@@ -1,0 +1,44 @@
+name: atlas
+
+# Run ATLAS from the prebuilt image on GHCR — no source checkout or local build
+# needed. Put this file next to a `.env` and an `editor_hash.txt`, then:
+#   docker compose -f docker-compose.ghcr.yml up -d
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-atlas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atlas}
+      POSTGRES_DB: ${POSTGRES_DB:-atlas}
+    volumes:
+      - atlas-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-atlas} -d ${POSTGRES_DB:-atlas}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    image: ghcr.io/tpasson/sw-atlas:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ATLAS_DATABASE_URL: ${ATLAS_DATABASE_URL:-postgres://atlas:atlas@db:5432/atlas?sslmode=disable}
+      ATLAS_SESSION_SECRET: ${ATLAS_SESSION_SECRET:?set ATLAS_SESSION_SECRET in .env}
+      ATLAS_EDITOR_USERNAME: ${ATLAS_EDITOR_USERNAME:-editor}
+      ATLAS_EDITOR_PASSWORD_HASH_FILE: /run/secrets/editor_password_hash
+    secrets:
+      - editor_password_hash
+    ports:
+      - "${ATLAS_PORT:-8080}:8080"
+
+secrets:
+  editor_password_hash:
+    file: ./editor_hash.txt
+
+volumes:
+  atlas-db:

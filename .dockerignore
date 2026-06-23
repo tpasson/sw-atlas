@@ -1,0 +1,9 @@
+.git
+node_modules
+dist
+server/atlas
+server/bin
+**/.DS_Store
+*.local
+.env
+deploy/.env
