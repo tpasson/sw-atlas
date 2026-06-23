@@ -1,0 +1,14 @@
+ATLAS — milestone & roadmap planner
+Copyright 2026 Thomas Passon
+
+This product is licensed under the Apache License, Version 2.0 (the "License");
+you may not use this software except in compliance with the License. A copy of
+the License is provided in the LICENSE file and is also available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This software bundles third-party open-source components, each distributed under
+its own permissive license (MIT, BSD-2-Clause, BSD-3-Clause, ISC and
+Apache-2.0). Their copyright notices are retained in the respective dependency
+manifests (package.json / package-lock.json for the frontend, go.mod / go.sum
+for the backend) and in the source distributions of those components.
