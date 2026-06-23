@@ -21,7 +21,7 @@ not tied to any one domain.
 | ------ | ---- | ------ |
 | **P0** | Foundation: Go backend + PostgreSQL + Docker, editor auth & public-read switch, frontend moved off `localStorage` | ✅ |
 | **P1** | Visualization: milestone vs. event types, time-spanning bars, marker shapes | ✅ |
-| **P2** | Baselines: named snapshots with switch & diff (moved / added / removed) | ⬜ |
+| **P2** | Baselines: named snapshots with switch & diff (moved / added / removed) | ✅ |
 | **P3** | Export & reporting: PPTX / image export of the timeline | ⬜ |
 | **P4** | Sync & drift: generic project-plan import (CSV/Excel/ICS, optional API) + schedule-drift warnings | ⬜ |
 
@@ -201,14 +201,15 @@ GitHub Actions for build/test/lint on pull requests.
 
 ---
 
-## P2–P4 (outline)
+## P2 · Baselines ✅ (shipped in v1.0.0)
+
+- `baseline` snapshots of the plan (item dates + structure) with a name and timestamp.
+- Switch between any baseline and the live plan; viewing a baseline is read-only.
+- Diff against the live plan: **added / moved / removed** items, with counts and hover lists.
+
+## P3–P4 (outline)
 
 These will be expanded into detailed issues when their phase starts.
-
-**P2 · Baselines**
-- `baseline` snapshots of the plan (item dates + structure) with a name and timestamp.
-- Switch between baselines and the live plan; overlay a baseline for comparison.
-- Diff view: moved / extended / shortened / added / removed items.
 
 **P3 · Export & reporting**
 - Client-side PPTX export (pptxgenjs) of the timeline (per swimlane / year).

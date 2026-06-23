@@ -11,7 +11,8 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](deploy/docker-compose.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing)
-[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#-roadmap)
+[![Status: Stable](https://img.shields.io/badge/status-stable-brightgreen.svg)](#-roadmap)
+[![Release](https://img.shields.io/github/v/release/tpasson/sw-atlas)](https://github.com/tpasson/sw-atlas/releases)
 
 [**🚀 Live Demo**](https://tpasson.github.io/sw-atlas/) · [Features](#-features) · [Roadmap](#%EF%B8%8F-roadmap) · [Getting Started](#-getting-started) · [Contributing](#-contributing)
 
@@ -27,7 +28,7 @@ Work is organized into **swimlanes** and **sub-lanes** on a month/year timeline.
 
 ATLAS is **general-purpose** and not tied to any one domain: use the same timeline for product roadmaps, delivery plans, go-to-market calendars, release trains or any program of work that benefits from a shared, date-anchored view.
 
-> **Project status:** ATLAS started as a single-page, browser-only planner and is evolving into a collaborative **client–server** application with a real backend, authentication and a self-hostable Docker deployment. See the [Roadmap](#%EF%B8%8F-roadmap) for what's live today versus what's coming.
+> **Project status:** ATLAS is a collaborative **client–server** application — a Vue SPA backed by a Go API, PostgreSQL, editor authentication and a self-hostable Docker deployment — stable as of **v1.0.0**. See the [Roadmap](#%EF%B8%8F-roadmap) for what's live today versus what's still coming (export & project-plan sync).
 
 ## ✨ Features
 
@@ -40,12 +41,12 @@ ATLAS is **general-purpose** and not tied to any one domain: use the same timeli
 - 🖱️ **Click-to-inspect** details; quick add/edit via modals
 - 🔎 **Zoom** and year navigation
 - 👁️ **Read-only mode** for sharing
+- 🧬 **Baselines** — save named snapshots and compare any baseline against the live plan (added / moved / removed, with counts)
 - 🗄️ **Backend + PostgreSQL** — a true single source of truth for the whole team
 - 🔐 **Editor login** with a global *public-read* switch (open to everyone, or editors-only at the flip of a toggle)
 - 🐳 **Self-hostable** via Docker Compose, or run the browser-only build with local persistence
 
 ### On the roadmap
-- 🧬 **Baselines** — named snapshots with switch & diff to see what moved
 - 📑 **Export & reporting** — PPTX / image export of the timeline
 - 🔄 **Generic project-plan import** (CSV / Excel / ICS, optional API) — imported items stay source-is-master (locked)
 - ⚠️ **Schedule-drift warnings** (in-app) when imported dates shift
@@ -60,32 +61,37 @@ ATLAS is **general-purpose** and not tied to any one domain: use the same timeli
 
 ## 🧱 Tech Stack
 
-| Layer    | Today              | Planned                                      |
-| -------- | ------------------ | -------------------------------------------- |
-| Frontend | Vue 3, Vite        | Vue 3, Vite                                   |
-| Backend  | — (browser only)   | Go (chi router, pgx + sqlc)                  |
-| Database | `localStorage`     | PostgreSQL 16                                 |
-| Deploy   | GitHub Pages       | Docker Compose (app · postgres · reverse proxy) |
+| Layer    | Stack                                                  |
+| -------- | ------------------------------------------------------ |
+| Frontend | Vue 3, Vite                                            |
+| Backend  | Go (chi router, pgx, goose migrations)                 |
+| Database | PostgreSQL 16                                          |
+| Deploy   | Docker Compose (app · postgres) · GitHub Pages demo    |
 
-## 🏗️ Architecture (target)
+> The browser-only demo build (`npm run build:demo`, GitHub Pages) keeps data in
+> `localStorage` and needs no backend; the full app uses the Go API + PostgreSQL.
+
+## 🏗️ Architecture
 
 ```
 Browser (Vue SPA)
    │  HTTPS / JSON REST
    ▼
-Reverse Proxy (Caddy/nginx) ── TLS, optional SSO/OIDC
+Reverse Proxy (Caddy/nginx) ── TLS, optional SSO/OIDC   [bring your own]
    ▼
 API (Go · chi)
    ├─ Auth (editor login) + global "public read" switch
    ├─ Domain API (swimlanes · sub-lanes · items · links · groups)
-   ├─ Import workers (cron) ── generic project-plan import (CSV/Excel/ICS; source stays master)
    ├─ Baseline & diff service
-   └─ Export service (PPTX / image)
+   ├─ Import workers (cron) ── generic project-plan import (CSV/Excel/ICS)   [planned · P4]
+   └─ Export service (PPTX / image)                                          [planned · P3]
    ▼
 PostgreSQL  +  file storage (exports)
 ```
 
-Today the app ships as a static SPA; the architecture above is the target for the collaborative rebuild.
+The collaborative stack — Vue SPA, Go API, PostgreSQL, editor auth and baselines —
+is live as of **v1.0.0**. Import workers and the export service are still on the
+roadmap; the reverse proxy is provided by you in front of the container.
 
 ## 🚀 Getting Started
 
@@ -185,17 +191,23 @@ sw-atlas/
 ├─ index.html
 ├─ vite.config.js
 ├─ package.json
-├─ src/
+├─ Dockerfile               # multi-stage build: SPA + static Go binary
+├─ src/                     # Vue 3 + Vite frontend
 │  ├─ main.js               # app entry
 │  ├─ App.vue               # root component & modal orchestration
+│  ├─ api.js                # backend API client (demoApi.js for the Pages demo)
 │  ├─ style.css
 │  ├─ components/
-│  │  ├─ TheHeader.vue      # toolbar: year nav, zoom, manage
+│  │  ├─ TheHeader.vue      # toolbar: year nav, zoom, baselines, manage
 │  │  ├─ MilestoneTable.vue # the timeline grid
 │  │  ├─ MilestoneModal.vue # add/edit a milestone
 │  │  └─ ManageModal.vue    # swimlanes, sub-lanes, settings
 │  └─ stores/
-│     └─ useAppStore.js     # reactive state + persistence (seed data)
+│     └─ useAppStore.js     # reactive client state, synced with the API
+├─ server/                  # Go backend (chi, pgx, goose)
+│  ├─ cmd/atlas/            # entrypoint: serve · seed · hashpw
+│  └─ internal/             # api · auth · store · db (migrations) · seed · config
+├─ deploy/                  # docker-compose (+ ghcr) & .env example
 └─ dist/                    # production build output (generated)
 ```
 
@@ -206,7 +218,7 @@ lives in [`ROADMAP.md`](ROADMAP.md).
 
 - **P0 · Foundation** ✅ — Go backend + PostgreSQL + Docker, editor auth & public-read switch, frontend moved from `localStorage` to the API *(→ the real single source of truth)*
 - **P1 · Visualization** ✅ — milestone vs. event types, time-spanning bars, marker shapes
-- **P2 · Baselines** — named snapshots with switch & diff (moved / added / removed)
+- **P2 · Baselines** ✅ — named snapshots with switch & diff (added / moved / removed)
 - **P3 · Export & reporting** — PPTX / image export of the timeline
 - **P4 · Sync & drift** — generic project-plan import (CSV / Excel / ICS, optional API) & schedule-drift warnings
 
