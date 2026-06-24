@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -66,6 +67,16 @@ func runServe(cfg config.Config) {
 	if cfg.EditorHash == "" {
 		log.Println("WARNING: ATLAS_EDITOR_PASSWORD_HASH is empty — editor login is disabled until you set it (atlas hashpw <password>)")
 	}
+
+	// Background smart-poll: sync due subscriptions every minute.
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for range t.C {
+			st.SyncDueSubscriptions(context.Background())
+		}
+	}()
+
 	log.Printf("ATLAS listening on %s", cfg.ListenAddr)
 	must(http.ListenAndServe(cfg.ListenAddr, handler))
 }

@@ -20,6 +20,8 @@
               <button class="tab" :class="{ active: tab === 'display' }" @click="tab = 'display'">Display</button>
               <button class="tab" :class="{ active: tab === 'legend' }" @click="tab = 'legend'">Icons</button>
               <button class="tab" :class="{ active: tab === 'baselines' }" @click="tab = 'baselines'">Baselines</button>
+              <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
+              <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
             </div>
 
             <div class="panel-body">
@@ -79,9 +81,24 @@
                 </div>
 
                 <div v-else class="lanes-grid">
-                  <div v-for="(sw, si) in store.swimlanes" :key="sw.id" class="lane-item">
+                  <div
+                    v-for="(sw, si) in store.swimlanes"
+                    :key="sw.id"
+                    class="lane-item"
+                    :class="{ dragging: dragKind === 'lane' && dragIndex === si }"
+                    @dragover.prevent="onDragOver(si)"
+                  >
                     <!-- Row 1: name + actions -->
                     <div class="lane-header">
+                      <span
+                        class="drag-handle"
+                        draggable="true"
+                        title="Drag to reorder"
+                        @dragstart="onDragStart(si, $event)"
+                        @dragend="onDragEnd"
+                      >
+                        <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1.2"/><circle cx="8" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="8" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="8" cy="12" r="1.2"/></svg>
+                      </span>
                       <span class="lane-dot" :style="{ background: sw.color }"></span>
 
                       <input
@@ -93,9 +110,14 @@
                         @keyup.enter="saveEdit(sw)"
                         @keyup.escape="cancelEdit"
                       />
-                      <span v-else class="lane-name" @dblclick="startEdit(sw)">{{ sw.name }}</span>
+                      <span v-else class="lane-name" @dblclick="!sw.sourceSystem && startEdit(sw)">{{ sw.name }}</span>
+                      <span v-if="sw.sourceSystem" class="ext-badge" title="Mirrored from a subscription — read-only">synced</span>
 
                       <div class="lane-actions">
+                        <button class="icon-btn" :title="sw.hidden ? 'Show on board' : 'Hide from board'" @click="setLaneHidden(sw.id, !sw.hidden)">
+                          <svg v-if="!sw.hidden" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l20 20M9.9 4.2A9 9 0 0 1 12 4c6.5 0 10 7 10 7a13 13 0 0 1-3 3.6M6 6.3C3.4 8 2 11 2 12s3.5 7 10 7a9 9 0 0 0 3.4-.7"/></svg>
+                        </button>
                         <button class="icon-btn" title="Move up" @click="moveSwimlane(sw.id, -1)" :disabled="si === 0">
                           <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                             <path d="M6.5 10V3M3 6.5l3.5-3.5 3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -106,7 +128,7 @@
                             <path d="M6.5 3v7M10 6.5L6.5 10 3 6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                           </svg>
                         </button>
-                        <button class="icon-btn danger" title="Delete area" @click="doDeleteSwimlane(sw.id)">
+                        <button v-if="!sw.sourceSystem" class="icon-btn danger" title="Delete area" @click="doDeleteSwimlane(sw.id)">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>
                           </svg>
@@ -114,8 +136,8 @@
                       </div>
                     </div>
 
-                    <!-- Row 2: color swatches -->
-                    <div class="lane-colors">
+                    <!-- Row 2: color swatches (own areas only) -->
+                    <div v-if="!sw.sourceSystem" class="lane-colors">
                       <button
                         v-for="c in swatchColors"
                         :key="c"
@@ -133,7 +155,23 @@
 
                     <!-- Row 3: sub-areas -->
                     <div class="sublanes">
-                      <div v-for="sub in sw.subLanes" :key="sub.id" class="sublane-item">
+                      <div
+                        v-for="(sub, sj) in sw.subLanes"
+                        :key="sub.id"
+                        class="sublane-item"
+                        :class="{ dragging: dragKind === 'sub' && subDrag.swId === sw.id && subDrag.index === sj }"
+                        @dragover.prevent="onSubDragOver(sw.id, sj)"
+                      >
+                        <span
+                          v-if="!sw.sourceSystem"
+                          class="drag-handle sm"
+                          draggable="true"
+                          title="Drag to reorder"
+                          @dragstart="onSubDragStart(sw.id, sj, $event)"
+                          @dragend="onSubDragEnd"
+                        >
+                          <svg width="8" height="12" viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1.2"/><circle cx="8" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="8" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="8" cy="12" r="1.2"/></svg>
+                        </span>
                         <span class="sublane-dot" :style="{ background: sw.color }"></span>
                         <input
                           v-if="editing.id === sub.id && editing.type === 'sub'"
@@ -144,15 +182,15 @@
                           @keyup.enter="saveSubEdit(sw.id, sub)"
                           @keyup.escape="cancelEdit"
                         />
-                        <span v-else class="sublane-name" @dblclick="startSubEdit(sub)">{{ sub.name }}</span>
-                        <button class="icon-btn danger" @click="doDeleteSubLane(sw.id, sub.id, sub.name)">
+                        <span v-else class="sublane-name" @dblclick="!sw.sourceSystem && startSubEdit(sub)">{{ sub.name }}</span>
+                        <button v-if="!sw.sourceSystem" class="icon-btn danger" @click="doDeleteSubLane(sw.id, sub.id, sub.name)">
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>
                           </svg>
                         </button>
                       </div>
 
-                      <div class="add-sub-row">
+                      <div v-if="!sw.sourceSystem" class="add-sub-row">
                         <input
                           v-model="newSubs[sw.id]"
                           class="field-input sm"
@@ -307,6 +345,10 @@
                       <input type="range" min="0" max="12" step="1" v-model.number="settings.items.padding" />
                       <span class="opt-val">{{ settings.items.padding }}px</span>
                     </label>
+                    <label class="opt">Row margin
+                      <input type="range" min="0" max="20" step="1" v-model.number="settings.items.margin" />
+                      <span class="opt-val">{{ settings.items.margin }}px</span>
+                    </label>
                   </div>
                   <div class="opt-row">
                     <label class="opt">Corner radius
@@ -340,6 +382,17 @@
                     <label class="opt">Event fill
                       <input type="range" min="0" max="1" step="0.05" v-model.number="settings.items.eventOpacity" />
                       <span class="opt-val">{{ Math.round(settings.items.eventOpacity * 100) }}%</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <p class="section-label">Layout</p>
+                  <p class="card-hint">Width of the frozen Sub-Area column. Longer names truncate with a hover tooltip.</p>
+                  <div class="opt-row">
+                    <label class="opt">Sub-area width
+                      <input type="range" min="100" max="320" step="4" v-model.number="settings.layout.subAreaWidth" />
+                      <span class="opt-val">{{ settings.layout.subAreaWidth }}px</span>
                     </label>
                   </div>
                 </div>
@@ -411,6 +464,30 @@
                   </div>
                 </div>
               </section>
+
+              <section v-show="tab === 'data'" class="tab-pane">
+                <div class="card">
+                  <p class="section-label">Backup &amp; transfer</p>
+                  <p class="card-hint">
+                    Export the whole plan as a JSON file — for backups, moving to another ATLAS,
+                    or handing it to a colleague. Import adds a file's contents to the current
+                    plan as new, editable items.
+                  </p>
+                  <div class="data-actions">
+                    <button class="btn-add" :disabled="busy" @click="onExport">Export plan (JSON)</button>
+                    <template v-if="session.authenticated">
+                      <button class="btn-add" :disabled="busy" @click="pickImport">Import from file…</button>
+                      <input ref="importInput" type="file" accept="application/json,.json" hidden @change="onImportFile" />
+                    </template>
+                  </div>
+                  <p v-if="dataMsg" class="data-msg" :class="dataMsg.type">{{ dataMsg.text }}</p>
+                </div>
+              </section>
+
+              <section v-if="tab === 'sharing'" class="tab-pane">
+                <ShareManager />
+                <SubscriptionManager />
+              </section>
             </div>
 
             <div class="panel-footer">
@@ -426,8 +503,12 @@
 
 <script setup>
 import { reactive, ref, computed } from 'vue'
-import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, session, settings, resetSettings, MARKER_LIBRARY } from '../stores/useAppStore.js'
+import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, session, settings, resetSettings, MARKER_LIBRARY, exportPlanToFile, importPlanFromFile } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
+import ShareManager from './ShareManager.vue'
+import SubscriptionManager from './SubscriptionManager.vue'
+
+const isDemo = import.meta.env.VITE_DEMO
 
 const SHAPE_NAMES = { diamond: 'Diamond', circle: 'Circle', cone: 'Cone', flag: 'Flag', square: 'Square', triangleDown: 'Triangle', star: 'Star', hexagon: 'Hexagon', pentagon: 'Pentagon' }
 function prettyShape(s) {
@@ -457,9 +538,77 @@ function removeMarker(i) {
 
 defineEmits(['close'])
 
-const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
+const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 
 const tab = ref('areas')
+
+// ── Areas tab: drag & drop reorder (areas + sub-areas) ──────────────────────
+// dragKind guards against the two nested drags interfering (drag events bubble).
+const dragKind = ref(null) // 'lane' | 'sub' | null
+const dragIndex = ref(null)
+let dragMoved = false
+function onDragStart(i, e) {
+  dragKind.value = 'lane'; dragIndex.value = i; dragMoved = false
+  e.dataTransfer.effectAllowed = 'move'
+  try { e.dataTransfer.setData('text/plain', String(i)) } catch { /* Safari */ }
+}
+function onDragOver(j) {
+  if (dragKind.value !== 'lane' || dragIndex.value === null || dragIndex.value === j) return
+  moveSwimlaneTo(dragIndex.value, j); dragIndex.value = j; dragMoved = true
+}
+function onDragEnd() {
+  if (dragKind.value === 'lane' && dragMoved) commitSwimlaneOrder()
+  dragIndex.value = null; dragMoved = false; dragKind.value = null
+}
+
+const subDrag = reactive({ swId: null, index: null })
+let subMoved = false
+function onSubDragStart(swId, i, e) {
+  dragKind.value = 'sub'; subDrag.swId = swId; subDrag.index = i; subMoved = false
+  e.dataTransfer.effectAllowed = 'move'
+  try { e.dataTransfer.setData('text/plain', String(i)) } catch { /* Safari */ }
+}
+function onSubDragOver(swId, j) {
+  if (dragKind.value !== 'sub' || subDrag.swId !== swId || subDrag.index === null || subDrag.index === j) return
+  moveSubLaneTo(swId, subDrag.index, j); subDrag.index = j; subMoved = true
+}
+function onSubDragEnd() {
+  if (dragKind.value === 'sub' && subMoved && subDrag.swId) commitSubLaneOrder(subDrag.swId)
+  subDrag.swId = null; subDrag.index = null; subMoved = false; dragKind.value = null
+}
+
+// ── Data tab: export / import ───────────────────────────────────────────────
+const importInput = ref(null)
+const dataMsg = ref(null)
+const busy = ref(false)
+
+async function onExport() {
+  dataMsg.value = null
+  busy.value = true
+  try {
+    await exportPlanToFile()
+  } catch (e) {
+    dataMsg.value = { type: 'err', text: e.message || 'Export failed' }
+  }
+  busy.value = false
+}
+
+function pickImport() { importInput.value?.click() }
+
+async function onImportFile(e) {
+  const file = e.target.files?.[0]
+  e.target.value = '' // allow re-selecting the same file
+  if (!file) return
+  dataMsg.value = null
+  busy.value = true
+  try {
+    const s = await importPlanFromFile(file)
+    dataMsg.value = { type: 'ok', text: `Imported ${s.swimlanes} areas, ${s.items} items, ${s.links} links.` }
+  } catch (e) {
+    dataMsg.value = { type: 'err', text: e.message || 'Import failed' }
+  }
+  busy.value = false
+}
 const customNew = ref('#0A84FF')
 
 function formatDate(s) {
@@ -952,6 +1101,22 @@ function cancelEdit() {
   transition: background 0.15s;
 }
 .btn-primary:hover { background: var(--clr-accent-hover); }
+
+.data-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.data-msg { margin-top: 12px; font-size: 13px; }
+.data-msg.ok { color: var(--clr-accent); }
+.data-msg.err { color: var(--clr-danger); }
+
+.ext-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--clr-text-3); background: var(--clr-surface-2); padding: 2px 6px; border-radius: 999px; }
+
+.drag-handle { display: inline-flex; align-items: center; cursor: grab; color: var(--clr-text-3);
+  padding: 2px 2px; flex-shrink: 0; touch-action: none; }
+.drag-handle:hover { color: var(--clr-text-2); }
+.drag-handle:active { cursor: grabbing; }
+.drag-handle.sm { padding: 0 2px; }
+.lane-item.dragging { opacity: 0.45; }
+.sublane-item.dragging { opacity: 0.45; }
 
 /* ── Mobile: full-screen sheet ───────────────────────────────────────── */
 @media (max-width: 600px) {

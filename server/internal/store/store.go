@@ -11,6 +11,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -30,10 +31,12 @@ type SubLane struct {
 }
 
 type Swimlane struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Color    string    `json:"color"`
-	SubLanes []SubLane `json:"subLanes"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Color        string    `json:"color"`
+	SubLanes     []SubLane `json:"subLanes"`
+	SourceSystem *string   `json:"sourceSystem"` // set => mirrored from a subscription (read-only)
+	Hidden       bool      `json:"hidden"`       // consumer-local: hidden from the board
 }
 
 // Item is a milestone or event. JSON keys mirror the existing frontend store so
@@ -81,14 +84,14 @@ const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why
 func (s *Store) GetPlan(ctx context.Context) (Plan, error) {
 	p := Plan{Swimlanes: []Swimlane{}, Milestones: []Item{}, Links: []Link{}}
 
-	swRows, err := s.pool.Query(ctx, `SELECT id, name, color FROM swimlane ORDER BY sort_order, name`)
+	swRows, err := s.pool.Query(ctx, `SELECT id, name, color, source_system, hidden FROM swimlane ORDER BY sort_order, name`)
 	if err != nil {
 		return p, err
 	}
 	idx := map[string]int{}
 	for swRows.Next() {
 		var sw Swimlane
-		if err := swRows.Scan(&sw.ID, &sw.Name, &sw.Color); err != nil {
+		if err := swRows.Scan(&sw.ID, &sw.Name, &sw.Color, &sw.SourceSystem, &sw.Hidden); err != nil {
 			swRows.Close()
 			return p, err
 		}
@@ -174,6 +177,114 @@ func scanItem(row pgx.Row) (Item, error) {
 	return it, nil
 }
 
+// ── Import ──────────────────────────────────────────────────────────────────
+
+// ImportSummary reports how many entities an import created.
+type ImportSummary struct {
+	Swimlanes int `json:"swimlanes"`
+	SubLanes  int `json:"subLanes"`
+	Items     int `json:"items"`
+	Links     int `json:"links"`
+}
+
+// ImportPlan additively imports a plan (the shared wire format) into the current
+// plan inside one transaction. All IDs are remapped to fresh UUIDs so an import
+// never collides with existing data, and provenance is stripped so imported
+// items become native, editable items (Copy-mode — distinct from a live mirror).
+// Items referencing a swimlane absent from the payload, and links with a missing
+// endpoint, are skipped rather than failing the whole import.
+func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
+	var sum ImportSummary
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return sum, err
+	}
+	defer tx.Rollback(ctx)
+
+	swID := make(map[string]string)  // old swimlane id → new
+	subID := make(map[string]string) // old sub-lane id → new
+	itID := make(map[string]string)  // old item id → new
+
+	for _, sw := range p.Swimlanes {
+		nid := uuid.NewString()
+		swID[sw.ID] = nid
+		color := sw.Color
+		if color == "" {
+			color = "#0A84FF"
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO swimlane (id, name, color, sort_order)
+			 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane))`,
+			nid, sw.Name, color); err != nil {
+			return sum, err
+		}
+		sum.Swimlanes++
+		for _, sub := range sw.SubLanes {
+			nsid := uuid.NewString()
+			subID[sub.ID] = nsid
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO sub_lane (id, swimlane_id, name, sort_order)
+				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sub_lane WHERE swimlane_id = $2))`,
+				nsid, nid, sub.Name); err != nil {
+				return sum, err
+			}
+			sum.SubLanes++
+		}
+	}
+
+	for _, it := range p.Milestones {
+		nsw, ok := swID[it.SwimlaneID]
+		if !ok {
+			continue // item's swimlane is not part of this payload
+		}
+		var nsub interface{}
+		if it.SubLaneID != nil {
+			if v, ok := subID[*it.SubLaneID]; ok {
+				nsub = v
+			}
+		}
+		defaultsForItem(&it)
+		whenV, startV, endV, err := itemDates(it)
+		if err != nil {
+			return sum, err
+		}
+		nid := uuid.NewString()
+		itID[it.ID] = nid
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO item (`+itemColumns+`)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+			nid, nsw, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
+			whenV, it.Kind, it.Marker, startV, endV, it.Color,
+			nil, nil, nil, nil); err != nil { // provenance stripped → native item
+			return sum, err
+		}
+		sum.Items++
+	}
+
+	for _, l := range p.Links {
+		na, ok1 := itID[l.A]
+		nb, ok2 := itID[l.B]
+		if !ok1 || !ok2 || na == nb {
+			continue
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO link (a_item_id, b_item_id)
+			 SELECT $1, $2
+			 WHERE NOT EXISTS (
+			   SELECT 1 FROM link WHERE (a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1)
+			 )`,
+			na, nb); err != nil {
+			return sum, err
+		}
+		sum.Links++
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return sum, err
+	}
+	return sum, nil
+}
+
 // ── Swimlanes ───────────────────────────────────────────────────────────────
 
 func (s *Store) CreateSwimlane(ctx context.Context, id, name, color string) (Swimlane, error) {
@@ -191,6 +302,9 @@ func (s *Store) CreateSwimlane(ctx context.Context, id, name, color string) (Swi
 }
 
 func (s *Store) UpdateSwimlane(ctx context.Context, id string, name, color *string) error {
+	if err := s.ensureSwimlaneUnlocked(ctx, id); err != nil {
+		return err
+	}
 	ct, err := s.pool.Exec(ctx,
 		`UPDATE swimlane SET name = COALESCE($2, name), color = COALESCE($3, color) WHERE id = $1`,
 		id, name, color)
@@ -204,7 +318,40 @@ func (s *Store) UpdateSwimlane(ctx context.Context, id string, name, color *stri
 }
 
 func (s *Store) DeleteSwimlane(ctx context.Context, id string) error {
+	if err := s.ensureSwimlaneUnlocked(ctx, id); err != nil {
+		return err
+	}
 	ct, err := s.pool.Exec(ctx, `DELETE FROM swimlane WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ensureSwimlaneUnlocked rejects edits to mirrored (external) swimlanes — like
+// items, the source subscription is master. Native lanes pass.
+func (s *Store) ensureSwimlaneUnlocked(ctx context.Context, id string) error {
+	var src *string
+	err := s.pool.QueryRow(ctx, `SELECT source_system FROM swimlane WHERE id = $1`, id).Scan(&src)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if src != nil {
+		return ErrLocked
+	}
+	return nil
+}
+
+// SetSwimlaneHidden toggles a lane's consumer-local visibility (allowed on
+// external lanes — it's a local view preference, not a change to the source).
+func (s *Store) SetSwimlaneHidden(ctx context.Context, id string, hidden bool) error {
+	ct, err := s.pool.Exec(ctx, `UPDATE swimlane SET hidden = $2 WHERE id = $1`, id, hidden)
 	if err != nil {
 		return err
 	}
@@ -251,6 +398,22 @@ func (s *Store) MoveSwimlane(ctx context.Context, id string, dir int) error {
 	return tx.Commit(ctx)
 }
 
+// ReorderSwimlanes sets sort_order to match the given id order (drag & drop).
+// Ids not present are left untouched; the client sends the full ordered list.
+func (s *Store) ReorderSwimlanes(ctx context.Context, ids []string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for i, id := range ids {
+		if _, err := tx.Exec(ctx, `UPDATE swimlane SET sort_order = $2 WHERE id = $1`, id, i); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 // ── Sub-lanes ───────────────────────────────────────────────────────────────
 
 func (s *Store) CreateSubLane(ctx context.Context, swimlaneID, id, name string) (SubLane, error) {
@@ -284,6 +447,22 @@ func (s *Store) DeleteSubLane(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ReorderSubLanes sets sort_order to match the given id order (drag & drop within
+// one swimlane). The client sends the full ordered list of that lane's sub-lanes.
+func (s *Store) ReorderSubLanes(ctx context.Context, ids []string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for i, id := range ids {
+		if _, err := tx.Exec(ctx, `UPDATE sub_lane SET sort_order = $2 WHERE id = $1`, id, i); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // ── Items ───────────────────────────────────────────────────────────────────
@@ -358,7 +537,7 @@ func defaultsForItem(it *Item) {
 		it.Kind = "milestone"
 	}
 	if it.Marker == "" {
-		it.Marker = "diamond"
+		it.Marker = "l:Diamond"
 	}
 }
 

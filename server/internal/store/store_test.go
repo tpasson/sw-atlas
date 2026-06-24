@@ -8,8 +8,8 @@ func TestDefaultsForItem(t *testing.T) {
 	if it.Kind != "milestone" {
 		t.Errorf("Kind default = %q, want milestone", it.Kind)
 	}
-	if it.Marker != "diamond" {
-		t.Errorf("Marker default = %q, want diamond", it.Marker)
+	if it.Marker != "l:Diamond" {
+		t.Errorf("Marker default = %q, want l:Diamond", it.Marker)
 	}
 
 	custom := Item{Kind: "event", Marker: "bar"}

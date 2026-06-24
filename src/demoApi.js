@@ -46,6 +46,42 @@ export const demoApi = {
     milestones: db.milestones.map(m => ({ ...m })),
     links: db.links.map(l => ({ ...l })),
   }),
+  exportPlan: () => ok({
+    atlas: { schema: 1, kind: 'export', generatedAt: new Date().toISOString() },
+    swimlanes: db.swimlanes.map(s => ({ ...s, subLanes: s.subLanes.map(sl => ({ ...sl })) })),
+    milestones: db.milestones.map(m => ({ ...m })),
+    links: db.links.map(l => ({ ...l })),
+  }),
+  importPlan: (env) => {
+    const swMap = {}, subMap = {}, itMap = {}
+    for (const sw of (env.swimlanes || [])) {
+      const nid = uid(); swMap[sw.id] = nid
+      const nsw = { id: nid, name: sw.name, color: sw.color || '#0A84FF', subLanes: [] }
+      for (const sub of (sw.subLanes || [])) {
+        const nsid = uid(); subMap[sub.id] = nsid
+        nsw.subLanes.push({ id: nsid, name: sub.name })
+      }
+      db.swimlanes.push(nsw)
+    }
+    let items = 0, links = 0
+    for (const m of (env.milestones || [])) {
+      const nsw = swMap[m.swimlaneId]; if (!nsw) continue
+      const nid = uid(); itMap[m.id] = nid
+      const nsub = (m.subLaneId != null && subMap[m.subLaneId]) ? subMap[m.subLaneId] : null
+      // Copy-mode: strip provenance so imported items are native/editable.
+      db.milestones.push({ ...m, id: nid, swimlaneId: nsw, subLaneId: nsub,
+        sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null })
+      items++
+    }
+    for (const l of (env.links || [])) {
+      const a = itMap[l.a], b = itMap[l.b]
+      if (a && b && a !== b && !db.links.some(x => (x.a === a && x.b === b) || (x.a === b && x.b === a))) {
+        db.links.push({ a, b }); links++
+      }
+    }
+    save()
+    return ok({ swimlanes: Object.keys(swMap).length, subLanes: Object.keys(subMap).length, items, links })
+  },
   getPublicRead: () => ok({ enabled: db.settings.publicReadEnabled }),
   setPublicRead: (enabled) => { db.settings.publicReadEnabled = enabled; save(); return ok({ enabled }) },
   getPalette: () => ok({ colors: db.palette == null ? null : [...db.palette] }),
@@ -74,6 +110,11 @@ export const demoApi = {
     }
     save(); return ok()
   },
+  reorderSwimlanes: (ids) => {
+    const byId = Object.fromEntries(db.swimlanes.map(s => [s.id, s]))
+    db.swimlanes = ids.map(id => byId[id]).filter(Boolean)
+    save(); return ok()
+  },
   createSubLane: (swimlaneId, data) => {
     const sl = db.swimlanes.find(s => s.id === swimlaneId)
     const sub = { id: data.id || uid(), name: data.name }
@@ -81,6 +122,16 @@ export const demoApi = {
   },
   updateSubLane: (id, name) => {
     for (const sl of db.swimlanes) { const sub = sl.subLanes.find(s => s.id === id); if (sub) { sub.name = name; break } }
+    save(); return ok()
+  },
+  reorderSubLanes: (ids) => {
+    const set = new Set(ids)
+    for (const sl of db.swimlanes) {
+      if (sl.subLanes.length && sl.subLanes.every(s => set.has(s.id))) {
+        const byId = Object.fromEntries(sl.subLanes.map(s => [s.id, s]))
+        sl.subLanes = ids.map(id => byId[id]).filter(Boolean); break
+      }
+    }
     save(); return ok()
   },
   deleteSubLane: (id) => {

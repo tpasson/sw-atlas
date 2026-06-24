@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -35,10 +36,14 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		r.Post("/logout", s.logout)
 		r.Get("/me", s.me)
 
+		// Subscribe feed: authenticated by its bearer token, not a session.
+		r.Get("/shared", s.sharedFeed)
+
 		// Read endpoints: open when public-read is on, otherwise editor-only.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireReadAccess)
 			r.Get("/plan", s.getPlan)
+			r.Get("/export", s.exportPlan)
 			r.Get("/settings/public-read", s.getPublicRead)
 			r.Get("/settings/palette", s.getPalette)
 			r.Get("/settings/groups", s.getGroups)
@@ -49,16 +54,19 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		// Write endpoints: editors only.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireEditor)
+			r.Post("/import", s.importPlan)
 			r.Put("/settings/public-read", s.setPublicRead)
 			r.Put("/settings/palette", s.setPalette)
 			r.Put("/settings/groups", s.setGroups)
 
 			r.Post("/swimlanes", s.createSwimlane)
+			r.Post("/swimlanes/reorder", s.reorderSwimlanes)
 			r.Put("/swimlanes/{id}", s.updateSwimlane)
 			r.Delete("/swimlanes/{id}", s.deleteSwimlane)
 			r.Post("/swimlanes/{id}/move", s.moveSwimlane)
 			r.Post("/swimlanes/{id}/sublanes", s.createSubLane)
 
+			r.Post("/sublanes/reorder", s.reorderSubLanes)
 			r.Put("/sublanes/{id}", s.updateSubLane)
 			r.Delete("/sublanes/{id}", s.deleteSubLane)
 
@@ -72,6 +80,23 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			// baselines (P2)
 			r.Post("/baselines", s.createBaseline)
 			r.Delete("/baselines/{id}", s.deleteBaseline)
+
+			// share scopes & subscribe tokens (federation, producer side)
+			r.Post("/share-scopes", s.createShareScope)
+			r.Get("/share-scopes", s.listShareScopes)
+			r.Get("/share-scopes/{id}", s.getShareScope)
+			r.Delete("/share-scopes/{id}", s.deleteShareScope)
+			r.Post("/share-scopes/{id}/tokens", s.createShareToken)
+			r.Get("/share-scopes/{id}/tokens", s.listShareTokens)
+			r.Delete("/share-tokens/{id}", s.revokeShareToken)
+
+			// subscriptions (federation, consumer side)
+			r.Post("/subscriptions", s.createSubscription)
+			r.Get("/subscriptions", s.listSubscriptions)
+			r.Delete("/subscriptions/{id}", s.deleteSubscription)
+			r.Post("/subscriptions/{id}/sync", s.syncSubscription)
+			r.Post("/subscriptions/{id}/pause", s.setSubscriptionPaused)
+			r.Post("/swimlanes/{id}/hidden", s.setSwimlaneHidden)
 		})
 	})
 
@@ -155,6 +180,66 @@ func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// schemaVersion is the version of the ATLAS wire format (export / import / share
+// all share this envelope). Bump only on breaking changes.
+const schemaVersion = 1
+
+// planEnvelope is the portable wire format: a versioned header plus the plan.
+// The same shape powers file export/import today and the live-share feed later.
+type planEnvelope struct {
+	Atlas struct {
+		Schema      int    `json:"schema"`
+		Kind        string `json:"kind"` // "export" | "share"
+		GeneratedAt string `json:"generatedAt,omitempty"`
+	} `json:"atlas"`
+	Swimlanes  []store.Swimlane `json:"swimlanes"`
+	Milestones []store.Item     `json:"milestones"`
+	Links      []store.Link     `json:"links"`
+}
+
+func newEnvelope(kind string, p store.Plan) planEnvelope {
+	var env planEnvelope
+	env.Atlas.Schema = schemaVersion
+	env.Atlas.Kind = kind
+	env.Atlas.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	env.Swimlanes, env.Milestones, env.Links = p.Swimlanes, p.Milestones, p.Links
+	return env
+}
+
+// exportPlan returns the whole plan as a portable JSON envelope (backup / move /
+// hand to a colleague). Gated like /plan (read access).
+func (s *Server) exportPlan(w http.ResponseWriter, r *http.Request) {
+	p, err := s.store.GetPlan(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, newEnvelope("export", p))
+}
+
+// importPlan additively imports an envelope into the current plan (editor-only,
+// Copy-mode: new IDs, provenance stripped). Returns counts of what was created.
+func (s *Server) importPlan(w http.ResponseWriter, r *http.Request) {
+	var env planEnvelope
+	if !decode(w, r, &env) {
+		return
+	}
+	if env.Atlas.Schema > schemaVersion {
+		writeErr(w, http.StatusBadRequest, "export was made with a newer ATLAS version")
+		return
+	}
+	sum, err := s.store.ImportPlan(r.Context(), store.Plan{
+		Swimlanes:  env.Swimlanes,
+		Milestones: env.Milestones,
+		Links:      env.Links,
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sum)
 }
 
 func (s *Server) getPublicRead(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +354,34 @@ func (s *Server) updateSwimlane(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteSwimlane(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteSwimlane(r.Context(), chi.URLParam(r, "id")); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
+}
+
+func (s *Server) reorderSwimlanes(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.ReorderSwimlanes(r.Context(), in.IDs); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
+}
+
+func (s *Server) reorderSubLanes(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.ReorderSubLanes(r.Context(), in.IDs); err != nil {
 		s.fail(w, err)
 		return
 	}

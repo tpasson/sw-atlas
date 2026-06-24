@@ -74,7 +74,7 @@ func Run(ctx context.Context, st *store.Store) (int, error) {
 		return store.Item{
 			ID: id, SwimlaneID: sw, SubLaneID: subp, Year: year, Month: month,
 			Title: title, What: what, Why: why, How: how, Who: who, When: when,
-			Kind: "milestone", Marker: "diamond",
+			Kind: "milestone", Marker: "l:Diamond",
 		}
 	}
 

@@ -47,18 +47,19 @@ export const session = reactive({
 const SETTINGS_KEY = 'atlas-ui-settings'
 const SETTINGS_DEFAULTS = {
   monthHighlight: { enabled: true, color: '#0A84FF', opacity: 0.06 },
-  dayLine: { enabled: false, color: '#FF3B30', opacity: 0.7, width: 2 },
+  dayLine: { enabled: true, color: '#FF3B30', opacity: 0.7, width: 2 },
   weekNumbers: { enabled: true },
   monthLines: { enabled: false, color: '#E5E5EA', opacity: 1, width: 1 },
   weekLines: { enabled: true, color: '#8E8E93', opacity: 0.1, width: 1 },
-  items: { fontSize: 14, fontWeight: 700, padding: 4, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 12, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13 },
+  items: { fontSize: 14, fontWeight: 700, padding: 4, margin: 6, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 12, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13 },
   markers: [
-    { shape: 'l:Flag', label: 'Milestone', fill: true },
+    { shape: 'l:Diamond', label: 'Milestone', fill: true },
     { shape: 'l:Circle', label: 'Circle', fill: true },
     { shape: 'l:Triangle', label: 'Decision', fill: true },
     { shape: 'l:Star', label: 'Highlight', fill: true },
   ],
   eventLabel: 'Event (duration)',
+  layout: { subAreaWidth: 240 },
   theme: 'light',
 }
 function loadSettings() {
@@ -86,6 +87,7 @@ function loadSettings() {
         monthLines: { ...def.monthLines, ...(raw.monthLines || {}) },
         weekLines: { ...def.weekLines, ...(raw.weekLines || {}) },
         items: { ...def.items, ...(raw.items || {}) },
+        layout: { ...def.layout, ...(raw.layout || {}) },
         markers,
         eventLabel,
         theme: (raw.theme === 'dark' || raw.theme === 'light') ? raw.theme : def.theme,
@@ -235,6 +237,35 @@ export async function loadPlan() {
   store.loaded = true
 }
 
+// ── Import / Export (portable JSON, the shared wire format) ──────────────────
+
+// exportPlanToFile downloads the whole plan as a JSON envelope (backup / move /
+// hand to a colleague). Reuses the same format the live-share feed will serve.
+export async function exportPlanToFile() {
+  const env = await api.exportPlan()
+  const blob = new Blob([JSON.stringify(env, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `atlas-export-${new Date().toISOString().slice(0, 10)}.json`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+// importPlanFromFile parses a JSON export and adds it to the current plan
+// (Copy-mode: new IDs, editable), then reloads. Returns the created counts.
+export async function importPlanFromFile(file) {
+  const text = await file.text()
+  let env
+  try { env = JSON.parse(text) } catch { throw new Error('Not a valid JSON file') }
+  const summary = await api.importPlan(env)
+  await loadPlan()
+  try { await loadGroups() } catch { /* groups are non-fatal */ }
+  return summary
+}
+
 // initApp resolves auth + settings, then loads the plan. Called once on mount.
 export async function initApp() {
   session.error = null
@@ -300,6 +331,34 @@ export function useAppStore() {
     store.swimlanes[i] = store.swimlanes[j]
     store.swimlanes[j] = tmp
     api.moveSwimlane(id, dir).catch(onWriteError)
+  }
+  function setLaneHidden(id, hidden) {
+    const s = store.swimlanes.find(s => s.id === id)
+    if (s) s.hidden = hidden
+    api.setSwimlaneHidden(id, hidden).catch(onWriteError)
+  }
+  // Drag & drop reorder: moveSwimlaneTo splices locally (live preview),
+  // commitSwimlaneOrder persists the final order in one call.
+  function moveSwimlaneTo(from, to) {
+    const arr = store.swimlanes
+    if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return
+    const [it] = arr.splice(from, 1)
+    arr.splice(to, 0, it)
+  }
+  function commitSwimlaneOrder() {
+    api.reorderSwimlanes(store.swimlanes.map(s => s.id)).catch(onWriteError)
+  }
+  function moveSubLaneTo(swimlaneId, from, to) {
+    const sl = store.swimlanes.find(s => s.id === swimlaneId)
+    if (!sl) return
+    const arr = sl.subLanes
+    if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return
+    const [it] = arr.splice(from, 1)
+    arr.splice(to, 0, it)
+  }
+  function commitSubLaneOrder(swimlaneId) {
+    const sl = store.swimlanes.find(s => s.id === swimlaneId)
+    if (sl) api.reorderSubLanes(sl.subLanes.map(s => s.id)).catch(onWriteError)
   }
 
   // ── Sub-lanes ───────────────────────────────────────────────────────────
@@ -506,7 +565,7 @@ export function useAppStore() {
   return {
     store, session, baselines,
     prevYear, nextYear,
-    addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane,
+    addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder,
     addSubLane, updateSubLane, deleteSubLane,
     addMilestone, updateMilestone, deleteMilestone,
     addLink, removeLink, getLinkedIds, dependsOnIds, dependentIds,
