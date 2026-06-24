@@ -34,6 +34,8 @@ const realApi = {
 
   // plan + settings
   getPlan: () => req('GET', '/plan'),
+  exportPlan: () => req('GET', '/export'),
+  importPlan: (envelope) => req('POST', '/import', envelope),
   getPublicRead: () => req('GET', '/settings/public-read'),
   setPublicRead: (enabled) => req('PUT', '/settings/public-read', { enabled }),
   getPalette: () => req('GET', '/settings/palette'),
@@ -46,8 +48,10 @@ const realApi = {
   updateSwimlane: (id, patch) => req('PUT', `/swimlanes/${id}`, patch),
   deleteSwimlane: (id) => req('DELETE', `/swimlanes/${id}`),
   moveSwimlane: (id, dir) => req('POST', `/swimlanes/${id}/move`, { dir }),
+  reorderSwimlanes: (ids) => req('POST', '/swimlanes/reorder', { ids }),
   createSubLane: (swimlaneId, data) => req('POST', `/swimlanes/${swimlaneId}/sublanes`, data),
   updateSubLane: (id, name) => req('PUT', `/sublanes/${id}`, { name }),
+  reorderSubLanes: (ids) => req('POST', '/sublanes/reorder', { ids }),
   deleteSubLane: (id) => req('DELETE', `/sublanes/${id}`),
 
   // items
@@ -58,6 +62,21 @@ const realApi = {
   // links
   addLink: (a, b) => req('POST', '/links', { a, b }),
   removeLink: (a, b) => req('DELETE', '/links', { a, b }),
+
+  // sharing — federation producer side
+  listShareScopes: () => req('GET', '/share-scopes'),
+  createShareScope: (data) => req('POST', '/share-scopes', data),
+  deleteShareScope: (id) => req('DELETE', `/share-scopes/${id}`),
+  listShareTokens: (scopeId) => req('GET', `/share-scopes/${scopeId}/tokens`),
+  createShareToken: (scopeId, label) => req('POST', `/share-scopes/${scopeId}/tokens`, { label }),
+  revokeShareToken: (id) => req('DELETE', `/share-tokens/${id}`),
+
+  // subscriptions — federation consumer side
+  listSubscriptions: () => req('GET', '/subscriptions'),
+  createSubscription: (data) => req('POST', '/subscriptions', data),
+  deleteSubscription: (id) => req('DELETE', `/subscriptions/${id}`),
+  syncSubscription: (id) => req('POST', `/subscriptions/${id}/sync`),
+  setSwimlaneHidden: (id, hidden) => req('POST', `/swimlanes/${id}/hidden`, { hidden }),
 
   // baselines (P2)
   listBaselines: () => req('GET', '/baselines'),

@@ -124,7 +124,7 @@
               <!-- Milestone Links -->
               <div class="field">
                 <label class="field-label">
-                  Depends on
+                  Blocked by
                   <span v-if="localLinkedIds.size > 0" class="link-count">{{ localLinkedIds.size }}</span>
                 </label>
                 <div class="ms-picker">
@@ -178,6 +178,63 @@
                 </div>
               </div>
 
+              <!-- Required by (reverse dependency) -->
+              <div class="field">
+                <label class="field-label">
+                  Blocks
+                  <span v-if="localDependentIds.size > 0" class="link-count">{{ localDependentIds.size }}</span>
+                </label>
+                <div class="ms-picker">
+                  <div class="picker-search">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+                      <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.5"/>
+                      <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                    <input
+                      v-model="pickerSearch2"
+                      class="picker-input"
+                      placeholder="Search milestones…"
+                      autocomplete="off"
+                    />
+                    <button
+                      v-if="pickerSearch2"
+                      type="button"
+                      class="picker-clear"
+                      @click="pickerSearch2 = ''"
+                    >×</button>
+                  </div>
+                  <div class="picker-list">
+                    <template v-for="group in pickerGroups2" :key="'rb-' + group.swimlane.id + '-' + (group.subLane?.id ?? 'root')">
+                      <div class="picker-group-header">
+                        <span class="picker-group-dot" :style="{ background: group.swimlane.color }"></span>
+                        {{ group.swimlane.name }}{{ group.subLane ? ' · ' + group.subLane.name : '' }}
+                      </div>
+                      <button
+                        v-for="m in group.milestones"
+                        :key="m.id"
+                        type="button"
+                        class="picker-item"
+                        :class="{ 'picker-active': localDependentIds.has(m.id) }"
+                        :style="localDependentIds.has(m.id) ? activePickerStyle(group.swimlane.color) : {}"
+                        @click="toggleLocalDependent(m.id)"
+                      >
+                        <span class="picker-dot" :style="{ background: group.swimlane.color }"></span>
+                        <div class="picker-info">
+                          <span class="picker-title">{{ m.title }}</span>
+                          <span class="picker-meta">{{ MONTHS[m.month - 1] }} {{ m.year !== year ? m.year : '' }}</span>
+                        </div>
+                        <svg v-if="localDependentIds.has(m.id)" class="picker-check" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                        </svg>
+                      </button>
+                    </template>
+                    <div v-if="pickerGroups2.length === 0" class="picker-empty">
+                      {{ pickerSearch2 ? 'No milestones match your search' : 'No other milestones yet' }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- Group membership -->
               <div v-if="groups.list.length" class="field">
                 <label class="field-label">
@@ -224,7 +281,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
-const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, dependsOnIds, itemGroupIds, setItemGroups } = useAppStore()
+const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, dependsOnIds, dependentIds, itemGroupIds, setItemGroups } = useAppStore()
 
 // Marker shapes offered in the picker = the active legend markers (+ the item's
 // own marker if it was removed from the active set, so it stays selectable).
@@ -287,12 +344,27 @@ const dateError = computed(() => {
 const localLinkedIds = ref(new Set(
   props.milestone ? dependsOnIds(props.milestone.id) : []
 ))
+const localDependentIds = ref(new Set(
+  props.milestone ? dependentIds(props.milestone.id) : []
+))
 
+// "Depends on" and "Required by" are the two ends of one directed link, so they
+// are mutually exclusive for a given milestone (prevents A↔A mutual / cycles).
 function toggleLocalLink(id) {
-  const next = new Set(localLinkedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  localLinkedIds.value = next
+  const deps = new Set(localLinkedIds.value)
+  const dependents = new Set(localDependentIds.value)
+  if (deps.has(id)) deps.delete(id)
+  else { deps.add(id); dependents.delete(id) }
+  localLinkedIds.value = deps
+  localDependentIds.value = dependents
+}
+function toggleLocalDependent(id) {
+  const deps = new Set(localLinkedIds.value)
+  const dependents = new Set(localDependentIds.value)
+  if (dependents.has(id)) dependents.delete(id)
+  else { dependents.add(id); deps.delete(id) }
+  localLinkedIds.value = deps
+  localDependentIds.value = dependents
 }
 
 // Group membership (applied on save).
@@ -317,9 +389,10 @@ function activePickerStyle(color) {
 
 // Milestone picker search + grouping
 const pickerSearch = ref('')
+const pickerSearch2 = ref('')
 
-const pickerGroups = computed(() => {
-  const q = pickerSearch.value.toLowerCase()
+function buildPickerGroups(query) {
+  const q = (query || '').toLowerCase()
   const groups = []
   for (const sw of store.swimlanes) {
     const subs = sw.subLanes.length ? sw.subLanes : [null]
@@ -335,18 +408,33 @@ const pickerGroups = computed(() => {
     }
   }
   return groups
-})
+}
+const pickerGroups = computed(() => buildPickerGroups(pickerSearch.value))
+const pickerGroups2 = computed(() => buildPickerGroups(pickerSearch2.value))
 
 const titleInput = ref(null)
 onMounted(() => titleInput.value?.focus())
 
 function syncLinks(msId) {
-  const current = dependsOnIds(msId)
-  for (const id of localLinkedIds.value) {
-    if (!current.has(id)) addLink(msId, id)
+  const curDeps = dependsOnIds(msId)        // msId → id (depends on)
+  const curParents = dependentIds(msId)     // id → msId (required by)
+  const wantDeps = localLinkedIds.value
+  const wantParents = localDependentIds.value
+
+  // Add or flip into "depends on" (msId → id).
+  for (const id of wantDeps) {
+    if (!curDeps.has(id)) { removeLink(msId, id); addLink(msId, id) }
   }
-  for (const id of current) {
-    if (!localLinkedIds.value.has(id)) removeLink(msId, id)
+  // Add or flip into "required by" (id → msId).
+  for (const id of wantParents) {
+    if (!curParents.has(id)) { removeLink(id, msId); addLink(id, msId) }
+  }
+  // Drop links no longer wanted in either direction.
+  for (const id of curDeps) {
+    if (!wantDeps.has(id) && !wantParents.has(id)) removeLink(msId, id)
+  }
+  for (const id of curParents) {
+    if (!wantParents.has(id) && !wantDeps.has(id)) removeLink(id, msId)
   }
 }
 

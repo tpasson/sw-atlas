@@ -4,3 +4,4 @@ dist/
 *.local
 .env
 deploy/editor_hash.txt
+dev.sh

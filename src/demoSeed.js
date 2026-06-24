@@ -6,7 +6,7 @@ const d = (m, day) => `${YEAR}-${String(m).padStart(2, '0')}-${String(day).padSt
 export function demoSeed() {
   const ms = (id, swimlaneId, subLaneId, month, title, what, why, how, who, when) => ({
     id, swimlaneId, subLaneId, year: YEAR, month, title, what, why, how, who, when,
-    kind: 'milestone', marker: 'l:Flag', startDate: null, endDate: null,
+    kind: 'milestone', marker: 'l:Diamond', startDate: null, endDate: null,
     color: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
   })
 

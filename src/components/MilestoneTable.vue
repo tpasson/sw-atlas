@@ -17,7 +17,7 @@
       <thead>
         <tr class="head-months" ref="headRowEl">
           <th class="th-area">Area</th>
-          <th class="th-sub">Sub-Area</th>
+          <th class="th-sub" :style="{ width: SUB_W + 'px', minWidth: SUB_W + 'px' }">Sub-Area</th>
           <th
             v-for="(m, i) in MONTHS"
             :key="i"
@@ -58,7 +58,7 @@
             </td>
 
             <td class="td-sub">
-              <span class="sub-name">{{ g.row.subLane?.name ?? '' }}</span>
+              <span class="sub-name" :title="g.row.subLane?.name">{{ g.row.subLane?.name ?? '' }}</span>
             </td>
 
             <!-- One track per row spanning all 12 fixed-width months. Items are
@@ -301,7 +301,7 @@ import MarkerIcon from './MarkerIcon.vue'
 // Fixed geometry — months are a fixed width so date math is exact regardless of
 // label length (labels overflow freely to the right).
 const AREA_W = 168
-const SUB_W = 148
+const SUB_W = computed(() => settings.layout?.subAreaWidth ?? 240)
 const MIN_COL_W = 72
 // Lane heights scale with the item appearance. Event rows are slightly taller
 // (events carry a real border); milestone-only rows are tighter.
@@ -317,8 +317,8 @@ const msPillH = computed(() =>
 const eventPillH = computed(() =>
   Math.round(Math.max(settings.items.fontSize, settings.items.markerSize) + settings.items.padding * 2 + settings.items.border * 2 + LH_FUDGE)
 )
-const msLaneH = computed(() => Math.max(20, msPillH.value + ITEM_AIR * 2))
-const eventLaneH = computed(() => Math.max(20, eventPillH.value + ITEM_AIR * 2))
+const msLaneH = computed(() => Math.max(20, msPillH.value + (settings.items.margin ?? ITEM_AIR) * 2))
+const eventLaneH = computed(() => Math.max(20, eventPillH.value + (settings.items.margin ?? ITEM_AIR) * 2))
 const DAYS_PER_COL = 30.4 // avg days/month for px↔day conversion when dragging
 // Reserved space right of December so end-of-year labels flow right into a
 // defined gutter instead of creating dead horizontal scroll space.
@@ -338,18 +338,19 @@ const wrapW = ref(1200)
 const headRowEl = ref(null)     // months header row — measured to stick the week row below it
 const monthHeadH = ref(44)
 let resizeObs = null
-const baseColW = computed(() => Math.max(MIN_COL_W, (wrapW.value - AREA_W - SUB_W) / 12))
+const baseColW = computed(() => Math.max(MIN_COL_W, (wrapW.value - AREA_W - SUB_W.value) / 12))
 const COL_W = computed(() => baseColW.value * props.zoom)
 const MONTHS_W = computed(() => COL_W.value * 12)
 // The right gutter grows to fill the viewport when zoomed out, so the grid/rows
 // reach the edge instead of leaving the page background showing.
-const gutterW = computed(() => Math.max(RIGHT_PAD, wrapW.value - AREA_W - SUB_W - MONTHS_W.value))
-const tableWidth = computed(() => AREA_W + SUB_W + MONTHS_W.value + gutterW.value)
+const gutterW = computed(() => Math.max(RIGHT_PAD, wrapW.value - AREA_W - SUB_W.value - MONTHS_W.value))
+const tableWidth = computed(() => AREA_W + SUB_W.value + MONTHS_W.value + gutterW.value)
 
 // ── Rows ────────────────────────────────────────────────────────────────────
 const tableRows = computed(() => {
   const rows = []
   for (const sw of store.swimlanes) {
+    if (sw.hidden) continue // consumer-hidden (e.g. a subscribed lane)
     if (sw.subLanes.length === 0) {
       rows.push({ swimlane: sw, subLane: null, showLaneCell: true, rowspan: 1 })
     } else {
@@ -423,7 +424,7 @@ function estTextW(t) {
 }
 function markerOf(m) {
   if (m.marker && m.marker !== 'bar') return m.marker
-  return m.kind === 'event' ? 'flag' : 'diamond'
+  return m.kind === 'event' ? 'l:Flag' : 'l:Diamond'
 }
 // Whether a marker shape should be rendered filled (from its legend definition).
 // Compare normalised so legacy names ("flag") match Lucide ids ("l:Flag").
@@ -435,7 +436,8 @@ function normShape(s) {
 function markerFill(shape) {
   const n = normShape(shape)
   const m = settings.markers.find(x => normShape(x.shape) === n)
-  return !!(m && m.fill)
+  // Markers not present in the legend default to filled (e.g. seed 'diamond').
+  return m ? !!m.fill : true
 }
 function isBar(m) {
   return m.kind === 'event' && m.startDate && m.endDate && m.endDate > m.startDate
@@ -965,7 +967,7 @@ thead th {
 }
 .th-sub {
   position: sticky; left: 168px; z-index: 30;
-  width: 148px; min-width: 148px; text-align: left;
+  text-align: left;
   border-left: 1px solid rgba(255,255,255,0.06);
 }
 .th-month { text-align: center; }
@@ -1014,9 +1016,11 @@ thead th {
   padding: 4px 14px;
   vertical-align: middle;
   white-space: nowrap;
+  overflow: hidden;
   user-select: none; -webkit-user-select: none;
 }
-.sub-name { font-size: 12px; color: var(--clr-text-2); font-weight: 500; }
+.sub-name { display: block; font-size: 12px; color: var(--clr-text-2); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* --- Track (the 12-month area for one row) --- */
 .track {
