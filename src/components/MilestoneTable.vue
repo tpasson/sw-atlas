@@ -112,13 +112,13 @@
                   class="mk-item"
                   :data-item-id="it.m.id"
                   :class="[chipState(it.m), baselineClass(it.m)]"
-                  :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: g.row.swimlane.color }"
+                  :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: it.m.color || g.row.swimlane.color }"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
-                  @click.stop="onChipClick($event, it.m, g.row.swimlane.color)"
+                  @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
                   @dblclick.stop="!props.readOnly && !it.m.sourceSystem && $emit('edit-milestone', it.m)"
                 >
-                  <MarkerIcon :shape="markerOf(it.m)" :color="g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFill(markerOf(it.m))" class="mk-icon" />
+                  <MarkerIcon :shape="markerOf(it.m)" :color="it.m.color || g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFill(markerOf(it.m))" class="mk-icon" />
                   <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only">🔒</span><span class="mk-label">{{ it.m.title }}</span><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
 
@@ -128,11 +128,11 @@
                   class="event-bar"
                   :data-item-id="it.m.id"
                   :class="[chipState(it.m), baselineClass(it.m), { draggable: !props.readOnly && !it.m.sourceSystem }]"
-                  :style="barStyleFull(it, g.row.swimlane.color, g.laneH, g.vOffset)"
+                  :style="barStyleFull(it, it.m.color || g.row.swimlane.color, g.laneH, g.vOffset)"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @pointerdown="startDrag($event, it, 'move')"
-                  @click.stop="onChipClick($event, it.m, g.row.swimlane.color)"
+                  @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
                   @dblclick.stop="!props.readOnly && !it.m.sourceSystem && $emit('edit-milestone', it.m)"
                 >
                   <span v-if="it.continuesLeft" class="bar-arrow">◀</span>
@@ -141,7 +141,7 @@
                       v-if="it.m.marker && it.m.marker !== 'bar'"
                       :shape="it.m.marker"
                       :fill="markerFill(it.m.marker)"
-                      :color="g.row.swimlane.color"
+                      :color="it.m.color || g.row.swimlane.color"
                       :size="settings.items.markerSize"
                       :stroke-width="settings.items.markerStroke"
                       class="bar-marker"
@@ -853,7 +853,7 @@ function selectFromTooltip(m, e) {
   const fallback = e.currentTarget.getBoundingClientRect()
   selectedMs.value = m
   tooltip.ms = m
-  tooltip.color = swimlaneColor(m.swimlaneId)
+  tooltip.color = m.color || swimlaneColor(m.swimlaneId)
   tooltip.visible = true
   let rect = fallback
   const el = wrapEl.value && wrapEl.value.querySelector(`[data-item-id="${m.id}"]`)
@@ -875,7 +875,7 @@ function focusItem(id) {
   const place = () => {
     selectedMs.value = m
     tooltip.ms = m
-    tooltip.color = swimlaneColor(m.swimlaneId)
+    tooltip.color = m.color || swimlaneColor(m.swimlaneId)
     tooltip.visible = true
     const el = wrapEl.value && wrapEl.value.querySelector(`[data-item-id="${id}"]`)
     if (el) {
