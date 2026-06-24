@@ -83,6 +83,39 @@
                 </div>
               </div>
 
+              <div class="field">
+                <label class="field-label">Colour</label>
+                <div class="color-row">
+                  <button
+                    type="button"
+                    class="color-swatch area"
+                    :class="{ selected: !form.color }"
+                    :style="{ background: swimlane?.color || '#888' }"
+                    title="Use area colour"
+                    @click="form.color = null"
+                  >A</button>
+                  <button
+                    v-for="c in swatchColors"
+                    :key="c"
+                    type="button"
+                    class="color-swatch"
+                    :class="{ selected: form.color === c }"
+                    :style="{ background: c }"
+                    :title="c"
+                    @click="form.color = c"
+                  >
+                    <svg v-if="form.color === c" width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5 4.5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <input
+                    type="color"
+                    class="color-custom"
+                    :value="form.color || swimlane?.color || '#0A84FF'"
+                    @input="form.color = $event.target.value"
+                    title="Custom colour"
+                  />
+                </div>
+              </div>
+
               <div class="two-col">
                 <div class="field">
                   <label class="field-label">What</label>
@@ -267,7 +300,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, store, groups, settings } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, store, groups, settings, swatchColors } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 
 const props = defineProps({
@@ -324,6 +357,7 @@ const form = reactive({
   when:   props.milestone?.when ?? defaultDate,
   startDate: props.milestone?.startDate ?? defaultDate,
   endDate:   props.milestone?.endDate ?? addDays(defaultDate, 7),
+  color:  props.milestone?.color ?? null,
 })
 
 // Keep an event's end date on/after its start so the picker opens in the right
@@ -467,6 +501,7 @@ function submit() {
     when:       isEvent ? (form.startDate || null) : (form.when || null),
     startDate:  isEvent ? (form.startDate || null) : null,
     endDate:    isEvent ? (form.endDate || null) : null,
+    color:      form.color || null,
   }
   if (props.mode === 'edit') {
     updateMilestone(props.milestone.id, payload)
@@ -652,6 +687,19 @@ function remove() {
 }
 .mini-toggle.on { background: var(--clr-accent); color: #fff; border-color: var(--clr-accent); }
 .field-hint { font-size: 12.5px; color: var(--clr-text-3); padding: 7px 2px; }
+
+.color-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.color-swatch {
+  width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid transparent; cursor: pointer;
+  color: #fff; font-size: 11px; font-weight: 700;
+}
+.color-swatch.selected { border-color: var(--clr-text); }
+.color-custom {
+  width: 30px; height: 24px; padding: 0; border: 1.5px solid var(--clr-border);
+  border-radius: 6px; background: none; cursor: pointer;
+}
 
 .field-error { font-size: 12.5px; color: var(--clr-danger); margin: -6px 0 0; }
 
