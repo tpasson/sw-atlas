@@ -80,7 +80,7 @@ func (s *Store) CreateGitHubSource(ctx context.Context, id string, in GitHubSour
 		   (id, owner, repo, html_url, provider, api_base, token, include_releases, include_tags, include_issues, include_prs,
 		    stable_only, state_filter, since_date, max_per_type)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-		id, in.Owner, in.Repo, in.HTMLURL, in.Provider, in.APIBase, in.Token, in.Releases, in.Tags, in.Issues, in.PRs,
+		id, in.Owner, in.Repo, in.HTMLURL, in.Provider, in.APIBase, encToken(in.Token), in.Releases, in.Tags, in.Issues, in.PRs,
 		in.StableOnly, in.StateFilter, in.SinceDate, in.MaxPerType)
 	if err != nil {
 		return GitHubSource{}, err
@@ -120,7 +120,7 @@ func (s *Store) markGitHubSync(ctx context.Context, id, status string) {
 // SetGitHubSourceToken updates the stored token (for private / self-hosted repos)
 // without recreating the source.
 func (s *Store) SetGitHubSourceToken(ctx context.Context, id, token string) error {
-	ct, err := s.pool.Exec(ctx, `UPDATE github_source SET token = $2 WHERE id = $1`, id, token)
+	ct, err := s.pool.Exec(ctx, `UPDATE github_source SET token = $2 WHERE id = $1`, id, encToken(token))
 	if err != nil {
 		return err
 	}
@@ -146,6 +146,7 @@ func (s *Store) SyncGitHubSource(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	cfg.token = decToken(cfg.token) // stored encrypted (or legacy plaintext)
 	wire, ferr := fetchGitHub(ctx, cfg)
 	if ferr != nil {
 		s.markGitHubSync(ctx, id, "error: "+ferr.Error())
