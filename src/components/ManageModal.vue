@@ -409,10 +409,16 @@
 
                 <div class="card">
                   <p class="section-label">Layout</p>
-                  <p class="card-hint">Width of the frozen Sub-Area column. Longer names truncate with a hover tooltip.</p>
+                  <p class="card-hint">Width of the frozen Area and Sub-Area columns. Longer names truncate with a hover tooltip.</p>
+                  <div class="opt-row">
+                    <label class="opt">Area width
+                      <input type="range" min="150" max="280" step="2" v-model.number="settings.layout.areaWidth" />
+                      <span class="opt-val">{{ settings.layout.areaWidth }}px</span>
+                    </label>
+                  </div>
                   <div class="opt-row">
                     <label class="opt">Sub-area width
-                      <input type="range" min="100" max="320" step="4" v-model.number="settings.layout.subAreaWidth" />
+                      <input type="range" min="150" max="280" step="2" v-model.number="settings.layout.subAreaWidth" />
                       <span class="opt-val">{{ settings.layout.subAreaWidth }}px</span>
                     </label>
                   </div>
