@@ -324,10 +324,10 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 		itemLocal[it.ID] = nid
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO item (`+itemColumns+`)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
 			nid, lid, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 			whenV, it.Kind, it.Marker, startV, endV, it.Color,
-			subID, it.ID, remoteURL, now); err != nil {
+			subID, it.ID, remoteURL, now, it.Maturity, it.Progress, it.ScmURL); err != nil {
 			return err
 		}
 	}

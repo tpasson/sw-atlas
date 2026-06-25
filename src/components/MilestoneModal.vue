@@ -12,15 +12,15 @@
                 </span>
                 <span v-if="subLane" class="panel-sub">{{ subLane.name }}</span>
                 <span class="panel-month">{{ displayMonth }}</span>
+                <span v-if="readOnly" class="ro-badge"><Lock :size="11" :stroke-width="2.5" /> Read-only</span>
               </div>
-              <h2 class="panel-title">{{ mode === 'edit' ? 'Edit Milestone' : 'New Milestone' }}</h2>
               <div class="panel-actions-top">
-                <button v-if="mode === 'edit'" type="button" class="icon-act danger" title="Delete milestone" @click="remove">
+                <button v-if="mode === 'edit' && !readOnly" type="button" class="icon-act danger" title="Delete milestone" @click="remove">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>
                   </svg>
                 </button>
-                <button type="button" class="icon-act primary" :title="mode === 'edit' ? 'Save' : 'Create'" @click="submit">
+                <button v-if="!readOnly" type="button" class="icon-act primary" :title="mode === 'edit' ? 'Save' : 'Create'" @click="submit">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                     <path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
@@ -35,6 +35,7 @@
 
             <!-- Form -->
             <form class="panel-form" @submit.prevent="submit">
+              <fieldset class="ms-group" :disabled="readOnly">
               <div class="field">
                 <label class="field-label">Title <span class="req">*</span></label>
                 <input
@@ -56,30 +57,34 @@
                   </div>
                 </div>
                 <div class="field">
-                  <label class="field-label">
-                    Marker
+                  <label class="field-label">Marker</label>
+                  <div class="marker-row">
                     <button
                       v-if="form.kind === 'event'"
                       type="button"
-                      class="mini-toggle"
-                      :class="{ on: markerOn }"
-                      @click="markerOn = !markerOn"
-                    >{{ markerOn ? 'On' : 'Off' }}</button>
-                  </label>
-                  <div v-if="form.kind !== 'event' || markerOn" class="marker-row">
+                      class="marker-btn marker-none"
+                      :class="{ on: !markerOn }"
+                      :style="{ color: !markerOn ? '#0A84FF' : '#9aa0a6' }"
+                      title="No marker"
+                      @click="markerOn = false"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M4.5 11.5L11.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </button>
                     <button
                       v-for="o in markerOptions"
                       :key="o.shape"
                       type="button"
                       class="marker-btn"
-                      :class="{ on: form.marker === o.shape }"
+                      :class="{ on: (form.kind !== 'event' || markerOn) && form.marker === o.shape }"
                       :title="o.shape"
-                      @click="form.marker = o.shape"
+                      @click="markerOn = true; form.marker = o.shape"
                     >
-                      <MarkerIcon :shape="o.shape" :fill="o.fill" :color="form.marker === o.shape ? (swimlane?.color || '#0A84FF') : '#9aa0a6'" :size="16" />
+                      <MarkerIcon :shape="o.shape" :fill="o.fill" :color="(form.kind !== 'event' || markerOn) && form.marker === o.shape ? (swimlane?.color || '#0A84FF') : '#9aa0a6'" :size="16" />
                     </button>
                   </div>
-                  <span v-else class="field-hint">No marker on this event</span>
                 </div>
               </div>
 
@@ -116,10 +121,72 @@
                 </div>
               </div>
 
+              <div class="field">
+                <label class="field-label">
+                  Maturity
+                  <span v-if="form.maturity" class="mat-current">{{ MATURITY_STAGES[form.maturity - 1] }}</span>
+                </label>
+                <div class="maturity-row">
+                  <button
+                    type="button"
+                    class="maturity-btn"
+                    :class="{ on: !form.maturity }"
+                    title="No maturity"
+                    @click="form.maturity = null"
+                  >
+                    <MaturityGlyph :level="0" variant="grid" :color="!form.maturity ? '#0A84FF' : '#9aa0a6'" />
+                    <span class="maturity-lbl">None</span>
+                  </button>
+                  <button
+                    v-for="(s, i) in MATURITY_STAGES"
+                    :key="s"
+                    type="button"
+                    class="maturity-btn"
+                    :class="{ on: form.maturity === i + 1 }"
+                    :title="s"
+                    @click="form.maturity = i + 1"
+                  >
+                    <MaturityGlyph :level="i + 1" variant="grid" :color="form.maturity === i + 1 ? (form.color || swimlane?.color || '#0A84FF') : '#9aa0a6'" />
+                    <span class="maturity-lbl">{{ s }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="field">
+                <label class="field-label">
+                  Progress
+                  <span v-if="form.progress != null" class="mat-current">{{ form.progress }}%</span>
+                </label>
+                <div class="progress-row">
+                  <button
+                    type="button"
+                    class="maturity-btn"
+                    :class="{ on: form.progress == null }"
+                    @click="form.progress = null"
+                  >None</button>
+                  <input
+                    type="range" min="0" max="100" step="1"
+                    class="progress-slider"
+                    :value="form.progress ?? 0"
+                    @input="form.progress = +$event.target.value"
+                  />
+                </div>
+              </div>
+              </fieldset>
+
+              <div class="ms-tabs" role="tablist">
+                <button type="button" class="ms-tab" :class="{ active: tab === 'details' }" @click="tab = 'details'">Details</button>
+                <button type="button" class="ms-tab" :class="{ active: tab === 'scm' }" @click="tab = 'scm'">Source control</button>
+                <button type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'">Dependencies</button>
+                <button type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
+              </div>
+
+              <fieldset class="ms-tab-body" :disabled="readOnly">
+              <div v-show="tab === 'details'" class="ms-panel">
               <div class="two-col">
                 <div class="field">
                   <label class="field-label">What</label>
-                  <textarea v-model="form.what" class="field-textarea" rows="3" placeholder="What will be achieved?"></textarea>
+                  <textarea v-model="form.what" class="field-textarea" :rows="readOnly ? 12 : 3" placeholder="What will be achieved?"></textarea>
                 </div>
                 <div class="field">
                   <label class="field-label">Why</label>
@@ -149,16 +216,34 @@
                 </div>
               </div>
               <div v-else class="field">
-                <label class="field-label">Date</label>
+                <label class="field-label">When</label>
                 <input v-model="form.when" type="date" class="field-input field-date" />
               </div>
               <p v-if="dateError" class="field-error">{{ dateError }}</p>
+              </div>
 
-              <!-- Milestone Links -->
+              <div v-show="tab === 'scm'" class="ms-panel">
+                <div class="field">
+                  <label class="field-label">Link</label>
+                  <input
+                    v-model="form.scmUrl"
+                    class="field-input"
+                    placeholder="https://github.com/owner/repo/releases/tag/v1.0.0"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <ScmBadge v-if="form.scmUrl.trim()" :url="form.scmUrl" />
+                  <p class="scm-hint">Paste a GitHub or GitLab URL — release, pull request, branch, commit or issue. It shows as a badge here and in the timeline tooltip.</p>
+                </div>
+              </div>
+
+              <div v-show="tab === 'deps'" class="ms-panel">
+              <!-- Blocked by / Blocks (side by side) -->
+              <div class="two-col dep-cols">
               <div class="field">
                 <label class="field-label">
                   Blocked by
-                  <span v-if="localLinkedIds.size > 0" class="link-count">{{ localLinkedIds.size }}</span>
+                  <span v-if="localLinkedIds.size > 0" class="link-count link-toggle" :class="{ on: showOnly1 }" :title="showOnly1 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnly1 = !showOnly1">{{ localLinkedIds.size }}</span>
                 </label>
                 <div class="ms-picker">
                   <div class="picker-search">
@@ -215,7 +300,7 @@
               <div class="field">
                 <label class="field-label">
                   Blocks
-                  <span v-if="localDependentIds.size > 0" class="link-count">{{ localDependentIds.size }}</span>
+                  <span v-if="localDependentIds.size > 0" class="link-count link-toggle" :class="{ on: showOnly2 }" :title="showOnly2 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnly2 = !showOnly2">{{ localDependentIds.size }}</span>
                 </label>
                 <div class="ms-picker">
                   <div class="picker-search">
@@ -267,7 +352,10 @@
                   </div>
                 </div>
               </div>
+              </div>
+              </div>
 
+              <div v-show="tab === 'groups'" class="ms-panel">
               <!-- Group membership -->
               <div v-if="groups.list.length" class="field">
                 <label class="field-label">
@@ -287,6 +375,8 @@
                   </button>
                 </div>
               </div>
+              </div>
+              </fieldset>
 
               <!-- Enter-to-save (actions live in the header) -->
               <button type="submit" class="hidden-submit" tabindex="-1" aria-hidden="true"></button>
@@ -300,8 +390,11 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, store, groups, settings, swatchColors } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown } from '../stores/useAppStore.js'
+import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
+import ScmBadge from './ScmBadge.vue'
+import { Lock } from 'lucide-vue-next'
 
 const props = defineProps({
   mode:      { type: String,  default: 'add' },
@@ -315,6 +408,12 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, dependsOnIds, dependentIds, itemGroupIds, setItemGroups } = useAppStore()
+
+const tab = ref('details') // details | scm | deps | groups
+
+// Items synced from an external source (GitHub, a subscription) are read-only —
+// the modal opens as a viewer so the full info is visible, but nothing can be saved.
+const readOnly = computed(() => !!props.milestone?.sourceSystem)
 
 // Marker shapes offered in the picker = the active legend markers (+ the item's
 // own marker if it was removed from the active set, so it stays selectable).
@@ -350,7 +449,7 @@ const form = reactive({
   title:  props.milestone?.title ?? '',
   kind:   props.milestone?.kind ?? 'milestone',
   marker: props.milestone?.marker && props.milestone.marker !== 'bar' ? props.milestone.marker : (settings.markers[0]?.shape || 'l:Flag'),
-  what:   props.milestone?.what  ?? '',
+  what:   props.milestone?.sourceSystem ? stripMarkdown(props.milestone?.what || '') : (props.milestone?.what ?? ''),
   why:    props.milestone?.why   ?? '',
   how:    props.milestone?.how   ?? '',
   who:    props.milestone?.who   ?? '',
@@ -358,6 +457,9 @@ const form = reactive({
   startDate: props.milestone?.startDate ?? defaultDate,
   endDate:   props.milestone?.endDate ?? addDays(defaultDate, 7),
   color:  props.milestone?.color ?? null,
+  maturity: props.milestone?.maturity ?? null,
+  progress: props.milestone?.progress ?? null,
+  scmUrl: props.milestone?.scmUrl ?? '',
 })
 
 // Keep an event's end date on/after its start so the picker opens in the right
@@ -416,7 +518,6 @@ function activePickerStyle(color) {
   const g = parseInt(color.slice(3, 5), 16)
   const b = parseInt(color.slice(5, 7), 16)
   return {
-    background: `rgba(${r},${g},${b},0.08)`,
     borderLeft: `2px solid rgba(${r},${g},${b},0.5)`,
   }
 }
@@ -425,7 +526,7 @@ function activePickerStyle(color) {
 const pickerSearch = ref('')
 const pickerSearch2 = ref('')
 
-function buildPickerGroups(query) {
+function buildPickerGroups(query, onlyIds) {
   const q = (query || '').toLowerCase()
   const groups = []
   for (const sw of store.swimlanes) {
@@ -435,6 +536,7 @@ function buildPickerGroups(query) {
         if (m.id === props.milestone?.id) return false
         if (m.swimlaneId !== sw.id) return false
         if (m.subLaneId !== (sub?.id ?? null)) return false
+        if (onlyIds && !onlyIds.has(m.id)) return false
         if (q && !m.title.toLowerCase().includes(q)) return false
         return true
       })
@@ -443,8 +545,11 @@ function buildPickerGroups(query) {
   }
   return groups
 }
-const pickerGroups = computed(() => buildPickerGroups(pickerSearch.value))
-const pickerGroups2 = computed(() => buildPickerGroups(pickerSearch2.value))
+// Clicking the count badge filters the picker to only the selected items.
+const showOnly1 = ref(false)
+const showOnly2 = ref(false)
+const pickerGroups = computed(() => buildPickerGroups(pickerSearch.value, showOnly1.value && localLinkedIds.value.size ? localLinkedIds.value : null))
+const pickerGroups2 = computed(() => buildPickerGroups(pickerSearch2.value, showOnly2.value && localDependentIds.value.size ? localDependentIds.value : null))
 
 const titleInput = ref(null)
 onMounted(() => titleInput.value?.focus())
@@ -473,7 +578,9 @@ function syncLinks(msId) {
 }
 
 function submit() {
-  if (!form.title.trim() || dateError.value) return
+  if (readOnly.value) return // synced item — view only
+  if (dateError.value) { tab.value = 'details'; return } // surface the date error
+  if (!form.title.trim()) return
 
   const isEvent = form.kind === 'event'
   // Grid position derives from the start (event) or the date (milestone).
@@ -502,6 +609,9 @@ function submit() {
     startDate:  isEvent ? (form.startDate || null) : null,
     endDate:    isEvent ? (form.endDate || null) : null,
     color:      form.color || null,
+    maturity:   form.maturity || null,
+    progress:   form.progress,
+    scmUrl:     form.scmUrl.trim() || null,
   }
   if (props.mode === 'edit') {
     updateMilestone(props.milestone.id, payload)
@@ -542,7 +652,7 @@ function remove() {
   background: var(--clr-surface);
   border-radius: var(--r-xl);
   width: 100%;
-  max-width: 600px;
+  max-width: 960px;
   max-height: 92vh;
   box-shadow: var(--sh-modal);
   display: flex;
@@ -560,7 +670,7 @@ function remove() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
   padding-right: 110px; /* keep clear of the top-right action icons */
 }
@@ -576,14 +686,6 @@ function remove() {
 
 .panel-sub { font-size: 12px; color: var(--clr-text-2); font-weight: 500; }
 .panel-month { font-size: 12px; color: var(--clr-text-3); }
-
-.panel-title {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.4px;
-  color: var(--clr-text);
-  margin-bottom: 20px;
-}
 
 .panel-actions-top {
   position: absolute;
@@ -616,7 +718,37 @@ function remove() {
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-.field { display: flex; flex-direction: column; gap: 5px; }
+.ms-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--clr-border-light); margin: 2px 0 0; }
+.ms-tab {
+  padding: 8px 14px; font-size: 13.5px; font-weight: 600;
+  color: var(--clr-text-3); background: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  cursor: pointer; transition: color 0.12s, border-color 0.12s;
+}
+.ms-tab:hover { color: var(--clr-text-2); }
+.ms-tab.active { color: var(--clr-accent); border-bottom-color: var(--clr-accent); }
+.ms-tab-body { height: 320px; display: flex; flex-direction: column; } /* fixed so the modal is the same height on every tab */
+/* fieldsets are only used to disable the whole form in read-only mode — strip their chrome */
+.panel-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ms-group { display: flex; flex-direction: column; gap: 14px; }
+/* read-only view: keep the disabled controls fully legible (no browser dimming) */
+.panel-form fieldset:disabled :disabled { opacity: 1; cursor: default; }
+.panel-form fieldset:disabled .field-input,
+.panel-form fieldset:disabled .field-textarea,
+.panel-form fieldset:disabled .field-date {
+  color: var(--clr-text); -webkit-text-fill-color: var(--clr-text); background: var(--clr-bg);
+}
+.ro-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--clr-text-3); }
+.ms-panel { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; overflow-y: auto; }
+.scm-hint { font-size: 12.5px; color: var(--clr-text-3); line-height: 1.45; margin-top: -1px; }
+
+/* Dependencies tab: let the two pickers grow to fill the tab height instead of leaving whitespace below */
+.dep-cols { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.dep-cols .field { min-height: 0; }
+.dep-cols .ms-picker { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dep-cols .picker-list { max-height: none; flex: 1; min-height: 0; }
+
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 
 .field-label {
   font-size: 11.5px; font-weight: 600;
@@ -634,6 +766,10 @@ function remove() {
   border-radius: 100px;
   letter-spacing: 0;
 }
+.link-toggle { cursor: pointer; transition: background 0.12s, color 0.12s, box-shadow 0.12s; }
+/* Filter toggle: outline (hollow) while ALL are shown, filled while filtered to the selected ones */
+.link-count.link-toggle { background: transparent; color: var(--clr-accent); box-shadow: inset 0 0 0 1.5px var(--clr-accent); }
+.link-count.link-toggle.on { background: var(--clr-accent); color: #fff; box-shadow: none; }
 
 .field-input,
 .field-textarea {
@@ -678,16 +814,6 @@ function remove() {
 .marker-btn:hover { background: var(--clr-surface-2); }
 .marker-btn.on { border-color: var(--clr-accent); box-shadow: 0 0 0 3px rgba(0,113,227,0.12); }
 
-.mini-toggle {
-  margin-left: auto;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
-  padding: 2px 9px; border-radius: 100px;
-  border: 1px solid var(--clr-border);
-  color: var(--clr-text-3); background: var(--clr-bg);
-}
-.mini-toggle.on { background: var(--clr-accent); color: #fff; border-color: var(--clr-accent); }
-.field-hint { font-size: 12.5px; color: var(--clr-text-3); padding: 7px 2px; }
-
 .color-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .color-swatch {
   width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
@@ -700,6 +826,20 @@ function remove() {
   width: 30px; height: 24px; padding: 0; border: 1.5px solid var(--clr-border);
   border-radius: 6px; background: none; cursor: pointer;
 }
+
+.maturity-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.maturity-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: var(--r-md);
+  border: 1.5px solid var(--clr-border); background: var(--clr-surface);
+  font-size: 12.5px; color: var(--clr-text-2); cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.maturity-btn.on { border-color: var(--clr-accent); color: var(--clr-text); background: rgba(0,113,227,0.06); }
+.maturity-lbl { white-space: nowrap; }
+.mat-current { font-size: 11px; font-weight: 600; color: var(--clr-accent); padding-left: 6px; }
+.progress-row { display: flex; align-items: center; gap: 12px; }
+.progress-slider { flex: 1; }
 
 .field-error { font-size: 12.5px; color: var(--clr-danger); margin: -6px 0 0; }
 
@@ -777,9 +917,10 @@ function remove() {
   cursor: pointer;
   transition: background 0.12s;
   text-align: left;
+  background: none;
   border-left: 2px solid transparent;
 }
-.picker-item:hover { background: var(--clr-surface-2); }
+.picker-item:hover { background: rgba(120,120,128,0.2); }
 
 .picker-dot {
   width: 7px; height: 7px;

@@ -62,6 +62,9 @@ type Item struct {
 	ExternalID   *string `json:"externalId"`
 	ExternalURL  *string `json:"externalUrl"`
 	LastSyncedAt *string `json:"lastSyncedAt"`
+	Maturity     *int    `json:"maturity"` // 1..4 (Concept·Design·Production·Series) or null
+	Progress     *int    `json:"progress"` // 0..100 (% complete) or null
+	ScmURL       *string `json:"scmUrl"`   // link to a source-control resource (release/PR/branch/commit) or null
 }
 
 type Link struct {
@@ -77,7 +80,7 @@ type Plan struct {
 
 const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why, how, who,
 	when_date, kind, marker, start_date, end_date, color,
-	source_system, external_id, external_url, last_synced_at`
+	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url`
 
 // ── Plan (read) ─────────────────────────────────────────────────────────────
 
@@ -159,17 +162,19 @@ func (s *Store) GetPlan(ctx context.Context) (Plan, error) {
 
 func scanItem(row pgx.Row) (Item, error) {
 	var it Item
-	var sub, color, src, extID, extURL *string
+	var sub, color, src, extID, extURL, scm *string
+	var maturity, progress *int
 	var when, start, end, last sql.NullTime
 	if err := row.Scan(
 		&it.ID, &it.SwimlaneID, &sub, &it.Year, &it.Month,
 		&it.Title, &it.What, &it.Why, &it.How, &it.Who,
 		&when, &it.Kind, &it.Marker, &start, &end, &color,
-		&src, &extID, &extURL, &last,
+		&src, &extID, &extURL, &last, &maturity, &progress, &scm,
 	); err != nil {
 		return it, err
 	}
 	it.SubLaneID, it.Color, it.SourceSystem, it.ExternalID, it.ExternalURL = sub, color, src, extID, extURL
+	it.Maturity, it.Progress, it.ScmURL = maturity, progress, scm
 	it.When = dateStr(when)
 	it.StartDate = dateStr(start)
 	it.EndDate = dateStr(end)
@@ -252,10 +257,10 @@ func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
 		itID[it.ID] = nid
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO item (`+itemColumns+`)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
 			nid, nsw, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 			whenV, it.Kind, it.Marker, startV, endV, it.Color,
-			nil, nil, nil, nil); err != nil { // provenance stripped → native item
+			nil, nil, nil, nil, it.Maturity, it.Progress, it.ScmURL); err != nil { // provenance stripped → native item
 			return sum, err
 		}
 		sum.Items++
@@ -475,10 +480,10 @@ func (s *Store) CreateItem(ctx context.Context, it Item) (Item, error) {
 	}
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO item (`+itemColumns+`)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
 		it.ID, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 		whenV, it.Kind, it.Marker, startV, endV, it.Color,
-		it.SourceSystem, it.ExternalID, it.ExternalURL, nil)
+		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL)
 	if err != nil {
 		return it, err
 	}
@@ -501,11 +506,11 @@ func (s *Store) UpdateItem(ctx context.Context, id string, it Item) error {
 		`UPDATE item SET
 		   swimlane_id=$2, sub_lane_id=$3, year=$4, month=$5, title=$6,
 		   what=$7, why=$8, how=$9, who=$10, when_date=$11,
-		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16
+		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19
 		 WHERE id=$1`,
 		id, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title,
 		it.What, it.Why, it.How, it.Who, whenV,
-		it.Kind, it.Marker, startV, endV, it.Color)
+		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL)
 	return err
 }
 

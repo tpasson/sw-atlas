@@ -71,10 +71,12 @@ func Run(ctx context.Context, st *store.Store) (int, error) {
 			s := sub
 			subp = &s
 		}
+		mat := ((month - 1) % 4) + 1 // demo spread across the 4 maturity stages
+		prog := mat*25 - 10         // demo % progress, varies with the stage
 		return store.Item{
 			ID: id, SwimlaneID: sw, SubLaneID: subp, Year: year, Month: month,
 			Title: title, What: what, Why: why, How: how, Who: who, When: when,
-			Kind: "milestone", Marker: "l:Diamond",
+			Kind: "milestone", Marker: "l:Diamond", Maturity: &mat, Progress: &prog,
 		}
 	}
 
@@ -117,6 +119,20 @@ func Run(ctx context.Context, st *store.Store) (int, error) {
 		Who: "Whole team", Kind: "event", Marker: "bar", StartDate: d(9, 8), EndDate: d(9, 14), When: d(9, 8),
 	}
 	items = append(items, summitWeek)
+
+	// Link a few milestones to source control (GitHub/GitLab) for the SCM badge demo.
+	scm := map[string]string{
+		"m-apiv2":    "https://github.com/acme/platform/releases/tag/v2.0.0",
+		"m-mvp":      "https://dev.azure.com/acme/Platform/_git/api/pullrequest/482",
+		"m-webr2":    "https://gitea.com/acme/web/src/branch/release-r2",
+		"m-pipeline": "https://bitbucket.org/acme/infra/commits/9f3c1a2b8d4e",
+		"m-collab":   "https://gitlab.com/acme/app/-/merge_requests/77",
+	}
+	for i := range items {
+		if u, ok := scm[items[i].ID]; ok {
+			items[i].ScmURL = &u
+		}
+	}
 
 	for _, it := range items {
 		if _, err := st.CreateItem(ctx, it); err != nil {

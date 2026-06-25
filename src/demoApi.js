@@ -4,7 +4,7 @@
 // server, changes persist in the browser only).
 import { demoSeed } from './demoSeed.js'
 
-const KEY = 'atlas-demo-v3'
+const KEY = 'atlas-demo-v7'
 const uid = () =>
   (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
@@ -32,6 +32,159 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)) } catch { /* ignore quota */ }
 }
 const ok = (v = null) => Promise.resolve(v)
+
+// ── GitHub source (no backend → fetch GitHub's REST API straight from the browser;
+// its CORS headers allow this for public repos). Mirrors server/internal/store/github.go.
+function parseRepo(raw) {
+  let u
+  try { u = new URL((raw || '').trim()) } catch { throw new Error('invalid URL') }
+  const host = u.hostname.replace(/^www\./, '')
+  if (host !== 'github.com') throw new Error('expected a https://github.com/owner/repo URL')
+  const parts = u.pathname.split('/').filter(Boolean)
+  if (parts.length < 2) throw new Error('URL must be https://github.com/owner/repo')
+  return { owner: parts[0], repo: parts[1].replace(/\.git$/, '') }
+}
+function ghDate(ts) {
+  if (!ts) return null
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return null
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return { when: `${d.getFullYear()}-${mm}-${dd}`, year: d.getFullYear(), month: d.getMonth() + 1 }
+}
+function ghText(s, n) {
+  // strip common markdown so the body reads as plain prose; keep line breaks
+  s = (s || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^[ \t]*#{1,6}[ \t]*/gm, '')
+    .replace(/^[ \t]*>[ \t]?/gm, '')
+    .replace(/(\*\*|__|\*|`|~~)/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return s.length > n ? s.slice(0, n).trim() + '…' : s
+}
+function ghState(cfg) {
+  return cfg.stateFilter === 'open' || cfg.stateFilter === 'closed' ? cfg.stateFilter : 'all'
+}
+function ghLimit(items, since, max) {
+  let out = items
+  if (since) out = out.filter(it => (it.when || '') >= since)
+  if (max > 0 && out.length > max) {
+    out = out.slice().sort((a, b) => (b.when || '').localeCompare(a.when || '')).slice(0, max)
+  }
+  return out
+}
+async function ghFetch(cfg, path) {
+  const headers = { Accept: 'application/vnd.github+json' }
+  if (cfg.token) headers.Authorization = 'Bearer ' + cfg.token
+  const res = await fetch(`https://api.github.com/repos/${cfg.owner}/${cfg.repo}${path}`, { headers })
+  if (res.status === 404) throw new Error('repository not found (or private — add a token)')
+  if (res.status === 403) throw new Error('GitHub rate limit reached — try later or add a token')
+  if (!res.ok) throw new Error('GitHub returned ' + res.status)
+  return res.json()
+}
+function ghItem(extId, sub, title, dt, marker, scmUrl, what, who, progress, maturity, color) {
+  return {
+    _extId: extId, _sub: sub, title, year: dt.year, month: dt.month, when: dt.when,
+    kind: 'milestone', marker, scmUrl, what: what || '', why: '', how: '', who: who || '',
+    startDate: null, endDate: null, progress: progress ?? null, maturity: maturity ?? null, color: color ?? null,
+  }
+}
+async function ghReleases(cfg) {
+  const rels = await ghFetch(cfg, '/releases?per_page=100')
+  const items = [], tagSet = new Set()
+  for (const r of rels) {
+    if (r.draft) continue
+    tagSet.add(r.tag_name) // dedup tags against all release tags, even filtered-out ones
+    if (cfg.stableOnly && r.prerelease) continue
+    const dt = ghDate(r.published_at || r.created_at); if (!dt) continue
+    items.push(ghItem('release:' + r.tag_name, 'releases', r.name || r.tag_name, dt, 'l:Tag', r.html_url,
+      ghText(r.body, 4000), r.author && r.author.login, 100, 4, r.prerelease ? '#FF9F0A' : null))
+  }
+  return { items: ghLimit(items, cfg.since, cfg.maxPerType), tagSet }
+}
+async function ghTags(cfg, skip) {
+  const tags = await ghFetch(cfg, '/tags?per_page=100')
+  const items = []; let n = 0
+  for (const t of tags) {
+    if (skip.has(t.name) || n >= 30) { if (n >= 30) break; else continue }
+    n++
+    let dt = null
+    try { const c = await ghFetch(cfg, '/commits/' + t.commit.sha); dt = ghDate(c.commit && c.commit.committer && c.commit.committer.date) } catch { dt = null }
+    if (!dt) continue
+    items.push(ghItem('tag:' + t.name, 'tags', t.name, dt, 'l:Tag',
+      `https://github.com/${cfg.owner}/${cfg.repo}/releases/tag/${t.name}`, '', '', 100, 4, null))
+  }
+  return ghLimit(items, cfg.since, cfg.maxPerType)
+}
+async function ghIssues(cfg) {
+  const issues = await ghFetch(cfg, `/issues?state=${ghState(cfg)}&per_page=100`)
+  const items = []
+  for (const is of issues) {
+    if (is.pull_request) continue
+    const closed = is.state === 'closed'
+    const dt = ghDate(closed && is.closed_at ? is.closed_at : is.created_at); if (!dt) continue
+    items.push(ghItem('issue:' + is.number, 'issues', is.title, dt, 'l:CircleDot', is.html_url,
+      ghText(is.body, 600), is.user && is.user.login, closed ? 100 : 0, null, closed ? '#8957E5' : '#3FB950'))
+  }
+  return ghLimit(items, cfg.since, cfg.maxPerType)
+}
+async function ghPulls(cfg) {
+  const prs = await ghFetch(cfg, `/pulls?state=${ghState(cfg)}&per_page=100`)
+  const items = []
+  for (const p of prs) {
+    const merged = !!p.merged_at
+    const ts = merged ? p.merged_at : (p.state === 'closed' && p.closed_at ? p.closed_at : p.created_at)
+    const dt = ghDate(ts); if (!dt) continue
+    let color = '#3FB950', progress = 50
+    if (merged) { color = '#8957E5'; progress = 100 }
+    else if (p.state === 'closed') { color = '#F85149'; progress = 0 }
+    items.push(ghItem('pr:' + p.number, 'prs', p.title, dt, 'l:GitPullRequest', p.html_url,
+      ghText(p.body, 600), p.user && p.user.login, progress, null, color))
+  }
+  return ghLimit(items, cfg.since, cfg.maxPerType)
+}
+async function buildGitHubMirror(cfg) {
+  let { releases, tags, issues, prs } = cfg
+  if (!releases && !tags && !issues && !prs) releases = true
+  const subLanes = [], items = []
+  let relTags = new Set()
+  if (releases) { const r = await ghReleases(cfg); relTags = r.tagSet; if (r.items.length) { subLanes.push({ id: 'releases', name: 'Releases' }); items.push(...r.items) } }
+  if (tags)     { const t = await ghTags(cfg, relTags); if (t.length) { subLanes.push({ id: 'tags', name: 'Tags' }); items.push(...t) } }
+  if (issues)   { const i = await ghIssues(cfg); if (i.length) { subLanes.push({ id: 'issues', name: 'Issues' }); items.push(...i) } }
+  if (prs)      { const p = await ghPulls(cfg); if (p.length) { subLanes.push({ id: 'prs', name: 'Pull requests' }); items.push(...p) } }
+  return { subLanes, items }
+}
+function removeSourceContent(srcId) {
+  db.swimlanes = db.swimlanes.filter(s => s.sourceSystem !== srcId)
+  db.milestones = db.milestones.filter(m => m.sourceSystem !== srcId)
+}
+async function ghSync(src) {
+  removeSourceContent(src.id)
+  try {
+    const built = await buildGitHubMirror({
+      owner: src.owner, repo: src.repo, token: src._token || '',
+      releases: src.includeReleases, tags: src.includeTags, issues: src.includeIssues, prs: src.includePrs,
+      stableOnly: src.stableOnly, stateFilter: src.stateFilter, since: src.sinceDate, maxPerType: src.maxPerType,
+    })
+    const laneId = uid(), subMap = {}
+    const subLanes = built.subLanes.map(sl => { const i = uid(); subMap[sl.id] = i; return { id: i, name: sl.name } })
+    db.swimlanes.push({ id: laneId, name: src.repo, color: '#6E5494', subLanes, sourceSystem: src.id, hidden: false })
+    const ext = `https://github.com/${src.owner}/${src.repo}`, now = new Date().toISOString()
+    for (const it of built.items) {
+      const { _extId, _sub, ...rest } = it
+      db.milestones.push({ ...rest, id: uid(), swimlaneId: laneId, subLaneId: subMap[_sub] || null,
+        sourceSystem: src.id, externalId: _extId, externalUrl: ext, lastSyncedAt: now })
+    }
+    src.lastStatus = `ok · ${built.items.length} items`
+  } catch (e) {
+    src.lastStatus = 'error: ' + (e.message || 'sync failed')
+  }
+  src.lastSyncedAt = new Date().toISOString()
+}
 
 export const demoApi = {
   // auth (the demo is an open, editable sandbox)
@@ -178,4 +331,43 @@ export const demoApi = {
     return ok({ id: b.id, name: b.name, note: b.note, createdAt: b.createdAt, itemCount: b.items.length })
   },
   deleteBaseline: (id) => { db.baselines = db.baselines.filter(b => b.id !== id); save(); return ok() },
+
+  // GitHub sources (public repos; token used for the initial fetch but not persisted)
+  listGitHubSources: () => ok({ sources: (db.githubSources || []).map(s => ({ ...s })) }),
+  createGitHubSource: async (data) => {
+    let parsed
+    try { parsed = parseRepo(data.url) } catch (e) { return Promise.reject(e) }
+    const src = {
+      id: uid(), owner: parsed.owner, repo: parsed.repo,
+      htmlUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
+      includeReleases: !!data.includeReleases, includeTags: !!data.includeTags,
+      includeIssues: !!data.includeIssues, includePrs: !!data.includePrs,
+      stableOnly: !!data.stableOnly,
+      stateFilter: (data.stateFilter === 'open' || data.stateFilter === 'closed') ? data.stateFilter : 'all',
+      sinceDate: (data.sinceDate || '').trim(),
+      maxPerType: Math.max(0, Number(data.maxPerType) || 0),
+      lastSyncedAt: null, lastStatus: '', createdAt: new Date().toISOString(),
+      _token: data.token || '',
+    }
+    if (!src.includeReleases && !src.includeTags && !src.includeIssues && !src.includePrs) src.includeReleases = true
+    await ghSync(src)
+    const { _token, ...clean } = src
+    db.githubSources = db.githubSources || []
+    db.githubSources.push(clean) // persisted without the token
+    save()
+    return ok(clean)
+  },
+  syncGitHubSource: async (id) => {
+    const src = (db.githubSources || []).find(s => s.id === id)
+    if (!src) return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
+    await ghSync(src)
+    save()
+    return ok({ ...src })
+  },
+  deleteGitHubSource: (id) => {
+    removeSourceContent(id)
+    db.githubSources = (db.githubSources || []).filter(s => s.id !== id)
+    save()
+    return ok()
+  },
 }

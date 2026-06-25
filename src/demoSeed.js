@@ -7,7 +7,9 @@ export function demoSeed() {
   const ms = (id, swimlaneId, subLaneId, month, title, what, why, how, who, when) => ({
     id, swimlaneId, subLaneId, year: YEAR, month, title, what, why, how, who, when,
     kind: 'milestone', marker: 'l:Diamond', startDate: null, endDate: null,
-    color: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
+    maturity: ((month - 1) % 4) + 1,
+    progress: (((month - 1) % 4) + 1) * 25 - 10,
+    color: null, scmUrl: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
   })
 
   // Event (bar) helper. marker defaults to null (no marker on the bar).
@@ -15,7 +17,7 @@ export function demoSeed() {
     id, swimlaneId, subLaneId, year: YEAR, month: Number(startDate.slice(5, 7)), title,
     what: '', why: '', how: '', who,
     kind: 'event', marker, startDate, endDate, when: startDate,
-    color: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
+    color: null, scmUrl: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
   })
 
   const swimlanes = [
@@ -68,7 +70,7 @@ export function demoSeed() {
       id: 'm-summit-week', swimlaneId: 'ev', subLaneId: 'ev-summit', year: YEAR, month: 9,
       title: 'Summit Week', what: 'On-site exhibition week', why: 'Customer meetings', how: 'Conference venue', who: 'Whole team',
       kind: 'event', marker: 'bar', startDate: d(9, 8), endDate: d(9, 14), when: d(9, 8),
-      color: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
+      color: null, scmUrl: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
     },
 
     // ── Test-case events (edge cases) ─────────────────────────────────────
@@ -92,6 +94,16 @@ export function demoSeed() {
     { a: 'm-summit', b: 'm-beta-launch' }, { a: 'm-summit', b: 'm-con-rev' }, { a: 'm-summit', b: 'm-nor-poc' },
     { a: 'm-freeze', b: 'm-release' }, { a: 'm-sso', b: 'm-audit' },
   ]
+
+  // A few milestones linked to source control, to show the SCM badge in the demo.
+  const scm = {
+    'm-apiv2':    'https://github.com/acme/platform/releases/tag/v2.0.0',
+    'm-mvp':      'https://dev.azure.com/acme/Platform/_git/api/pullrequest/482',
+    'm-webr2':    'https://gitea.com/acme/web/src/branch/release-r2',
+    'm-pipeline': 'https://bitbucket.org/acme/infra/commits/9f3c1a2b8d4e',
+    'm-collab':   'https://gitlab.com/acme/app/-/merge_requests/77',
+  }
+  for (const m of milestones) if (scm[m.id]) m.scmUrl = scm[m.id]
 
   return { swimlanes, milestones, links }
 }

@@ -106,9 +106,23 @@
               </template>
 
               <template v-for="it in g.items" :key="it.key">
+                <!-- Rail dot: compact density mode collapses markers to a tick row -->
+                <div
+                  v-if="it.type === 'point' && it.rail"
+                  class="rail-dot"
+                  :data-item-id="it.m.id"
+                  :class="chipState(it.m)"
+                  :style="{ left: (it.x - 5) + 'px', top: (it.lane * g.laneH + (g.laneH - 10) / 2) + 'px', background: it.m.color || g.row.swimlane.color }"
+                  :title="it.m.title"
+                  @mouseenter="hoveredMs = it.m"
+                  @mouseleave="hoveredMs = null"
+                  @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
+                  @dblclick.stop="!props.readOnly && onEdit(it.m)"
+                ></div>
+
                 <!-- Milestone: marker is the anchor at its day, label flows right -->
                 <div
-                  v-if="it.type === 'point'"
+                  v-else-if="it.type === 'point'"
                   class="mk-item"
                   :data-item-id="it.m.id"
                   :class="[chipState(it.m), baselineClass(it.m)]"
@@ -116,11 +130,20 @@
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
-                  @dblclick.stop="!props.readOnly && !it.m.sourceSystem && $emit('edit-milestone', it.m)"
+                  @dblclick.stop="!props.readOnly && onEdit(it.m)"
                 >
                   <MarkerIcon :shape="markerOf(it.m)" :color="it.m.color || g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFill(markerOf(it.m))" class="mk-icon" />
-                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only">🔒</span><span class="mk-label">{{ it.m.title }}</span><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="settings.items.maturitySize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
+
+                <!-- Cluster: collapsed overflow markers; click to expand the list -->
+                <div
+                  v-else-if="it.type === 'cluster'"
+                  class="mk-cluster"
+                  :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px' }"
+                  :title="it.members.length + ' more — click to expand'"
+                  @click.stop="openCluster($event, it)"
+                >+{{ it.members.length }}</div>
 
                 <!-- Event: bar from start to end date -->
                 <div
@@ -133,7 +156,7 @@
                   @mouseleave="hoveredMs = null"
                   @pointerdown="startDrag($event, it, 'move')"
                   @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
-                  @dblclick.stop="!props.readOnly && !it.m.sourceSystem && $emit('edit-milestone', it.m)"
+                  @dblclick.stop="!props.readOnly && onEdit(it.m)"
                 >
                   <span v-if="it.continuesLeft" class="bar-arrow">◀</span>
                   <span class="bar-title" :class="{ 'bar-title-out': it.labelOutside }">
@@ -146,7 +169,7 @@
                       :stroke-width="settings.items.markerStroke"
                       class="bar-marker"
                     />
-                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only">🔒</span>{{ it.m.title }}<AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="settings.items.maturitySize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                   </span>
                   <span v-if="it.continuesRight" class="bar-arrow">▶</span>
                   <template v-if="!props.readOnly && !it.m.sourceSystem">
@@ -191,6 +214,10 @@
         <MarkerIcon :shape="m.shape" color="#8a8a8e" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="m.fill" /> {{ m.label }}
       </span>
       <span class="legend-item"><span class="legend-bar"></span> {{ settings.eventLabel }}</span>
+      <span class="legend-sep"></span>
+      <span v-for="(s, i) in MATURITY_STAGES" :key="s" class="legend-item">
+        <MaturityGlyph :level="i + 1" variant="grid" color="#8a8a8e" :title="s" /> {{ s }}
+      </span>
     </div>
   </div>
 
@@ -210,7 +237,7 @@
         <div class="tooltip-fields">
           <div v-if="tooltip.ms.what" class="tooltip-field">
             <span class="tf-label">What</span>
-            <span class="tf-val">{{ tooltip.ms.what }}</span>
+            <span class="tf-val tf-clamp">{{ tooltip.ms.sourceSystem ? stripMarkdown(tooltip.ms.what) : tooltip.ms.what }}</span>
           </div>
           <div v-if="tooltip.ms.why" class="tooltip-field">
             <span class="tf-label">Why</span>
@@ -232,13 +259,22 @@
             <span class="tf-label">End</span>
             <span class="tf-val">{{ formatDate(tooltip.ms.endDate) }}</span>
           </div>
-          <div v-if="tooltip.ms.sourceSystem" class="tooltip-field">
+          <div v-if="tooltip.ms.scmUrl" class="tooltip-field" style="align-items: center">
+            <span class="tf-label">Git</span>
+            <span class="tf-val"><ScmBadge :url="tooltip.ms.scmUrl" /></span>
+          </div>
+          <div v-if="tooltip.ms.sourceSystem" class="tooltip-field" style="align-items: center">
             <span class="tf-label">Source</span>
-            <span class="tf-val">🔒 Synced from {{ tooltip.ms.sourceSystem }} (read-only)</span>
+            <span class="tf-val tf-synced"><Lock :size="12" :stroke-width="2.5" /> Synced — read-only</span>
           </div>
         </div>
+        <div v-if="tooltip.ms.progress != null" class="tooltip-progress">
+          <span class="tp-label">Progress</span>
+          <span class="tp-bar"><span class="tp-fill" :style="{ width: tooltip.ms.progress + '%', background: tooltip.color }"></span></span>
+          <span class="tp-pct">{{ tooltip.ms.progress }}%</span>
+        </div>
         <div v-if="linkedMilestones.length > 0" class="tooltip-links">
-          <span class="tl-label">Prerequisites</span>
+          <span class="tl-label">Blocked by</span>
           <div class="tl-items">
             <div v-for="lm in linkedMilestones.slice(0, 10)" :key="lm.id" class="tl-item" @click.stop="selectFromTooltip(lm, $event)">
               <span class="tl-dot" :style="{ background: swimlaneColor(lm.swimlaneId) }"></span>
@@ -252,7 +288,7 @@
         </div>
 
         <div v-if="parentMilestones.length > 0" class="tooltip-links">
-          <span class="tl-label">Required by</span>
+          <span class="tl-label">Blocks</span>
           <div class="tl-items">
             <div v-for="pm in parentMilestones.slice(0, 10)" :key="pm.id" class="tl-item" @click.stop="selectFromTooltip(pm, $event)">
               <span class="tl-dot" :style="{ background: swimlaneColor(pm.swimlaneId) }"></span>
@@ -265,7 +301,7 @@
           </div>
         </div>
         <div v-if="riskByItem[tooltip.ms.id] && riskByItem[tooltip.ms.id].length" class="tooltip-risk">
-          <span class="tr-label">⚠ Late prerequisites</span>
+          <span class="tr-label">⚠ Late blockers</span>
           <div class="tr-items">
             <div v-for="p in riskByItem[tooltip.ms.id]" :key="p.id" class="tl-item" @click.stop="selectFromTooltip(p, $event)">
               <span class="tl-dot" :style="{ background: swimlaneColor(p.swimlaneId) }"></span>
@@ -276,6 +312,21 @@
         </div>
       </div>
     </Transition>
+  </Teleport>
+
+  <!-- Cluster popover: the markers collapsed under a "+N" chip -->
+  <Teleport to="body">
+    <div v-if="clusterPop.visible" class="cluster-backdrop" @click="clusterPop.visible = false" @wheel="clusterPop.visible = false"></div>
+    <div v-if="clusterPop.visible" class="cluster-pop" :style="{ left: clusterPop.x + 'px', top: clusterPop.y + 'px' }">
+      <div class="cl-head">{{ clusterPop.items.length }} milestones</div>
+      <div class="cl-list">
+        <div v-for="m in clusterPop.items" :key="m.id" class="tl-item" @click.stop="pickCluster(m)">
+          <span class="tl-dot" :style="{ background: m.color || swimlaneColor(m.swimlaneId) }"></span>
+          <span class="tl-title">{{ m.title }}</span>
+          <span class="tl-date">{{ MONTHS[(m.month || 1) - 1] }}</span>
+        </div>
+      </div>
+    </div>
   </Teleport>
 
   <!-- Live preview while dragging / resizing an event bar -->
@@ -294,9 +345,15 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useAppStore, MONTHS, store, baselineDiff, settings, groups, ui, riskIds, riskByItem } from '../stores/useAppStore.js'
-import { AlertTriangle } from 'lucide-vue-next'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, baselineDiff, settings, groups, ui, riskIds, riskByItem, stripMarkdown } from '../stores/useAppStore.js'
+import { AlertTriangle, Lock } from 'lucide-vue-next'
 import MarkerIcon from './MarkerIcon.vue'
+import MaturityGlyph from './MaturityGlyph.vue'
+import ScmBadge from './ScmBadge.vue'
+
+function maturityTitle(level) {
+  return level ? `Maturity: ${MATURITY_STAGES[level - 1]} (${level}/4)` : ''
+}
 
 // Fixed geometry — months are a fixed width so date math is exact regardless of
 // label length (labels overflow freely to the right).
@@ -504,18 +561,68 @@ function rowItems(swId, subId) {
     }
   }
 
-  // Greedy lane packing: each item drops to the first lane whose last item ended
-  // (plus a small gap) before this one starts.
-  items.sort((a, b) => a.x0 - b.x0)
+  return packLanes(items, settings.items.density, settings.items.densityRows)
+}
+
+const PACK_GAP = 6
+
+// Stack (default): each item drops to the first lane that's free where it starts.
+function packStack(items) {
   const laneRight = []
-  const GAP = 6
   for (const it of items) {
-    let lane = laneRight.findIndex(r => it.x0 >= r + GAP)
+    let lane = laneRight.findIndex(r => it.x0 >= r + PACK_GAP)
     if (lane === -1) { lane = laneRight.length; laneRight.push(0) }
     laneRight[lane] = it.x1
     it.lane = lane
   }
   return { items, laneCount: Math.max(1, laneRight.length) }
+}
+
+// Rail: collapse point markers onto one tick row (below any bars/ghosts), shown
+// as small dots — keeps the row 1 lane tall no matter how dense it is.
+function packRail(items) {
+  const normal = items.filter(i => i.type !== 'point')
+  const pts = items.filter(i => i.type === 'point')
+  const { laneCount: base } = packStack(normal)
+  const railLane = normal.length ? base : 0
+  for (const it of pts) { it.lane = railLane; it.rail = true }
+  return { items, laneCount: Math.max(1, railLane + (pts.length ? 1 : 0)) }
+}
+
+// Cluster: cap the stack at K lanes — show K-1 individually, collapse the rest at
+// that spot into a "+N" chip (click to expand). Only for pure point rows.
+function packCluster(items, maxLanes) {
+  const K = Math.max(2, maxLanes || 3)
+  const indiv = K - 1
+  const laneRight = new Array(indiv).fill(-Infinity)
+  const clusters = []
+  const out = []
+  const CLUSTER_W = 30, MERGE = 12
+  let maxLane = 0
+  for (const it of items) {
+    let lane = -1
+    for (let i = 0; i < indiv; i++) { if (it.x0 >= laneRight[i] + PACK_GAP) { lane = i; break } }
+    if (lane !== -1) {
+      laneRight[lane] = it.x1; it.lane = lane; out.push(it); maxLane = Math.max(maxLane, lane)
+    } else {
+      let c = clusters.length ? clusters[clusters.length - 1] : null
+      if (!c || it.x > c.x1 + MERGE) {
+        c = { type: 'cluster', key: 'cl-' + it.key, x: it.x, x0: it.x - 8, x1: it.x + CLUSTER_W, lane: indiv, members: [] }
+        clusters.push(c); out.push(c)
+      }
+      c.members.push(it)
+      c.x1 = Math.max(c.x1, it.x + CLUSTER_W)
+    }
+  }
+  if (clusters.length) maxLane = Math.max(maxLane, indiv)
+  return { items: out, laneCount: maxLane + 1 }
+}
+
+function packLanes(items, mode, maxLanes) {
+  items.sort((a, b) => a.x0 - b.x0)
+  if (mode === 'cluster' && items.length && items.every(i => i.type === 'point')) return packCluster(items, maxLanes)
+  if (mode === 'rail') return packRail(items)
+  return packStack(items)
 }
 
 const grid = computed(() =>
@@ -815,7 +922,7 @@ function chipState(m) {
 const tooltip = reactive({ visible: false, ms: null, x: 0, chipTop: 0, chipBottom: 0, color: '' })
 const tooltipStyle = computed(() => {
   const margin = 12
-  const tipW = 296
+  const tipW = 360
   const estimatedHeight = 340
   const left = Math.min(tooltip.x, window.innerWidth - tipW - margin)
   const spaceBelow = window.innerHeight - tooltip.chipBottom
@@ -830,6 +937,29 @@ const tooltipStyle = computed(() => {
     zIndex: 9999,
   }
 })
+function onEdit(m) {
+  // Opening the editor: dismiss the info tooltip (the dblclick's .stop would
+  // otherwise leave it open behind/beside the modal).
+  tooltip.visible = false
+  selectedMs.value = null
+  emit('edit-milestone', m)
+}
+
+// Cluster "+N" popover (density: cluster mode)
+const clusterPop = reactive({ visible: false, x: 0, y: 0, items: [] })
+function openCluster(ev, it) {
+  const r = ev.currentTarget.getBoundingClientRect()
+  clusterPop.items = it.members.map(x => x.m)
+  clusterPop.x = Math.min(r.left, window.innerWidth - 280)
+  clusterPop.y = r.bottom + 6
+  clusterPop.visible = true
+  tooltip.visible = false
+}
+function pickCluster(m) {
+  clusterPop.visible = false
+  onEdit(m)
+}
+
 function onChipClick(e, m, color) {
   if (suppressClick.value) return
   if (selectedMs.value?.id === m.id) {
@@ -1075,6 +1205,7 @@ thead th {
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
+  -webkit-user-select: none;
   border-radius: var(--it-radius, 6px);
   z-index: 2;                 /* keep markers/labels above the "+" add hint */
   transition: filter 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease;
@@ -1086,7 +1217,7 @@ thead th {
   text-box-edge: cap alphabetic;
 }
 .mk-label { position: relative; top: var(--it-label-y, 1px); color: inherit; }
-.chip-lock { margin-right: 2px; font-size: 9px; opacity: 0.85; }
+.chip-lock { display: inline-flex; align-items: center; margin-right: 3px; opacity: 0.55; flex-shrink: 0; }
 
 /* --- Event bars --- */
 .event-bar {
@@ -1108,6 +1239,7 @@ thead th {
   cursor: pointer;
   z-index: 3;
   user-select: none;
+  -webkit-user-select: none;
   transition: filter 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
 }
 .event-bar:hover { filter: brightness(0.97); }
@@ -1188,18 +1320,24 @@ thead th {
   z-index: 50;
 }
 .legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-sep { width: 1px; height: 18px; background: var(--clr-border); flex-shrink: 0; }
 .legend-bar { width: 18px; height: 10px; border-radius: 3px; background: rgba(120,120,128,0.3); border: 1px solid rgba(120,120,128,0.55); }
 
 /* --- Tooltip --- */
 .ms-tooltip {
   background: var(--clr-glass);
-  backdrop-filter: blur(28px) saturate(1.8);
-  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  backdrop-filter: blur(36px) saturate(2);
+  -webkit-backdrop-filter: blur(36px) saturate(2);
   border: 1px solid var(--clr-border-light);
   border-radius: var(--r-lg);
   box-shadow: 0 8px 32px rgba(0,0,0,0.18);
   overflow: hidden;
 }
+.tooltip-progress { display: flex; align-items: center; gap: 11px; padding: 9px 14px; border-top: 1px solid var(--clr-border-light); }
+.tp-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); flex-shrink: 0; }
+.tp-bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(127,127,127,0.22); overflow: hidden; }
+.tp-fill { display: block; height: 100%; border-radius: 3px; transition: width 0.2s; }
+.tp-pct { font-size: 12px; font-weight: 600; color: var(--clr-text); font-variant-numeric: tabular-nums; flex-shrink: 0; min-width: 34px; text-align: right; }
 .tooltip-header {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 14px 10px;
@@ -1211,6 +1349,41 @@ thead th {
 .tooltip-field { display: grid; grid-template-columns: 38px 1fr; gap: 8px; align-items: baseline; }
 .tf-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); }
 .tf-val { font-size: 12.5px; color: var(--clr-text); line-height: 1.45; }
+.tf-clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.tf-synced { display: inline-flex; align-items: center; gap: 5px; color: var(--clr-text-2); }
+
+/* Density: rail dots + cluster chips */
+.rail-dot {
+  position: absolute;
+  width: 10px; height: 10px; border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--clr-bg);
+  cursor: pointer; z-index: 3;
+  transition: transform 0.12s;
+}
+.rail-dot:hover { transform: scale(1.45); }
+.mk-cluster {
+  position: absolute;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 18px; padding: 0 7px;
+  font-size: 11px; font-weight: 700;
+  color: var(--clr-text-2); background: var(--clr-surface-2);
+  border: 1px solid var(--clr-border-light); border-radius: 100px;
+  cursor: pointer; z-index: 4; user-select: none; -webkit-user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.mk-cluster:hover { background: var(--clr-accent); color: #fff; border-color: var(--clr-accent); }
+.cluster-backdrop { position: fixed; inset: 0; z-index: 9998; }
+.cluster-pop {
+  position: fixed; z-index: 9999;
+  min-width: 220px; max-width: 280px; max-height: 320px; overflow-y: auto;
+  background: var(--clr-glass);
+  backdrop-filter: blur(36px) saturate(2); -webkit-backdrop-filter: blur(36px) saturate(2);
+  border: 1px solid var(--clr-border-light); border-radius: var(--r-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  padding: 8px;
+}
+.cl-head { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); padding: 2px 4px 6px; }
+.cl-list { display: flex; flex-direction: column; gap: 2px; }
 .tooltip-links { padding: 8px 14px 10px; border-top: 1px solid var(--clr-border-light); }
 .tl-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); display: block; margin-bottom: 6px; }
 .tl-items { display: flex; flex-direction: column; gap: 5px; }
@@ -1223,6 +1396,7 @@ thead th {
 
 /* Dependency-risk badge + tooltip section */
 .risk-badge { flex-shrink: 0; margin-left: 3px; }
+.mk-mat { margin-left: 5px; }
 .tooltip-risk { padding: 8px 14px 10px; border-top: 1px solid var(--clr-border-light); }
 .tr-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-danger); display: block; margin-bottom: 6px; }
 .tr-items { display: flex; flex-direction: column; gap: 4px; }

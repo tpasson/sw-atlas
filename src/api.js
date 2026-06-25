@@ -78,6 +78,12 @@ const realApi = {
   syncSubscription: (id) => req('POST', `/subscriptions/${id}/sync`),
   setSwimlaneHidden: (id, hidden) => req('POST', `/swimlanes/${id}/hidden`, { hidden }),
 
+  // GitHub sources — pull releases/tags/issues/PRs into a read-only swimlane
+  listGitHubSources: () => req('GET', '/github-sources'),
+  createGitHubSource: (data) => req('POST', '/github-sources', data),
+  syncGitHubSource: (id) => req('POST', `/github-sources/${id}/sync`),
+  deleteGitHubSource: (id) => req('DELETE', `/github-sources/${id}`),
+
   // baselines (P2)
   listBaselines: () => req('GET', '/baselines'),
   getBaseline: (id) => req('GET', `/baselines/${id}`),

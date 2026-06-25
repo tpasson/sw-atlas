@@ -51,7 +51,7 @@ const SETTINGS_DEFAULTS = {
   weekNumbers: { enabled: true },
   monthLines: { enabled: false, color: '#E5E5EA', opacity: 1, width: 1 },
   weekLines: { enabled: true, color: '#8E8E93', opacity: 0.1, width: 1 },
-  items: { fontSize: 14, fontWeight: 700, padding: 4, margin: 6, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 12, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13 },
+  items: { fontSize: 14, fontWeight: 700, padding: 4, margin: 6, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 12, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13, maturitySize: 5, density: 'stack', densityRows: 3 },
   markers: [
     { shape: 'l:Diamond', label: 'Milestone', fill: true },
     { shape: 'l:Circle', label: 'Circle', fill: true },
@@ -62,6 +62,107 @@ const SETTINGS_DEFAULTS = {
   layout: { subAreaWidth: 240 },
   theme: 'light',
 }
+
+// Fixed 4-stage maturity scale (mirrors the ATLAS 4-square logo).
+export const MATURITY_STAGES = ['Concept', 'Design', 'Production', 'Series']
+
+// Parse a source-control URL into the pieces needed to render a compact badge.
+// Supports GitHub, GitLab, Azure DevOps, Gitea/Forgejo/Codeberg and Bitbucket
+// (plus a generic git fallback). Returns null for anything that isn't a URL.
+// GitLab nests resources under a `/-/` segment (and supports sub-groups), so we
+// split the path on that marker; GitHub/Gitea keep them directly under owner/repo;
+// Azure DevOps is handled separately (its `_git`/`_workitems` layout differs).
+export function parseScmUrl(url) {
+  if (!url || typeof url !== 'string') return null
+  let u
+  try { u = new URL(url.trim()) } catch { return null }
+  if (!/^https?:$/.test(u.protocol)) return null
+  const host = u.hostname.replace(/^www\./, '')
+  const parts = u.pathname.split('/').filter(Boolean)
+  const dec = (s) => { try { return decodeURIComponent(s || '') } catch { return s || '' } }
+
+  // Azure DevOps (Services dev.azure.com / *.visualstudio.com, or on-prem Server —
+  // detectable by the `_git`/`_workitems` path segment).
+  if (host === 'dev.azure.com' || host.endsWith('.visualstudio.com') ||
+      parts.includes('_git') || parts.includes('_workitems')) {
+    return parseAzureScm(u, host, parts, dec)
+  }
+
+  const provider =
+    /github/.test(host) ? 'github' :
+    /gitlab/.test(host) ? 'gitlab' :
+    /bitbucket/.test(host) ? 'bitbucket' :
+    (host === 'codeberg.org' || /gitea|forgejo/.test(host)) ? 'gitea' :
+    'git'
+
+  const dash = parts.indexOf('-')
+  const repo = (dash > 0 ? parts.slice(0, dash) : parts.slice(0, 2)).join('/') || host
+  const seg = dash > 0 ? parts.slice(dash + 1) : parts.slice(2)
+
+  let type = 'repo', ref = ''
+  switch (seg[0]) {
+    case 'releases': type = 'release'; ref = dec(seg[1] === 'tag' ? seg[2] : seg[1]); break
+    case 'tag': case 'tags': type = 'tag'; ref = dec(seg[1]); break
+    case 'pull': case 'pulls': case 'pull-requests': type = 'pr'; ref = seg[1] ? '#' + seg[1] : ''; break
+    case 'merge_requests': type = 'pr'; ref = seg[1] ? '!' + seg[1] : ''; break
+    case 'issues': type = 'issue'; ref = seg[1] ? '#' + seg[1] : ''; break
+    case 'commit': case 'commits': type = 'commit'; ref = (seg[1] || '').slice(0, 7); break
+    case 'tree': case 'branch': type = 'branch'; ref = dec(seg.slice(1).join('/')); break
+    case 'src': // Gitea: src/branch|tag|commit/<ref>; Bitbucket: src/<branch>/<path>
+      if (seg[1] === 'branch') { type = 'branch'; ref = dec(seg.slice(2).join('/')) }
+      else if (seg[1] === 'tag') { type = 'tag'; ref = dec(seg.slice(2).join('/')) }
+      else if (seg[1] === 'commit') { type = 'commit'; ref = (seg[2] || '').slice(0, 7) }
+      else { type = 'branch'; ref = dec(seg[1]) }
+      break
+    case 'blob': type = 'file'; ref = dec(seg.slice(1).join('/')); break
+    default: type = seg.length ? 'link' : 'repo'; ref = dec(seg.join('/'))
+  }
+  return { provider, repo, type, ref, url: u.href }
+}
+
+// Azure DevOps URLs: .../{project}/_git/{repo}/pullrequest/{id} | /commit/{sha} |
+// ?version=GB{branch}/GT{tag}/GC{sha}; work items live under /_workitems/edit/{id}.
+function parseAzureScm(u, host, parts, dec) {
+  let repo = '', type = 'repo', ref = ''
+  const gi = parts.indexOf('_git')
+  const wi = parts.indexOf('_workitems')
+  if (gi >= 0) {
+    const project = gi >= 1 ? parts[gi - 1] : ''
+    repo = [project, parts[gi + 1]].filter(Boolean).join('/') || host
+    const res = parts[gi + 2], id = parts[gi + 3]
+    if (res === 'pullrequest') { type = 'pr'; ref = id ? '#' + id : '' }
+    else if (res === 'commit') { type = 'commit'; ref = (id || '').slice(0, 7) }
+    else {
+      const ver = u.searchParams.get('version') || '' // GB<branch> / GT<tag> / GC<sha>
+      if (/^GB/.test(ver)) { type = 'branch'; ref = dec(ver.slice(2)) }
+      else if (/^GT/.test(ver)) { type = 'tag'; ref = dec(ver.slice(2)) }
+      else if (/^GC/.test(ver)) { type = 'commit'; ref = ver.slice(2, 9) }
+    }
+  } else if (wi >= 0) {
+    repo = parts.slice(0, wi).join('/') || host
+    type = 'issue'; ref = parts[wi + 2] ? '#' + parts[wi + 2] : '' // .../_workitems/edit/{id}
+  } else {
+    repo = parts.slice(0, 2).join('/') || host
+    type = parts.length > 2 ? 'link' : 'repo'
+  }
+  return { provider: 'azure', repo, type, ref, url: u.href }
+}
+
+// Strip common markdown to plain prose (keeps line breaks). Used to render the
+// bodies of synced/imported items (releases, issues, PRs) that arrive as markdown.
+export function stripMarkdown(s) {
+  return (s || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^[ \t]*#{1,6}[ \t]*/gm, '')
+    .replace(/^[ \t]*>[ \t]?/gm, '')
+    .replace(/(\*\*|__|\*|`|~~)/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function loadSettings() {
   const def = JSON.parse(JSON.stringify(SETTINGS_DEFAULTS))
   try {
