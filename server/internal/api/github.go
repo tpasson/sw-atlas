@@ -28,7 +28,7 @@ func (s *Server) createGitHubSource(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	owner, repo, htmlURL, err := store.ParseGitHubRepo(in.URL)
+	owner, repo, htmlURL, provider, apiBase, err := store.ParseRepoURL(in.URL)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -46,7 +46,7 @@ func (s *Server) createGitHubSource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	src, err := s.store.CreateGitHubSource(r.Context(), uuid.NewString(), store.GitHubSourceInput{
-		Owner: owner, Repo: repo, HTMLURL: htmlURL, Token: in.Token,
+		Owner: owner, Repo: repo, HTMLURL: htmlURL, Provider: provider, APIBase: apiBase, Token: in.Token,
 		Releases: in.IncludeReleases, Tags: in.IncludeTags, Issues: in.IncludeIssues, PRs: in.IncludePrs,
 		StableOnly: in.StableOnly, StateFilter: state, SinceDate: strings.TrimSpace(in.SinceDate), MaxPerType: in.MaxPerType,
 	})
