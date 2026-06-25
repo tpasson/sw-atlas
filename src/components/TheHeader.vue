@@ -107,7 +107,7 @@
         <span
           v-if="riskWarnings.length"
           class="risk-hdr"
-          title="Milestones at risk (a prerequisite is scheduled later)"
+          title="Milestones at risk (a blocker is scheduled later)"
           @mouseenter="hoverRisk = true"
           @mouseleave="hoverRisk = false"
         >

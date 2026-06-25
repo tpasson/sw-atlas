@@ -21,6 +21,7 @@
               <button class="tab" :class="{ active: tab === 'legend' }" @click="tab = 'legend'">Icons</button>
               <button class="tab" :class="{ active: tab === 'baselines' }" @click="tab = 'baselines'">Baselines</button>
               <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
+              <button v-if="session.authenticated" class="tab" :class="{ active: tab === 'sources' }" @click="tab = 'sources'">Sources</button>
               <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
             </div>
 
@@ -332,6 +333,22 @@
                       <button type="button" :class="{ on: settings.items.borderMode === 'off' }" @click="settings.items.borderMode = 'off'">Off</button>
                     </div>
                   </div>
+                  <div class="row-between">
+                    <span class="setting-name">Density
+                      <span class="setting-sub">how many markers stack in one spot</span>
+                    </span>
+                    <div class="seg-mini">
+                      <button type="button" :class="{ on: settings.items.density === 'stack' }" @click="settings.items.density = 'stack'" title="Stack them all (tallest)">Stack</button>
+                      <button type="button" :class="{ on: settings.items.density === 'cluster' }" @click="settings.items.density = 'cluster'" title="Cap the stack, collapse the rest into a +N chip">Cluster</button>
+                      <button type="button" :class="{ on: settings.items.density === 'rail' }" @click="settings.items.density = 'rail'" title="Collapse markers to a single tick row">Rail</button>
+                    </div>
+                  </div>
+                  <div v-if="settings.items.density === 'cluster'" class="opt-row">
+                    <label class="opt">Max rows before “+N”
+                      <input type="range" min="2" max="6" step="1" v-model.number="settings.items.densityRows" />
+                      <span class="opt-val">{{ settings.items.densityRows }}</span>
+                    </label>
+                  </div>
                   <div class="opt-row">
                     <label class="opt">Font size
                       <input type="range" min="9" max="18" step="0.5" v-model.number="settings.items.fontSize" />
@@ -383,6 +400,10 @@
                       <input type="range" min="0" max="1" step="0.05" v-model.number="settings.items.eventOpacity" />
                       <span class="opt-val">{{ Math.round(settings.items.eventOpacity * 100) }}%</span>
                     </label>
+                    <label class="opt">Maturity size
+                      <input type="range" min="3" max="12" step="1" v-model.number="settings.items.maturitySize" />
+                      <span class="opt-val">{{ settings.items.maturitySize }}px</span>
+                    </label>
                   </div>
                 </div>
 
@@ -396,6 +417,7 @@
                     </label>
                   </div>
                 </div>
+
               </section>
 
               <!-- ───────────────── LEGEND ───────────────── -->
@@ -484,6 +506,10 @@
                 </div>
               </section>
 
+              <section v-if="tab === 'sources'" class="tab-pane">
+                <GitHubSourceManager />
+              </section>
+
               <section v-if="tab === 'sharing'" class="tab-pane">
                 <ShareManager />
                 <SubscriptionManager />
@@ -507,6 +533,7 @@ import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, se
 import MarkerIcon from './MarkerIcon.vue'
 import ShareManager from './ShareManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
+import GitHubSourceManager from './GitHubSourceManager.vue'
 
 const isDemo = import.meta.env.VITE_DEMO
 
@@ -782,6 +809,7 @@ function cancelEdit() {
 }
 .setting-info { display: flex; flex-direction: column; gap: 2px; }
 .setting-name { font-size: 14px; font-weight: 600; color: var(--clr-text); }
+.setting-sub { display: block; font-size: 11.5px; font-weight: 400; color: var(--clr-text-3); margin-top: 1px; }
 .setting-desc { font-size: 12px; color: var(--clr-text-3); }
 
 /* ── Toggle ──────────────────────────────────────────────────────────── */

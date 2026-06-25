@@ -97,6 +97,12 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Post("/subscriptions/{id}/sync", s.syncSubscription)
 			r.Post("/subscriptions/{id}/pause", s.setSubscriptionPaused)
 			r.Post("/swimlanes/{id}/hidden", s.setSwimlaneHidden)
+
+			// GitHub sources (releases/tags/issues/PRs → read-only swimlane)
+			r.Post("/github-sources", s.createGitHubSource)
+			r.Get("/github-sources", s.listGitHubSources)
+			r.Post("/github-sources/{id}/sync", s.syncGitHubSource)
+			r.Delete("/github-sources/{id}", s.deleteGitHubSource)
 		})
 	})
 
