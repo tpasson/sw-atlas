@@ -89,6 +89,28 @@ func (s *Server) syncGitHubSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) setGitHubSourceToken(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Token string `json:"token"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := s.store.SetGitHubSourceToken(r.Context(), id, strings.TrimSpace(in.Token)); err != nil {
+		s.fail(w, err)
+		return
+	}
+	// re-sync with the new token so the result is immediate
+	_ = s.store.SyncGitHubSource(r.Context(), id)
+	out, err := s.store.GetGitHubSource(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) deleteGitHubSource(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteGitHubSource(r.Context(), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)

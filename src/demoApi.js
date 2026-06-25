@@ -376,6 +376,15 @@ export const demoApi = {
     save()
     return ok({ ...src })
   },
+  setGitHubSourceToken: async (id, token) => {
+    const src = (db.githubSources || []).find(s => s.id === id)
+    if (!src) return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
+    src._token = (token || '').trim()
+    await ghSync(src)
+    delete src._token // never persist the token in the demo
+    save()
+    return ok({ ...src })
+  },
   deleteGitHubSource: (id) => {
     removeSourceContent(id)
     db.githubSources = (db.githubSources || []).filter(s => s.id !== id)
