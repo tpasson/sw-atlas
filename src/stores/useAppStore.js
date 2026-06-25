@@ -367,6 +367,21 @@ export async function importPlanFromFile(file) {
   return summary
 }
 
+// Demo only: the seed ships a pre-connected GitHub source (tpasson/sw-atlas) with
+// no mirrored content yet. Pull it live from GitHub once (cached in localStorage
+// afterwards; a manual "Sync now" refreshes it). Runs in the background so the
+// board renders immediately and the area pops in when the fetch resolves.
+async function syncSeededDemoSources() {
+  try {
+    if (!api.listGitHubSources) return
+    const { sources } = await api.listGitHubSources()
+    const need = (sources || []).filter(s => !store.swimlanes.some(sw => sw.sourceSystem === s.id))
+    if (!need.length) return
+    await Promise.all(need.map(s => api.syncGitHubSource(s.id).catch(() => {})))
+    await loadPlan()
+  } catch { /* non-fatal — the demo area stays empty if GitHub is unreachable */ }
+}
+
 // initApp resolves auth + settings, then loads the plan. Called once on mount.
 export async function initApp() {
   session.error = null
@@ -395,6 +410,7 @@ export async function initApp() {
     await loadGroups()
   }
   session.ready = true
+  if (import.meta.env.VITE_DEMO && !session.error) syncSeededDemoSources()
 }
 
 export function useAppStore() {
