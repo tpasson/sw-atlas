@@ -82,6 +82,7 @@ const realApi = {
   listGitHubSources: () => req('GET', '/github-sources'),
   createGitHubSource: (data) => req('POST', '/github-sources', data),
   syncGitHubSource: (id) => req('POST', `/github-sources/${id}/sync`),
+  setGitHubSourceToken: (id, token) => req('POST', `/github-sources/${id}/token`, { token }),
   deleteGitHubSource: (id) => req('DELETE', `/github-sources/${id}`),
 
   // baselines (P2)

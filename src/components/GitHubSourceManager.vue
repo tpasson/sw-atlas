@@ -44,15 +44,24 @@
     <p v-if="msg" class="data-msg" :class="msg.type">{{ msg.text }}</p>
 
     <div v-if="sources.length" class="gh-list">
-      <div v-for="s in sources" :key="s.id" class="gh-row">
-        <div class="gh-meta">
-          <span class="gh-name">{{ s.owner }}/{{ s.repo }}<span v-if="s.provider && s.provider !== 'github'" class="gh-prov">{{ s.provider }}</span></span>
-          <span class="gh-kinds">{{ kinds(s) }}</span>
-          <span class="gh-sub" :class="{ err: (s.lastStatus || '').startsWith('error') }">{{ statusText(s) }}</span>
+      <div v-for="s in sources" :key="s.id" class="gh-item">
+        <div class="gh-row">
+          <div class="gh-meta">
+            <span class="gh-name">{{ s.owner }}/{{ s.repo }}<span v-if="s.provider && s.provider !== 'github'" class="gh-prov">{{ s.provider }}</span></span>
+            <span class="gh-kinds">{{ kinds(s) }}</span>
+            <span class="gh-sub" :class="{ err: (s.lastStatus || '').startsWith('error') }">{{ statusText(s) }}</span>
+          </div>
+          <div class="gh-actions">
+            <button class="link-btn" :class="{ on: tokenFor === s.id }" :disabled="busy" @click="toggleToken(s)">Token</button>
+            <button class="link-btn" :disabled="busy" @click="onSync(s)">Sync now</button>
+            <button class="link-btn danger" :disabled="busy" @click="onRemove(s)">Remove</button>
+          </div>
         </div>
-        <div class="gh-actions">
-          <button class="link-btn" :disabled="busy" @click="onSync(s)">Sync now</button>
-          <button class="link-btn danger" :disabled="busy" @click="onRemove(s)">Remove</button>
+        <div v-if="tokenFor === s.id" class="gh-token-edit">
+          <input type="password" v-model="tokenVal" class="field-input" autocomplete="off"
+                 placeholder="Access token (read scope) — empty clears it" @keyup.enter="onSetToken(s)" />
+          <button class="btn-add" :disabled="busy" @click="onSetToken(s)">Save &amp; sync</button>
+          <button class="link-btn" :disabled="busy" @click="tokenFor = null">Cancel</button>
         </div>
       </div>
     </div>
@@ -73,6 +82,8 @@ const inc = reactive({ releases: true, tags: false, issues: false, prs: false })
 const filters = reactive({ stableOnly: false, stateFilter: 'all', sinceDate: '', maxPerType: 0 })
 const busy = ref(false)
 const msg = ref(null)
+const tokenFor = ref(null) // id of the source whose token is being edited
+const tokenVal = ref('')
 
 function kinds(s) {
   const k = []
@@ -123,9 +134,28 @@ async function onSync(s) {
 
 async function onRemove(s) {
   if (!confirm(`Remove ${s.owner}/${s.repo}? Its mirrored area disappears.`)) return
-  busy.value = true
+  msg.value = null; busy.value = true // clear any stale message
+  if (tokenFor.value === s.id) tokenFor.value = null
   try { await api.deleteGitHubSource(s.id); await load(); await loadPlan() }
   catch (e) { msg.value = { type: 'err', text: e.message || 'Remove failed' } }
+  busy.value = false
+}
+
+function toggleToken(s) {
+  tokenFor.value = tokenFor.value === s.id ? null : s.id
+  tokenVal.value = ''
+}
+
+async function onSetToken(s) {
+  msg.value = null; busy.value = true
+  try {
+    const r = await api.setGitHubSourceToken(s.id, tokenVal.value.trim())
+    tokenFor.value = null; tokenVal.value = ''
+    await load(); await loadPlan()
+    msg.value = (r.lastStatus || '').startsWith('ok')
+      ? { type: 'ok', text: `Token saved — ${r.owner}/${r.repo}: ${r.lastStatus}.` }
+      : { type: 'err', text: `Token saved, but sync said: ${r.lastStatus}` }
+  } catch (e) { msg.value = { type: 'err', text: e.message || 'Saving the token failed' } }
   busy.value = false
 }
 </script>
@@ -145,8 +175,11 @@ async function onRemove(s) {
 }
 .gh-num { width: 56px; }
 .gh-list { display: flex; flex-direction: column; gap: 6px; }
-.gh-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  border: 1px solid var(--clr-border-light); border-radius: var(--r-md); padding: 8px 12px; }
+.gh-item { border: 1px solid var(--clr-border-light); border-radius: var(--r-md); }
+.gh-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; }
+.gh-token-edit { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; }
+.gh-token-edit .field-input { flex: 1; }
+.link-btn.on { text-decoration: underline; }
 .gh-name { font-size: 13.5px; font-weight: 600; color: var(--clr-text); }
 .gh-prov { margin-left: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
   color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 4px; padding: 1px 5px; vertical-align: middle; }

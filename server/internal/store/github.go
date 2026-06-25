@@ -117,6 +117,19 @@ func (s *Store) markGitHubSync(ctx context.Context, id, status string) {
 	_, _ = s.pool.Exec(ctx, `UPDATE github_source SET last_status = $2, last_synced_at = now() WHERE id = $1`, id, status)
 }
 
+// SetGitHubSourceToken updates the stored token (for private / self-hosted repos)
+// without recreating the source.
+func (s *Store) SetGitHubSourceToken(ctx context.Context, id, token string) error {
+	ct, err := s.pool.Exec(ctx, `UPDATE github_source SET token = $2 WHERE id = $1`, id, token)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SyncGitHubSource fetches the repo's enabled resources from GitHub and mirrors
 // them locally. The outcome (or any error) is recorded in last_status.
 func (s *Store) SyncGitHubSource(ctx context.Context, id string) error {

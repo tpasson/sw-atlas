@@ -102,6 +102,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Post("/github-sources", s.createGitHubSource)
 			r.Get("/github-sources", s.listGitHubSources)
 			r.Post("/github-sources/{id}/sync", s.syncGitHubSource)
+			r.Post("/github-sources/{id}/token", s.setGitHubSourceToken)
 			r.Delete("/github-sources/{id}", s.deleteGitHubSource)
 		})
 	})
