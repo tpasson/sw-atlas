@@ -59,7 +59,7 @@ const SETTINGS_DEFAULTS = {
     { shape: 'l:Star', label: 'Highlight', fill: true },
   ],
   eventLabel: 'Event (duration)',
-  layout: { subAreaWidth: 240 },
+  layout: { subAreaWidth: 240, areaWidth: 168 },
   theme: 'light',
 }
 

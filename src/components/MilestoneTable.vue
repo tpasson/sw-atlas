@@ -16,8 +16,8 @@
     >
       <thead>
         <tr class="head-months" ref="headRowEl">
-          <th class="th-area">Area</th>
-          <th class="th-sub" :style="{ width: SUB_W + 'px', minWidth: SUB_W + 'px' }">Sub-Area</th>
+          <th class="th-area" :style="{ width: AREA_W + 'px', minWidth: AREA_W + 'px' }">Area</th>
+          <th class="th-sub" :style="{ left: AREA_W + 'px', width: SUB_W + 'px', minWidth: SUB_W + 'px' }">Sub-Area</th>
           <th
             v-for="(m, i) in MONTHS"
             :key="i"
@@ -30,8 +30,8 @@
           <th class="th-gutter" :style="{ width: gutterW + 'px' }"></th>
         </tr>
         <tr v-if="settings.weekNumbers.enabled" class="head-weeks" :style="{ '--wk-top': monthHeadH + 'px' }">
-          <th class="th-area wk-corner"></th>
-          <th class="th-sub wk-corner"><span class="wk-kw">CW</span></th>
+          <th class="th-area wk-corner" :style="{ width: AREA_W + 'px', minWidth: AREA_W + 'px' }"></th>
+          <th class="th-sub wk-corner" :style="{ left: AREA_W + 'px', width: SUB_W + 'px', minWidth: SUB_W + 'px' }"><span class="wk-kw">CW</span></th>
           <th class="wk-cell" colspan="13">
             <span
               v-for="w in weekTicks"
@@ -53,11 +53,11 @@
             >
               <div class="area-label">
                 <span class="area-dot" :style="{ background: g.row.swimlane.color }"></span>
-                <span class="area-name">{{ g.row.swimlane.name }}</span>
+                <span class="area-name" :title="g.row.swimlane.name">{{ g.row.swimlane.name }}</span>
               </div>
             </td>
 
-            <td class="td-sub">
+            <td class="td-sub" :style="{ left: AREA_W + 'px' }">
               <span class="sub-name" :title="g.row.subLane?.name">{{ g.row.subLane?.name ?? '' }}</span>
             </td>
 
@@ -259,13 +259,15 @@
             <span class="tf-label">End</span>
             <span class="tf-val">{{ formatDate(tooltip.ms.endDate) }}</span>
           </div>
-          <div v-if="tooltip.ms.scmUrl" class="tooltip-field" style="align-items: center">
-            <span class="tf-label">Git</span>
-            <span class="tf-val"><ScmBadge :url="tooltip.ms.scmUrl" /></span>
+        </div>
+        <div v-if="tooltip.ms.scmUrl || tooltip.ms.sourceSystem" class="tooltip-scm">
+          <div v-if="tooltip.ms.scmUrl" class="scm-row">
+            <span class="scm-label">Git</span>
+            <ScmBadge :url="tooltip.ms.scmUrl" />
           </div>
-          <div v-if="tooltip.ms.sourceSystem" class="tooltip-field" style="align-items: center">
-            <span class="tf-label">Source</span>
-            <span class="tf-val tf-synced"><Lock :size="12" :stroke-width="2.5" /> Synced — read-only</span>
+          <div v-if="tooltip.ms.sourceSystem" class="scm-row">
+            <span class="scm-label">Source</span>
+            <span class="scm-synced"><Lock :size="12" :stroke-width="2.5" /> Synced — read-only</span>
           </div>
         </div>
         <div v-if="tooltip.ms.progress != null" class="tooltip-progress">
@@ -357,8 +359,9 @@ function maturityTitle(level) {
 
 // Fixed geometry — months are a fixed width so date math is exact regardless of
 // label length (labels overflow freely to the right).
-const AREA_W = 168
-const SUB_W = computed(() => settings.layout?.subAreaWidth ?? 240)
+const clampW = (v, d) => Math.min(280, Math.max(150, v ?? d)) // frozen columns: 150–280px
+const AREA_W = computed(() => clampW(settings.layout?.areaWidth, 168))
+const SUB_W = computed(() => clampW(settings.layout?.subAreaWidth, 240))
 const MIN_COL_W = 72
 // Lane heights scale with the item appearance. Event rows are slightly taller
 // (events carry a real border); milestone-only rows are tighter.
@@ -395,13 +398,13 @@ const wrapW = ref(1200)
 const headRowEl = ref(null)     // months header row — measured to stick the week row below it
 const monthHeadH = ref(44)
 let resizeObs = null
-const baseColW = computed(() => Math.max(MIN_COL_W, (wrapW.value - AREA_W - SUB_W.value) / 12))
+const baseColW = computed(() => Math.max(MIN_COL_W, (wrapW.value - AREA_W.value - SUB_W.value) / 12))
 const COL_W = computed(() => baseColW.value * props.zoom)
 const MONTHS_W = computed(() => COL_W.value * 12)
 // The right gutter grows to fill the viewport when zoomed out, so the grid/rows
 // reach the edge instead of leaving the page background showing.
-const gutterW = computed(() => Math.max(RIGHT_PAD, wrapW.value - AREA_W - SUB_W.value - MONTHS_W.value))
-const tableWidth = computed(() => AREA_W + SUB_W.value + MONTHS_W.value + gutterW.value)
+const gutterW = computed(() => Math.max(RIGHT_PAD, wrapW.value - AREA_W.value - SUB_W.value - MONTHS_W.value))
+const tableWidth = computed(() => AREA_W.value + SUB_W.value + MONTHS_W.value + gutterW.value)
 
 // ── Rows ────────────────────────────────────────────────────────────────────
 const tableRows = computed(() => {
@@ -1093,10 +1096,10 @@ thead th {
 }
 .th-area {
   position: sticky; left: 0; z-index: 30;
-  width: 168px; min-width: 168px; text-align: left;
+  text-align: left;
 }
 .th-sub {
-  position: sticky; left: 168px; z-index: 30;
+  position: sticky; z-index: 30; /* left offset is bound to the Area width inline */
   text-align: left;
   border-left: 1px solid rgba(255,255,255,0.06);
 }
@@ -1134,12 +1137,13 @@ thead th {
   vertical-align: middle;
   user-select: none; -webkit-user-select: none;
 }
-.area-label { display: flex; align-items: center; gap: 8px; }
+.area-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .area-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.area-name { font-size: 13px; font-weight: 600; color: var(--clr-text); letter-spacing: -0.1px; }
+.area-name { font-size: 13px; font-weight: 600; color: var(--clr-text); letter-spacing: -0.1px;
+  min-width: 0; overflow-wrap: anywhere; }
 
 .td-sub {
-  position: sticky; left: 168px; z-index: 10;
+  position: sticky; z-index: 10; /* left offset is bound to the Area width inline */
   background: var(--clr-surface-2);
   border-bottom: 1px solid var(--clr-border-light);
   border-right: 1px solid var(--clr-border-light);
@@ -1350,7 +1354,11 @@ thead th {
 .tf-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); }
 .tf-val { font-size: 12.5px; color: var(--clr-text); line-height: 1.45; }
 .tf-clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
-.tf-synced { display: inline-flex; align-items: center; gap: 5px; color: var(--clr-text-2); }
+/* Source-control section (its own divided block, below WHEN) */
+.tooltip-scm { padding: 9px 14px; border-top: 1px solid var(--clr-border-light); display: flex; flex-direction: column; gap: 8px; }
+.scm-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.scm-label { flex: 0 0 44px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); }
+.scm-synced { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--clr-text-2); }
 
 /* Density: rail dots + cluster chips */
 .rail-dot {
