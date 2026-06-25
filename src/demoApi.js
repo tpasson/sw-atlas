@@ -26,7 +26,7 @@ function load() {
     settings: { publicReadEnabled: true },
     // Pre-connected source: the demo auto-syncs this live from GitHub on first load.
     githubSources: [{
-      id: 'gh-atlas', owner: 'tpasson', repo: 'sw-atlas',
+      id: 'gh-atlas', owner: 'tpasson', repo: 'sw-atlas', provider: 'github',
       htmlUrl: 'https://github.com/tpasson/sw-atlas',
       includeReleases: true, includeTags: false, includeIssues: true, includePrs: false,
       stableOnly: false, stateFilter: 'all', sinceDate: '', maxPerType: 0,
@@ -350,7 +350,7 @@ export const demoApi = {
     let parsed
     try { parsed = parseRepo(data.url) } catch (e) { return Promise.reject(e) }
     const src = {
-      id: uid(), owner: parsed.owner, repo: parsed.repo,
+      id: uid(), owner: parsed.owner, repo: parsed.repo, provider: 'github',
       htmlUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
       includeReleases: !!data.includeReleases, includeTags: !!data.includeTags,
       includeIssues: !!data.includeIssues, includePrs: !!data.includePrs,

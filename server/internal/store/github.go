@@ -25,6 +25,7 @@ type GitHubSource struct {
 	Owner           string  `json:"owner"`
 	Repo            string  `json:"repo"`
 	HTMLURL         string  `json:"htmlUrl"`
+	Provider        string  `json:"provider"` // github | gitea
 	IncludeReleases bool    `json:"includeReleases"`
 	IncludeTags     bool    `json:"includeTags"`
 	IncludeIssues   bool    `json:"includeIssues"`
@@ -38,13 +39,13 @@ type GitHubSource struct {
 	CreatedAt       string  `json:"createdAt"`
 }
 
-const ghColumns = `id, owner, repo, html_url, include_releases, include_tags, include_issues, include_prs, stable_only, state_filter, since_date, max_per_type, last_synced_at, last_status, created_at`
+const ghColumns = `id, owner, repo, html_url, provider, include_releases, include_tags, include_issues, include_prs, stable_only, state_filter, since_date, max_per_type, last_synced_at, last_status, created_at`
 
 func scanGitHubSource(row pgx.Row) (GitHubSource, error) {
 	var g GitHubSource
 	var last *time.Time
 	var ca time.Time
-	if err := row.Scan(&g.ID, &g.Owner, &g.Repo, &g.HTMLURL,
+	if err := row.Scan(&g.ID, &g.Owner, &g.Repo, &g.HTMLURL, &g.Provider,
 		&g.IncludeReleases, &g.IncludeTags, &g.IncludeIssues, &g.IncludePRs,
 		&g.StableOnly, &g.StateFilter, &g.SinceDate, &g.MaxPerType,
 		&last, &g.LastStatus, &ca); err != nil {
@@ -61,6 +62,8 @@ func scanGitHubSource(row pgx.Row) (GitHubSource, error) {
 // GitHubSourceInput carries everything needed to create a source.
 type GitHubSourceInput struct {
 	Owner, Repo, HTMLURL, Token string
+	Provider                    string // github | gitea
+	APIBase                     string // explicit REST base for self-hosted (empty = provider default)
 	Releases, Tags, Issues, PRs bool
 	StableOnly                  bool
 	StateFilter                 string
@@ -69,12 +72,15 @@ type GitHubSourceInput struct {
 }
 
 func (s *Store) CreateGitHubSource(ctx context.Context, id string, in GitHubSourceInput) (GitHubSource, error) {
+	if in.Provider == "" {
+		in.Provider = "github"
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO github_source
-		   (id, owner, repo, html_url, token, include_releases, include_tags, include_issues, include_prs,
+		   (id, owner, repo, html_url, provider, api_base, token, include_releases, include_tags, include_issues, include_prs,
 		    stable_only, state_filter, since_date, max_per_type)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		id, in.Owner, in.Repo, in.HTMLURL, in.Token, in.Releases, in.Tags, in.Issues, in.PRs,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		id, in.Owner, in.Repo, in.HTMLURL, in.Provider, in.APIBase, in.Token, in.Releases, in.Tags, in.Issues, in.PRs,
 		in.StableOnly, in.StateFilter, in.SinceDate, in.MaxPerType)
 	if err != nil {
 		return GitHubSource{}, err
@@ -116,10 +122,10 @@ func (s *Store) markGitHubSync(ctx context.Context, id, status string) {
 func (s *Store) SyncGitHubSource(ctx context.Context, id string) error {
 	var cfg ghConfig
 	err := s.pool.QueryRow(ctx,
-		`SELECT owner, repo, html_url, token, include_releases, include_tags, include_issues, include_prs,
+		`SELECT owner, repo, html_url, provider, api_base, token, include_releases, include_tags, include_issues, include_prs,
 		        stable_only, state_filter, since_date, max_per_type
 		 FROM github_source WHERE id = $1`, id).
-		Scan(&cfg.owner, &cfg.repo, &cfg.htmlURL, &cfg.token, &cfg.releases, &cfg.tags, &cfg.issues, &cfg.prs,
+		Scan(&cfg.owner, &cfg.repo, &cfg.htmlURL, &cfg.provider, &cfg.apiBase, &cfg.token, &cfg.releases, &cfg.tags, &cfg.issues, &cfg.prs,
 			&cfg.stableOnly, &cfg.stateFilter, &cfg.since, &cfg.maxPerType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -163,30 +169,38 @@ func (s *Store) DeleteGitHubSource(ctx context.Context, id string) error {
 	return tx.Commit(ctx)
 }
 
-// ParseGitHubRepo extracts owner/repo from a https://github.com/owner/repo URL.
-func ParseGitHubRepo(raw string) (owner, repo, htmlURL string, err error) {
+// ParseRepoURL extracts owner/repo and the provider/API base from a repo URL.
+// github.com uses GitHub's API; any other host is treated as a self-hosted Gitea
+// (REST base <host>/api/v1) — the other supported provider.
+func ParseRepoURL(raw string) (owner, repo, htmlURL, provider, apiBase string, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", "", "", fmt.Errorf("URL is required")
+		return "", "", "", "", "", fmt.Errorf("URL is required")
 	}
 	u, e := url.Parse(raw)
-	if e != nil {
-		return "", "", "", fmt.Errorf("invalid URL")
-	}
-	if u.Host == "" || !strings.Contains(u.Host, "github.com") {
-		return "", "", "", fmt.Errorf("expected a https://github.com/owner/repo URL")
+	if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", "", "", "", "", fmt.Errorf("expected a full https://host/owner/repo URL")
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", "", fmt.Errorf("URL must be https://github.com/owner/repo")
+		return "", "", "", "", "", fmt.Errorf("URL must look like https://host/owner/repo")
 	}
-	return parts[0], strings.TrimSuffix(parts[1], ".git"), "https://github.com/" + parts[0] + "/" + strings.TrimSuffix(parts[1], ".git"), nil
+	owner = parts[0]
+	repo = strings.TrimSuffix(parts[1], ".git")
+	htmlURL = fmt.Sprintf("%s://%s/%s/%s", u.Scheme, u.Host, owner, repo)
+	if strings.Contains(u.Host, "github.com") {
+		provider, apiBase = "github", "" // default api.github.com
+	} else {
+		provider, apiBase = "gitea", fmt.Sprintf("%s://%s/api/v1", u.Scheme, u.Host)
+	}
+	return owner, repo, htmlURL, provider, apiBase, nil
 }
 
 // ── GitHub REST client + mapping ───────────────────────────────────────────────
 
 type ghConfig struct {
 	owner, repo, token, htmlURL string
+	provider, apiBase           string // gitea uses a token-scheme header + /api/v1 base
 	releases, tags, issues, prs bool
 	stableOnly                  bool
 	stateFilter                 string // all | open | closed
@@ -196,22 +210,32 @@ type ghConfig struct {
 
 var ghClient = &http.Client{Timeout: 20 * time.Second}
 
-func ghBase() string {
+func ghBase(cfg ghConfig) string {
+	if cfg.apiBase != "" {
+		return strings.TrimRight(cfg.apiBase, "/") // self-hosted (Gitea …)
+	}
 	if v := strings.TrimRight(os.Getenv("ATLAS_GITHUB_API"), "/"); v != "" {
-		return v // overridable for GitHub Enterprise / tests
+		return v // overridable for tests / GitHub Enterprise
 	}
 	return "https://api.github.com"
 }
 
 func ghGet(ctx context.Context, cfg ghConfig, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ghBase()+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ghBase(cfg)+path, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if cfg.token != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.token)
+	if cfg.provider == "gitea" {
+		req.Header.Set("Accept", "application/json")
+		if cfg.token != "" {
+			req.Header.Set("Authorization", "token "+cfg.token)
+		}
+	} else {
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		if cfg.token != "" {
+			req.Header.Set("Authorization", "Bearer "+cfg.token)
+		}
 	}
 	resp, err := ghClient.Do(req)
 	if err != nil {
@@ -225,11 +249,11 @@ func ghGet(ctx context.Context, cfg ghConfig, path string, out any) error {
 	case http.StatusNotFound:
 		return fmt.Errorf("repository not found (or private — add a token)")
 	case http.StatusUnauthorized:
-		return fmt.Errorf("github auth failed (check the token)")
+		return fmt.Errorf("auth failed (check the token)")
 	case http.StatusForbidden:
-		return fmt.Errorf("github rate limit reached — try later or add a token")
+		return fmt.Errorf("forbidden or rate-limited — try later or add a token")
 	default:
-		return fmt.Errorf("github returned %d", resp.StatusCode)
+		return fmt.Errorf("the server returned %d", resp.StatusCode)
 	}
 }
 
@@ -310,7 +334,7 @@ func ghReleases(ctx context.Context, cfg ghConfig) ([]Item, map[string]bool, err
 			Login string `json:"login"`
 		} `json:"author"`
 	}
-	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/releases?per_page=100", cfg.owner, cfg.repo), &rels); err != nil {
+	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/releases?per_page=100&limit=50", cfg.owner, cfg.repo), &rels); err != nil {
 		return nil, nil, err
 	}
 	items := []Item{}
@@ -349,14 +373,15 @@ func ghTags(ctx context.Context, cfg ghConfig, skip map[string]bool) ([]Item, er
 	var tags []struct {
 		Name   string `json:"name"`
 		Commit struct {
-			SHA string `json:"sha"`
+			SHA     string `json:"sha"`
+			Created string `json:"created"` // Gitea provides the commit date here
 		} `json:"commit"`
 	}
-	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/tags?per_page=100", cfg.owner, cfg.repo), &tags); err != nil {
+	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/tags?per_page=100&limit=50", cfg.owner, cfg.repo), &tags); err != nil {
 		return nil, err
 	}
 	items := []Item{}
-	const maxTags = 30 // each tag costs a commit lookup; bound the rate-limit cost
+	const maxTags = 30 // GitHub needs a commit lookup per tag; bound the rate-limit cost
 	n := 0
 	for _, t := range tags {
 		if skip[t.Name] { // already shown as a release
@@ -366,17 +391,22 @@ func ghTags(ctx context.Context, cfg ghConfig, skip map[string]bool) ([]Item, er
 			break
 		}
 		n++
-		var commit struct {
-			Commit struct {
-				Committer struct {
-					Date string `json:"date"`
-				} `json:"committer"`
-			} `json:"commit"`
+		dateStr := t.Commit.Created // Gitea: present already
+		if dateStr == "" {
+			// GitHub: the tags endpoint has no date — fetch the commit.
+			var commit struct {
+				Commit struct {
+					Committer struct {
+						Date string `json:"date"`
+					} `json:"committer"`
+				} `json:"commit"`
+			}
+			if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/commits/%s", cfg.owner, cfg.repo, t.Commit.SHA), &commit); err != nil {
+				continue
+			}
+			dateStr = commit.Commit.Committer.Date
 		}
-		if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/commits/%s", cfg.owner, cfg.repo, t.Commit.SHA), &commit); err != nil {
-			continue
-		}
-		when, y, m, ok := ghDate(commit.Commit.Committer.Date)
+		when, y, m, ok := ghDate(dateStr)
 		if !ok {
 			continue
 		}
@@ -401,7 +431,11 @@ func ghIssues(ctx context.Context, cfg ghConfig) ([]Item, error) {
 		} `json:"user"`
 		PullRequest *struct{} `json:"pull_request"` // present ⇒ it's a PR, not an issue
 	}
-	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=100", cfg.owner, cfg.repo, ghState(cfg)), &issues); err != nil {
+	ip := fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=100&limit=50", cfg.owner, cfg.repo, ghState(cfg))
+	if cfg.provider == "gitea" {
+		ip += "&type=issues" // Gitea returns PRs on /issues unless filtered
+	}
+	if err := ghGet(ctx, cfg, ip, &issues); err != nil {
 		return nil, err
 	}
 	items := []Item{}
@@ -442,7 +476,7 @@ func ghPulls(ctx context.Context, cfg ghConfig) ([]Item, error) {
 			Login string `json:"login"`
 		} `json:"user"`
 	}
-	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/pulls?state=%s&per_page=100", cfg.owner, cfg.repo, ghState(cfg)), &prs); err != nil {
+	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/pulls?state=%s&per_page=100&limit=50", cfg.owner, cfg.repo, ghState(cfg)), &prs); err != nil {
 		return nil, err
 	}
 	items := []Item{}

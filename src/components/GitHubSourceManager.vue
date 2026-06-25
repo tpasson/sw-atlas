@@ -1,14 +1,15 @@
 <template>
   <div class="card">
-    <p class="section-label">GitHub sources</p>
+    <p class="section-label">Repository sources</p>
     <p class="card-hint">
       Pull a repository's releases, tags, issues and pull requests in as a read-only area,
-      placed on the timeline by date. Each item links back to GitHub. Hide or reorder the
-      area in the <strong>Areas</strong> tab. Public repos need no token.
+      placed on the timeline by date. Each item links back to the repo. Works with
+      <strong>github.com</strong> and self-hosted <strong>Gitea/Forgejo</strong>. Hide or reorder the
+      area in the <strong>Areas</strong> tab. Public repos need no token; private/self-hosted ones do.
     </p>
 
     <div class="gh-new">
-      <input v-model="url" class="field-input" placeholder="https://github.com/owner/repo" @keyup.enter="onAdd" />
+      <input v-model="url" class="field-input" placeholder="https://github.com/owner/repo — or your Gitea URL" @keyup.enter="onAdd" />
 
       <div class="gh-types">
         <label class="gh-chk"><input type="checkbox" v-model="inc.releases" /> Releases</label>
@@ -45,7 +46,7 @@
     <div v-if="sources.length" class="gh-list">
       <div v-for="s in sources" :key="s.id" class="gh-row">
         <div class="gh-meta">
-          <span class="gh-name">{{ s.owner }}/{{ s.repo }}</span>
+          <span class="gh-name">{{ s.owner }}/{{ s.repo }}<span v-if="s.provider && s.provider !== 'github'" class="gh-prov">{{ s.provider }}</span></span>
           <span class="gh-kinds">{{ kinds(s) }}</span>
           <span class="gh-sub" :class="{ err: (s.lastStatus || '').startsWith('error') }">{{ statusText(s) }}</span>
         </div>
@@ -147,6 +148,8 @@ async function onRemove(s) {
 .gh-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
   border: 1px solid var(--clr-border-light); border-radius: var(--r-md); padding: 8px 12px; }
 .gh-name { font-size: 13.5px; font-weight: 600; color: var(--clr-text); }
+.gh-prov { margin-left: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 4px; padding: 1px 5px; vertical-align: middle; }
 .gh-kinds { display: block; font-size: 11px; color: var(--clr-text-2); margin-top: 1px; }
 .gh-sub { display: block; font-size: 11.5px; color: var(--clr-text-3); margin-top: 1px; }
 .gh-sub.err { color: var(--clr-danger); }
