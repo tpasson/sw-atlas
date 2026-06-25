@@ -4,7 +4,7 @@
 // server, changes persist in the browser only).
 import { demoSeed } from './demoSeed.js'
 
-const KEY = 'atlas-demo-v7'
+const KEY = 'atlas-demo-v8'
 const uid = () =>
   (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
@@ -24,6 +24,14 @@ function load() {
     palette: null,
     groups: [],
     settings: { publicReadEnabled: true },
+    // Pre-connected source: the demo auto-syncs this live from GitHub on first load.
+    githubSources: [{
+      id: 'gh-atlas', owner: 'tpasson', repo: 'sw-atlas',
+      htmlUrl: 'https://github.com/tpasson/sw-atlas',
+      includeReleases: true, includeTags: false, includeIssues: true, includePrs: false,
+      stableOnly: false, stateFilter: 'all', sinceDate: '', maxPerType: 0,
+      lastSyncedAt: null, lastStatus: '', createdAt: '2026-06-25T18:37:47Z',
+    }],
   }
 }
 
@@ -266,6 +274,10 @@ export const demoApi = {
   reorderSwimlanes: (ids) => {
     const byId = Object.fromEntries(db.swimlanes.map(s => [s.id, s]))
     db.swimlanes = ids.map(id => byId[id]).filter(Boolean)
+    save(); return ok()
+  },
+  setSwimlaneHidden: (id, hidden) => {
+    const s = db.swimlanes.find(s => s.id === id); if (s) s.hidden = hidden
     save(); return ok()
   },
   createSubLane: (swimlaneId, data) => {
