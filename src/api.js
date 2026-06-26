@@ -4,8 +4,14 @@ import { demoApi } from './demoApi.js'
 
 const BASE = '/api'
 
+// The workspace the SPA is currently viewing (from the /{slug} URL). Sent on every
+// request so the backend serves/guards the right tenant; empty = "own/default".
+let workspaceSlug = ''
+export function setWorkspaceSlug(slug) { workspaceSlug = slug || '' }
+
 async function req(method, path, body) {
   const opts = { method, headers: {}, credentials: 'same-origin' }
+  if (workspaceSlug) opts.headers['X-Atlas-Workspace'] = workspaceSlug
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(body)

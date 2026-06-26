@@ -1,6 +1,18 @@
 import { reactive, computed, watch } from 'vue'
-import { api } from '../api.js'
+import { api, setWorkspaceSlug } from '../api.js'
 import { LUCIDE_MARKER_SHAPES } from '../lucideMarkers.js'
+
+const IS_DEMO = !!import.meta.env.VITE_DEMO
+// Top-level URL segments that are never workspace slugs.
+const RESERVED_SLUGS = new Set(['api', 'assets', 'favicon.svg', 'w', 'health', 'index.html'])
+
+// workspaceSlugFromUrl reads the first path segment of the current URL as the
+// workspace slug ('' = home/default). Never applies in the demo (single sandbox).
+function workspaceSlugFromUrl() {
+  if (IS_DEMO) return ''
+  const seg = (window.location.pathname.split('/').filter(Boolean)[0] || '').toLowerCase()
+  return RESERVED_SLUGS.has(seg) ? '' : seg
+}
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -42,7 +54,15 @@ export const session = reactive({
   role: null, // 'admin' | 'editor' | null
   publicReadEnabled: true,
   ready: false,
-  error: null, // 'auth-required' | message string | null
+  error: null, // 'auth-required' | 'private' | 'not-found' | message string | null
+})
+
+// Which workspace the SPA is viewing, and whether it's the logged-in user's own
+// (only then is editing unlocked). slug '' means the home/default plan.
+export const workspace = reactive({
+  slug: '',
+  isOwn: false,
+  ownSlug: '',
 })
 
 // UI view preferences (today indicator etc.) — per-browser, persisted locally.
@@ -384,29 +404,31 @@ async function syncSeededDemoSources() {
   } catch { /* non-fatal — the demo area stays empty if GitHub is unreachable */ }
 }
 
-// initApp resolves auth + settings, then loads the plan. Called once on mount.
+// initApp resolves auth, picks the workspace to view (from the /{slug} URL),
+// then loads its plan. Called once on mount.
 export async function initApp() {
   session.error = null
   session.ready = false
-  try {
-    const me = await api.me()
-    session.authenticated = !!me.authenticated
-    session.username = me.username || null
-    session.role = me.role || null
-  } catch { /* treat as anonymous */ }
+
+  let me = { authenticated: false }
+  try { me = await api.me() } catch { /* treat as anonymous */ }
+  session.authenticated = !!me.authenticated
+  session.username = me.username || null
+  session.role = me.role || null
+
+  resolveWorkspaceTarget(me)
 
   try {
     const pr = await api.getPublicRead()
     session.publicReadEnabled = !!pr.enabled
   } catch (e) {
-    // 401 here means public read is off and we're anonymous.
-    if (e.status === 401) session.publicReadEnabled = false
+    if (e.status === 401 || e.status === 403) session.publicReadEnabled = false
   }
 
   try {
     await loadPlan()
   } catch (e) {
-    session.error = e.status === 401 ? 'auth-required' : (e.message || 'Failed to load')
+    session.error = workspaceLoadError(e)
   }
   if (!session.error) {
     try { await loadBaselines() } catch { /* baselines non-fatal */ }
@@ -414,7 +436,39 @@ export async function initApp() {
     await loadGroups()
   }
   session.ready = true
-  if (import.meta.env.VITE_DEMO && !session.error) syncSeededDemoSources()
+  if (IS_DEMO && !session.error) syncSeededDemoSources()
+}
+
+// resolveWorkspaceTarget decides which workspace the request should target: the
+// /{slug} in the URL, else the logged-in user's own (reflected into the URL bar),
+// else the home/default plan. Sets the api header + the reactive workspace state.
+function resolveWorkspaceTarget(me) {
+  if (IS_DEMO) { workspace.slug = ''; workspace.isOwn = true; setWorkspaceSlug(''); return }
+  const ownSlug = me.workspace || ''
+  const urlSlug = workspaceSlugFromUrl()
+  let target
+  if (urlSlug) {
+    target = urlSlug
+  } else if (session.authenticated && ownSlug) {
+    target = ownSlug
+    try { window.history.replaceState(null, '', '/' + encodeURIComponent(ownSlug)) } catch { /* ignore */ }
+  } else {
+    target = ''
+  }
+  workspace.slug = target
+  workspace.ownSlug = ownSlug
+  workspace.isOwn = session.authenticated && !!ownSlug && target === ownSlug
+  setWorkspaceSlug(target)
+}
+
+// workspaceLoadError maps a failed plan load to a user-facing state.
+function workspaceLoadError(e) {
+  if (e.status === 404) return 'not-found'
+  if (e.status === 403) return 'private'
+  if (e.status === 401) {
+    return (workspace.slug === '' || workspace.slug === 'default') ? 'auth-required' : 'private'
+  }
+  return e.message || 'Failed to load'
 }
 
 export function useAppStore() {
@@ -578,10 +632,17 @@ export function useAppStore() {
   // ── Session / settings ────────────────────────────────────────────────────
   async function login(username, password) {
     const res = await api.login(username, password)
+    if (!IS_DEMO) {
+      // Land on your own workspace; a full navigation re-runs initApp cleanly.
+      const ownSlug = (res && res.workspace) || username
+      window.location.assign('/' + encodeURIComponent(ownSlug))
+      return
+    }
     session.authenticated = true
     session.username = (res && res.username) || username
     session.role = (res && res.role) || null
     session.error = null
+    workspace.isOwn = true
     try {
       const pr = await api.getPublicRead()
       session.publicReadEnabled = !!pr.enabled
@@ -589,6 +650,10 @@ export function useAppStore() {
     await loadPlan()
   }
   async function logout() {
+    if (!IS_DEMO) {
+      try { await api.logout() } finally { window.location.assign('/') }
+      return
+    }
     try { await api.logout() } finally {
       session.authenticated = false
       session.username = null

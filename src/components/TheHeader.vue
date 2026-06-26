@@ -143,15 +143,35 @@
 
         <template v-if="authenticated">
           <span v-if="session.username" class="user-chip" title="Signed in">{{ session.username }}</span>
-          <span v-if="!baselines.activeId" class="edit-pill">
-            <span class="edit-dot"></span>
-            Editing
-          </span>
-          <button v-if="!baselines.activeId" class="bl-btn" title="Save current plan as a baseline" @click="onSaveBaseline">Save baseline</button>
-          <button class="btn-manage" @click="$emit('manage')">Settings</button>
+
+          <!-- Viewing your own plan → full editing controls. -->
+          <template v-if="workspace.isOwn">
+            <span v-if="!baselines.activeId" class="edit-pill">
+              <span class="edit-dot"></span>
+              Editing
+            </span>
+            <button v-if="!baselines.activeId" class="bl-btn" title="Save current plan as a baseline" @click="onSaveBaseline">Save baseline</button>
+            <button class="btn-manage" @click="$emit('manage')">Settings</button>
+          </template>
+
+          <!-- Viewing someone else's plan → read-only, with a way back. -->
+          <template v-else>
+            <span class="view-pill" title="You are viewing another user's plan">
+              <span class="view-dot"></span>
+              Viewing {{ workspace.slug }}
+            </span>
+            <button v-if="workspace.ownSlug" class="btn-manage" @click="goToOwn">My plan</button>
+          </template>
+
           <button class="btn-manage" @click="$emit('logout')">Log out</button>
         </template>
-        <button v-else class="btn-manage" @click="$emit('login')">Log in</button>
+
+        <template v-else>
+          <span v-if="workspace.slug && workspace.slug !== 'default'" class="view-pill" title="Public plan">
+            {{ workspace.slug }}’s plan
+          </span>
+          <button class="btn-manage" @click="$emit('login')">Log in</button>
+        </template>
       </div>
     </div>
     <div class="header-trim"></div>
@@ -161,7 +181,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Sun, Moon, AlertTriangle } from 'lucide-vue-next'
-import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session } from '../stores/useAppStore.js'
+import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 
 defineProps({
@@ -172,6 +192,11 @@ defineProps({
 defineEmits(['prev-year', 'next-year', 'manage', 'zoom-in', 'zoom-out', 'login', 'logout', 'about'])
 
 const version = APP_VERSION
+
+// Navigate back to your own workspace (full load re-runs initApp for that slug).
+function goToOwn() {
+  if (workspace.ownSlug) window.location.assign('/' + encodeURIComponent(workspace.ownSlug))
+}
 
 const { selectBaseline, createBaseline } = useAppStore()
 const diff = baselineDiff
