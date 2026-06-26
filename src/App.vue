@@ -25,6 +25,15 @@
           <p>Public access is currently disabled. Log in as an editor to view the plan.</p>
           <button class="state-btn" @click="loginOpen = true">Log in</button>
         </template>
+        <template v-else-if="session.error === 'private'">
+          <h2>This plan is private</h2>
+          <p>The owner hasn’t made <strong>{{ workspace.slug }}</strong> public.<span v-if="!session.authenticated"> Log in if it’s yours.</span></p>
+          <button v-if="!session.authenticated" class="state-btn" @click="loginOpen = true">Log in</button>
+        </template>
+        <template v-else-if="session.error === 'not-found'">
+          <h2>No plan here</h2>
+          <p>There’s no workspace at <strong>/{{ workspace.slug }}</strong>.</p>
+        </template>
         <template v-else>
           <h2>Couldn’t load ATLAS</h2>
           <p>{{ session.error }}</p>
@@ -73,7 +82,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted } from 'vue'
-import { useAppStore, store, session, baselines, initApp } from './stores/useAppStore.js'
+import { useAppStore, store, session, workspace, baselines, initApp } from './stores/useAppStore.js'
 import TheHeader from './components/TheHeader.vue'
 import MilestoneTable from './components/MilestoneTable.vue'
 import MilestoneModal from './components/MilestoneModal.vue'
@@ -89,9 +98,10 @@ const loginOpen = ref(false)
 const aboutOpen = ref(false)
 const zoom = ref(1)
 
-// Editing is unlocked only for authenticated editors — and never while viewing
-// a saved baseline (that's a historical snapshot, not the live/head plan).
-const readOnly = computed(() => !session.authenticated || !!baselines.activeId)
+// Editing is unlocked only when an authenticated user is viewing their OWN
+// workspace — never on someone else's plan, and never while viewing a saved
+// baseline (a historical snapshot, not the live/head plan).
+const readOnly = computed(() => !session.authenticated || !workspace.isOwn || !!baselines.activeId)
 
 onMounted(initApp)
 

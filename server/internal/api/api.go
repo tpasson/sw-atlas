@@ -3,11 +3,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -126,28 +128,78 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 	return r
 }
 
-// ── workspace ───────────────────────────────────────────────────────────────
+// ── workspace resolution ──────────────────────────────────────────────────────
 
-// currentWorkspace resolves the workspace a request operates on. An authenticated
-// request operates on the session user's personal workspace; anonymous (public)
-// requests fall back to the default workspace. Slice C will additionally derive
-// it from the URL (/{username}).
+// wsContextKey carries the workspace id a request resolved to, set by the access
+// middleware so handlers don't re-resolve (or re-authorise) it.
+type wsContextKey struct{}
+
+func withWorkspace(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, wsContextKey{}, id)
+}
+
+// currentWorkspace returns the workspace a handler operates on: the one resolved
+// and authorised by the access middleware (stored in the request context),
+// falling back to the session's own workspace and finally the default.
 func (s *Server) currentWorkspace(r *http.Request) string {
+	if id, ok := r.Context().Value(wsContextKey{}).(string); ok && id != "" {
+		return id
+	}
 	if sess, ok := s.auth.SessionFromRequest(r); ok && sess.WorkspaceID != "" {
 		return sess.WorkspaceID
 	}
 	return store.DefaultWorkspaceID
 }
 
+// requestedSlug reads the target workspace slug from the X-Atlas-Workspace header
+// (the SPA sets it from the /{slug} URL). Empty means "no explicit target".
+func requestedSlug(r *http.Request) string {
+	return strings.ToLower(strings.TrimSpace(r.Header.Get("X-Atlas-Workspace")))
+}
+
+// resolveTargetWorkspace maps the requested slug to a workspace id. With no slug,
+// an authenticated request defaults to its own workspace and an anonymous one to
+// the default workspace. Returns store.ErrNotFound for an unknown slug.
+func (s *Server) resolveTargetWorkspace(r *http.Request) (string, error) {
+	slug := requestedSlug(r)
+	if slug == "" {
+		if sess, ok := s.auth.SessionFromRequest(r); ok && sess.WorkspaceID != "" {
+			return sess.WorkspaceID, nil
+		}
+		return store.DefaultWorkspaceID, nil
+	}
+	ws, err := s.store.GetWorkspaceBySlug(r.Context(), slug)
+	if err != nil {
+		return "", err
+	}
+	return ws.ID, nil
+}
+
 // ── middleware ──────────────────────────────────────────────────────────────
 
+// requireEditor restricts writes to the authenticated user's own workspace; a
+// request that explicitly targets another workspace is refused.
 func (s *Server) requireEditor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.auth.IsAuthed(r) {
+		sess, ok := s.auth.SessionFromRequest(r)
+		if !ok {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		next.ServeHTTP(w, r)
+		target, err := s.resolveTargetWorkspace(r)
+		if err == store.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if target != sess.WorkspaceID {
+			writeErr(w, http.StatusForbidden, "you can only edit your own plan")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), sess.WorkspaceID)))
 	})
 }
 
@@ -167,22 +219,36 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// requireReadAccess resolves the target workspace and allows the request when the
+// caller owns it or it is public; otherwise 401 (anonymous) or 403 (private).
 func (s *Server) requireReadAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.auth.IsAuthed(r) {
-			next.ServeHTTP(w, r)
+		target, err := s.resolveTargetWorkspace(r)
+		if err == store.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "workspace not found")
 			return
 		}
-		ok, err := s.store.GetPublicRead(r.Context(), s.currentWorkspace(r))
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, "login required")
-			return
+		sess, authed := s.auth.SessionFromRequest(r)
+		if !(authed && sess.WorkspaceID == target) {
+			public, err := s.store.GetPublicRead(r.Context(), target)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !public {
+				if authed {
+					writeErr(w, http.StatusForbidden, "this plan is private")
+				} else {
+					writeErr(w, http.StatusUnauthorized, "login required")
+				}
+				return
+			}
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
 	})
 }
 
@@ -205,12 +271,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	sess := auth.Session{UserID: u.ID, Username: u.Username, Role: u.Role, WorkspaceID: u.WorkspaceID}
+	// The workspace slug (for the /{slug} URL) lives on the workspace, not the user.
+	slug := u.WorkspaceID
+	if ws, err := s.store.GetWorkspace(r.Context(), u.WorkspaceID); err == nil {
+		slug = ws.Slug
+	}
+	sess := auth.Session{UserID: u.ID, Username: u.Username, Role: u.Role, WorkspaceID: u.WorkspaceID, WorkspaceSlug: slug}
 	if err := s.auth.SetCookie(w, sess); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": u.Username, "role": u.Role})
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": u.Username, "role": u.Role, "workspace": slug})
 }
 
 func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
@@ -221,7 +292,7 @@ func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	if sess, ok := s.auth.SessionFromRequest(r); ok {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"authenticated": true, "username": sess.Username, "role": sess.Role,
+			"authenticated": true, "username": sess.Username, "role": sess.Role, "workspace": sess.WorkspaceSlug,
 		})
 		return
 	}

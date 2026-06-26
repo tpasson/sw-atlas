@@ -26,18 +26,20 @@ func New(secret string) *Auth {
 
 // Session is the authenticated identity carried in the cookie.
 type Session struct {
-	UserID      string
-	Username    string
-	Role        string
-	WorkspaceID string
+	UserID        string
+	Username      string
+	Role          string
+	WorkspaceID   string
+	WorkspaceSlug string
 }
 
 // sessionClaims embeds the registered JWT claims plus ATLAS identity fields.
 type sessionClaims struct {
 	jwt.RegisteredClaims
-	Username    string `json:"usr"`
-	Role        string `json:"rol"`
-	WorkspaceID string `json:"wsp"`
+	Username      string `json:"usr"`
+	Role          string `json:"rol"`
+	WorkspaceID   string `json:"wsp"`
+	WorkspaceSlug string `json:"wss"`
 }
 
 // HashPassword returns a bcrypt hash suitable for storage.
@@ -58,9 +60,10 @@ func (a *Auth) issueToken(s Session) (string, error) {
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(sessionTTL)),
 		},
-		Username:    s.Username,
-		Role:        s.Role,
-		WorkspaceID: s.WorkspaceID,
+		Username:      s.Username,
+		Role:          s.Role,
+		WorkspaceID:   s.WorkspaceID,
+		WorkspaceSlug: s.WorkspaceSlug,
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(a.secret)
 }
@@ -113,10 +116,11 @@ func (a *Auth) SessionFromRequest(r *http.Request) (Session, bool) {
 		return Session{}, false
 	}
 	return Session{
-		UserID:      claims.Subject,
-		Username:    claims.Username,
-		Role:        claims.Role,
-		WorkspaceID: claims.WorkspaceID,
+		UserID:        claims.Subject,
+		Username:      claims.Username,
+		Role:          claims.Role,
+		WorkspaceID:   claims.WorkspaceID,
+		WorkspaceSlug: claims.WorkspaceSlug,
 	}, true
 }
 
