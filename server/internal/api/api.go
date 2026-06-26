@@ -53,6 +53,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/settings/palette", s.getPalette)
 			r.Get("/settings/groups", s.getGroups)
 			r.Get("/settings/ui", s.getUISettings)
+			r.Get("/settings/git-colors", s.getGitColors)
 			r.Get("/baselines", s.listBaselines)
 			r.Get("/baselines/{id}", s.getBaseline)
 		})
@@ -65,6 +66,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Put("/settings/palette", s.setPalette)
 			r.Put("/settings/groups", s.setGroups)
 			r.Put("/settings/ui", s.setUISettings)
+			r.Put("/settings/git-colors", s.setGitColors)
 
 			r.Post("/swimlanes", s.createSwimlane)
 			r.Post("/swimlanes/reorder", s.reorderSwimlanes)
@@ -476,6 +478,29 @@ func (s *Server) setUISettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeNoContent(w)
+}
+
+// getGitColors returns the viewed workspace's colour scheme for synced GitHub/
+// Gitea items (defaults applied for unset fields).
+func (s *Server) getGitColors(w http.ResponseWriter, r *http.Request) {
+	c, err := s.store.GetGitColors(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *Server) setGitColors(w http.ResponseWriter, r *http.Request) {
+	var in store.GitColors
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.SetGitColors(r.Context(), s.currentWorkspace(r), in); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, in)
 }
 
 // ── swimlanes ───────────────────────────────────────────────────────────────

@@ -147,6 +147,7 @@ func (s *Store) SyncGitHubSource(ctx context.Context, ws, id string) error {
 		return err
 	}
 	cfg.token = decToken(cfg.token) // stored encrypted (or legacy plaintext)
+	cfg.colors, _ = s.GetGitColors(ctx, ws)
 	wire, ferr := fetchGitHub(ctx, cfg)
 	if ferr != nil {
 		s.markGitHubSync(ctx, ws, id, "error: "+ferr.Error())
@@ -220,6 +221,7 @@ type ghConfig struct {
 	stateFilter                 string // all | open | closed
 	since                       string // YYYY-MM-DD
 	maxPerType                  int
+	colors                      GitColors // per-workspace colour scheme for the items
 }
 
 var ghClient = &http.Client{Timeout: 20 * time.Second}
@@ -373,9 +375,9 @@ func ghReleases(ctx context.Context, cfg ghConfig) ([]Item, map[string]bool, err
 		if title == "" {
 			title = r.TagName
 		}
-		var color *string
+		color := gitColorPtr(cfg.colors.ReleaseStable)
 		if r.Prerelease {
-			color = ghStrPtr("#FF9F0A")
+			color = gitColorPtr(cfg.colors.ReleasePre)
 		}
 		items = append(items, ghItem("release:"+r.TagName, "releases", title, when, y, m,
 			"l:Tag", r.HTMLURL, ghText(r.Body, 4000), r.Author.Login, ghIntPtr(100), ghIntPtr(4), color))
@@ -426,7 +428,7 @@ func ghTags(ctx context.Context, cfg ghConfig, skip map[string]bool) ([]Item, er
 		}
 		scm := fmt.Sprintf("%s/releases/tag/%s", cfg.htmlURL, t.Name)
 		items = append(items, ghItem("tag:"+t.Name, "tags", t.Name, when, y, m,
-			"l:Tag", scm, "", "", ghIntPtr(100), ghIntPtr(4), nil))
+			"l:Tag", scm, "", "", ghIntPtr(100), ghIntPtr(4), gitColorPtr(cfg.colors.Tag)))
 	}
 	return ghLimit(items, cfg.since, cfg.maxPerType), nil
 }
@@ -465,10 +467,10 @@ func ghIssues(ctx context.Context, cfg ghConfig) ([]Item, error) {
 		if !ok {
 			continue
 		}
-		color := ghStrPtr("#3FB950")
+		color := gitColorPtr(cfg.colors.IssueOpen)
 		progress := ghIntPtr(0)
 		if is.State == "closed" {
-			color, progress = ghStrPtr("#8957E5"), ghIntPtr(100)
+			color, progress = gitColorPtr(cfg.colors.IssueClosed), ghIntPtr(100)
 		}
 		items = append(items, ghItem(fmt.Sprintf("issue:%d", is.Number), "issues", is.Title, when, y, m,
 			"l:CircleDot", is.HTMLURL, ghText(is.Body, 600), is.User.Login, progress, nil, color))
@@ -510,11 +512,11 @@ func ghPulls(ctx context.Context, cfg ghConfig) ([]Item, error) {
 		var progress *int
 		switch {
 		case merged:
-			color, progress = ghStrPtr("#8957E5"), ghIntPtr(100)
+			color, progress = gitColorPtr(cfg.colors.PRMerged), ghIntPtr(100)
 		case p.State == "closed":
-			color, progress = ghStrPtr("#F85149"), ghIntPtr(0)
+			color, progress = gitColorPtr(cfg.colors.PRClosed), ghIntPtr(0)
 		default:
-			color, progress = ghStrPtr("#3FB950"), ghIntPtr(50)
+			color, progress = gitColorPtr(cfg.colors.PROpen), ghIntPtr(50)
 		}
 		items = append(items, ghItem(fmt.Sprintf("pr:%d", p.Number), "prs", p.Title, when, y, m,
 			"l:GitPullRequest", p.HTMLURL, ghText(p.Body, 600), p.User.Login, progress, nil, color))
