@@ -201,7 +201,7 @@ func (s *Store) SyncSubscription(ctx context.Context, ws, id string) error {
 		s.markSync(ctx, ws, id, etag, "error: invalid feed")
 		return err
 	}
-	if err := s.applyMirror(ctx, ws, id, remoteURL, wire); err != nil {
+	if err := s.applyMirror(ctx, ws, id, remoteURL, "subscription", wire); err != nil {
 		s.markSync(ctx, ws, id, etag, "error: "+err.Error())
 		return err
 	}
@@ -227,7 +227,7 @@ func (s *Store) syncLocalSubscription(ctx context.Context, ws, id, sourceWs, sco
 		s.markSync(ctx, ws, id, "", "error: "+err.Error())
 		return err
 	}
-	if err := s.applyMirror(ctx, ws, id, "", planToWire(plan)); err != nil {
+	if err := s.applyMirror(ctx, ws, id, "", "subscription", planToWire(plan)); err != nil {
 		s.markSync(ctx, ws, id, "", "error: "+err.Error())
 		return err
 	}
@@ -283,7 +283,7 @@ func fetchFeed(ctx context.Context, base, token, etag string) (body []byte, newE
 // applyMirror reconciles the feed into local mirrored entities in one tx.
 // External lanes are upserted (so the consumer's local order + hidden flag
 // survive a re-sync); their sub-lanes/items/links are fully replaced.
-func (s *Store) applyMirror(ctx context.Context, ws, subID, remoteURL string, wire subWire) error {
+func (s *Store) applyMirror(ctx context.Context, ws, subID, remoteURL, kind string, wire subWire) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -318,15 +318,17 @@ func (s *Store) applyMirror(ctx context.Context, ws, subID, remoteURL string, wi
 		}
 		lid, ok := existing[sw.ID]
 		if ok {
-			if _, err := tx.Exec(ctx, `UPDATE swimlane SET name = $2, color = $3 WHERE id = $1 AND workspace_id = $4`, lid, sw.Name, color, ws); err != nil {
+			// Keep the consumer's colour (they may have recoloured the lane) and
+			// sort order; only the name + source_kind are refreshed from the feed.
+			if _, err := tx.Exec(ctx, `UPDATE swimlane SET name = $2, source_kind = $3 WHERE id = $1 AND workspace_id = $4`, lid, sw.Name, kind, ws); err != nil {
 				return err
 			}
 		} else {
 			lid = uuid.NewString()
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO swimlane (id, name, color, sort_order, source_system, external_id, workspace_id)
-				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane WHERE workspace_id = $6), $4, $5, $6)`,
-				lid, sw.Name, color, subID, sw.ID, ws); err != nil {
+				`INSERT INTO swimlane (id, name, color, sort_order, source_system, source_kind, external_id, workspace_id)
+				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane WHERE workspace_id = $7), $4, $5, $6, $7)`,
+				lid, sw.Name, color, subID, kind, sw.ID, ws); err != nil {
 				return err
 			}
 		}

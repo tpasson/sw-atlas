@@ -180,7 +180,7 @@ async function ghSync(src) {
     })
     const laneId = uid(), subMap = {}
     const subLanes = built.subLanes.map(sl => { const i = uid(); subMap[sl.id] = i; return { id: i, name: sl.name } })
-    db.swimlanes.push({ id: laneId, name: src.repo, color: '#6E5494', subLanes, sourceSystem: src.id, hidden: false })
+    db.swimlanes.push({ id: laneId, name: src.repo, color: '#6E5494', subLanes, sourceSystem: src.id, sourceKind: src.provider || 'github', hidden: false })
     const ext = `https://github.com/${src.owner}/${src.repo}`, now = new Date().toISOString()
     for (const it of built.items) {
       const { _extId, _sub, ...rest } = it

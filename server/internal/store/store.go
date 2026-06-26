@@ -39,8 +39,9 @@ type Swimlane struct {
 	Name         string    `json:"name"`
 	Color        string    `json:"color"`
 	SubLanes     []SubLane `json:"subLanes"`
-	SourceSystem *string   `json:"sourceSystem"` // set => mirrored from a subscription (read-only)
-	Hidden       bool      `json:"hidden"`       // consumer-local: hidden from the board
+	SourceSystem *string   `json:"sourceSystem"`         // set => mirrored from a source (read-only)
+	SourceKind   *string   `json:"sourceKind,omitempty"` // github | gitea | gitlab | subscription | …
+	Hidden       bool      `json:"hidden"`               // consumer-local: hidden from the board
 }
 
 // Item is a milestone or event. JSON keys mirror the existing frontend store so
@@ -91,14 +92,14 @@ const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why
 func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 	p := Plan{Swimlanes: []Swimlane{}, Milestones: []Item{}, Links: []Link{}}
 
-	swRows, err := s.pool.Query(ctx, `SELECT id, name, color, source_system, hidden FROM swimlane WHERE workspace_id = $1 ORDER BY sort_order, name`, ws)
+	swRows, err := s.pool.Query(ctx, `SELECT id, name, color, source_system, source_kind, hidden FROM swimlane WHERE workspace_id = $1 ORDER BY sort_order, name`, ws)
 	if err != nil {
 		return p, err
 	}
 	idx := map[string]int{}
 	for swRows.Next() {
 		var sw Swimlane
-		if err := swRows.Scan(&sw.ID, &sw.Name, &sw.Color, &sw.SourceSystem, &sw.Hidden); err != nil {
+		if err := swRows.Scan(&sw.ID, &sw.Name, &sw.Color, &sw.SourceSystem, &sw.SourceKind, &sw.Hidden); err != nil {
 			swRows.Close()
 			return p, err
 		}
@@ -311,8 +312,14 @@ func (s *Store) CreateSwimlane(ctx context.Context, ws, id, name, color string) 
 }
 
 func (s *Store) UpdateSwimlane(ctx context.Context, ws, id string, name, color *string) error {
-	if err := s.ensureSwimlaneUnlocked(ctx, ws, id); err != nil {
+	// A mirrored lane's name belongs to its source, but the consumer may recolour
+	// it locally (the colour then survives re-sync). So block only a name change.
+	src, err := s.swimlaneSource(ctx, ws, id)
+	if err != nil {
 		return err
+	}
+	if src != nil && name != nil {
+		return ErrLocked
 	}
 	ct, err := s.pool.Exec(ctx,
 		`UPDATE swimlane SET name = COALESCE($2, name), color = COALESCE($3, color) WHERE id = $1 AND workspace_id = $4`,
@@ -340,14 +347,21 @@ func (s *Store) DeleteSwimlane(ctx context.Context, ws, id string) error {
 	return nil
 }
 
-// ensureSwimlaneUnlocked rejects edits to mirrored (external) swimlanes — like
-// items, the source subscription is master. Native lanes pass.
-func (s *Store) ensureSwimlaneUnlocked(ctx context.Context, ws, id string) error {
+// swimlaneSource returns a lane's source_system (nil for a native lane),
+// or ErrNotFound if the lane doesn't exist in this workspace.
+func (s *Store) swimlaneSource(ctx context.Context, ws, id string) (*string, error) {
 	var src *string
 	err := s.pool.QueryRow(ctx, `SELECT source_system FROM swimlane WHERE id = $1 AND workspace_id = $2`, id, ws).Scan(&src)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
+	return src, err
+}
+
+// ensureSwimlaneUnlocked rejects edits to mirrored (external) swimlanes — like
+// items, the source is master. Native lanes pass.
+func (s *Store) ensureSwimlaneUnlocked(ctx context.Context, ws, id string) error {
+	src, err := s.swimlaneSource(ctx, ws, id)
 	if err != nil {
 		return err
 	}
@@ -477,6 +491,10 @@ func (s *Store) ReorderSubLanes(ctx context.Context, ws string, ids []string) er
 // ── Items ───────────────────────────────────────────────────────────────────
 
 func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error) {
+	// A mirrored (read-only) swimlane only gets its items from its source.
+	if err := s.ensureSwimlaneUnlocked(ctx, ws, it.SwimlaneID); err != nil {
+		return it, err
+	}
 	defaultsForItem(&it)
 	whenV, startV, endV, err := itemDates(it)
 	if err != nil {

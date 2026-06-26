@@ -152,7 +152,7 @@ func (s *Store) SyncGitHubSource(ctx context.Context, ws, id string) error {
 		s.markGitHubSync(ctx, ws, id, "error: "+ferr.Error())
 		return ferr
 	}
-	if err := s.applyMirror(ctx, ws, id, cfg.htmlURL, wire); err != nil {
+	if err := s.applyMirror(ctx, ws, id, cfg.htmlURL, cfg.provider, wire); err != nil {
 		s.markGitHubSync(ctx, ws, id, "error: "+err.Error())
 		return err
 	}
