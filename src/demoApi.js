@@ -195,10 +195,18 @@ async function ghSync(src) {
 }
 
 export const demoApi = {
-  // auth (the demo is an open, editable sandbox)
+  // auth (the demo is an open, editable sandbox; no real accounts/roles)
   me: () => ok({ authenticated: true }),
   login: () => ok({ authenticated: true }),
   logout: () => ok({ authenticated: false }),
+  changeOwnPassword: () => ok(),
+
+  // users — not available in the backend-less demo (admin UI stays hidden)
+  listUsers: () => ok({ users: [] }),
+  createUser: () => Promise.reject(new Error('User management is unavailable in the demo')),
+  setUserRole: () => ok(),
+  setUserPassword: () => ok(),
+  deleteUser: () => ok(),
 
   // Return clones so the reactive store never shares array refs with the db
   // (otherwise an optimistic push + the db push would duplicate the item).
