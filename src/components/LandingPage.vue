@@ -1,19 +1,35 @@
 <template>
   <div class="lp">
-    <!-- top bar -->
-    <header class="lp-top">
-      <div class="lp-brand">
-        <span class="lp-logo">▦</span>
-        <span class="lp-title">ATLAS</span>
-        <span class="lp-tag">explore plans</span>
-      </div>
-      <div class="lp-actions">
-        <button class="lp-btn ghost" :title="theme === 'dark' ? 'Light mode' : 'Dark mode'" @click="toggleTheme">{{ theme === 'dark' ? '☀' : '☾' }}</button>
-        <template v-if="session.authenticated">
-          <button v-if="workspace.ownSlug" class="lp-btn" @click="goTo(workspace.ownSlug)">My plan</button>
-          <button class="lp-btn ghost" @click="$emit('logout')">Log out</button>
-        </template>
-        <button v-else class="lp-btn" @click="$emit('login')">Log in</button>
+    <!-- top bar — matches the app header (TheHeader.vue) -->
+    <header class="header">
+      <div class="header-inner">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              <rect x="2" y="2" width="8" height="8" rx="2" fill="white" opacity="0.9"/>
+              <rect x="12" y="2" width="8" height="8" rx="2" fill="white" opacity="0.6"/>
+              <rect x="2" y="12" width="8" height="8" rx="2" fill="white" opacity="0.6"/>
+              <rect x="12" y="12" width="8" height="8" rx="2" fill="white" opacity="0.35"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-title">ATLAS</span>
+            <span class="brand-ver">v{{ version }}</span>
+          </div>
+          <span class="brand-tag">explore plans</span>
+        </div>
+
+        <div class="header-right">
+          <button class="hdr-icon-btn" :title="theme === 'dark' ? 'Light mode' : 'Dark mode'" @click="toggleTheme">
+            <Sun v-if="theme === 'dark'" :size="16" />
+            <Moon v-else :size="16" />
+          </button>
+          <template v-if="session.authenticated">
+            <button v-if="workspace.ownSlug" class="btn-manage" @click="goTo(workspace.ownSlug)">My plan</button>
+            <button class="btn-manage" @click="$emit('logout')">Log out</button>
+          </template>
+          <button v-else class="btn-manage" @click="$emit('login')">Log in</button>
+        </div>
       </div>
     </header>
 
@@ -42,10 +58,14 @@
 
 <script setup>
 import { ref, computed, onMounted, h } from 'vue'
+import { Sun, Moon } from 'lucide-vue-next'
 import { api } from '../api.js'
 import { session, workspace, settings, toggleTheme } from '../stores/useAppStore.js'
+import { APP_VERSION } from '../version.js'
 
 defineEmits(['login', 'logout'])
+
+const version = APP_VERSION
 
 const plans = ref([])
 const ready = ref(false)
@@ -102,18 +122,28 @@ const PlanCard = {
 
 <style scoped>
 .lp { min-height: 100vh; display: flex; flex-direction: column; background: var(--clr-bg); }
-.lp-top { display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 24px; border-bottom: 1px solid var(--clr-border-light); }
-.lp-brand { display: flex; align-items: baseline; gap: 8px; }
-.lp-logo { font-size: 18px; color: var(--clr-accent); }
-.lp-title { font-size: 18px; font-weight: 800; letter-spacing: 0.5px; color: var(--clr-text); }
-.lp-tag { font-size: 12.5px; color: var(--clr-text-3); }
-.lp-actions { display: flex; gap: 8px; align-items: center; }
-.lp-btn { padding: 7px 14px; font-size: 13px; font-weight: 600; color: #fff;
-  background: var(--clr-accent); border-radius: var(--r-md); transition: background 0.15s; }
-.lp-btn:hover { background: var(--clr-accent-hover); }
-.lp-btn.ghost { color: var(--clr-text-2); background: transparent; border: 1px solid var(--clr-border-light); }
-.lp-btn.ghost:hover { background: var(--clr-surface); }
+
+/* Header — identical to TheHeader.vue so the landing matches the app. */
+.header { background: var(--clr-header); position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.06), var(--sh-md); }
+.header-inner { display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 64px; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-icon { width: 38px; height: 38px; background: rgba(255,255,255,0.08); border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.1); flex-shrink: 0; }
+.brand-text { display: flex; flex-direction: column; gap: 1px; }
+.brand-title { font-size: 15px; font-weight: 600; color: #FFFFFF; letter-spacing: -0.2px; }
+.brand-ver { font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.4); letter-spacing: 0.3px; }
+.brand-tag { font-size: 12.5px; color: rgba(255,255,255,0.5); padding-left: 12px; border-left: 1px solid rgba(255,255,255,0.12); }
+.header-right { display: flex; align-items: center; gap: 8px; }
+.hdr-icon-btn { width: 32px; height: 32px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 100px; color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12); transition: background 0.15s, color 0.15s; }
+.hdr-icon-btn:hover { background: rgba(255,255,255,0.14); color: #FFFFFF; }
+.btn-manage { display: inline-flex; align-items: center; gap: 7px; height: 32px; box-sizing: border-box; padding: 0 14px;
+  font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 100px; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.btn-manage:hover { background: rgba(255,255,255,0.14); color: #FFFFFF; border-color: rgba(255,255,255,0.2); }
+
 .lp-body { flex: 1; max-width: 1080px; width: 100%; margin: 0 auto; padding: 28px 24px 48px; }
 .lp-section { margin-bottom: 32px; }
 .lp-h { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
