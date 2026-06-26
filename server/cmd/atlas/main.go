@@ -87,7 +87,7 @@ func runSeed(cfg config.Config) {
 	must(err)
 	defer pool.Close()
 
-	n, err := seed.Run(context.Background(), store.New(pool))
+	n, err := seed.Run(context.Background(), store.New(pool), store.DefaultWorkspaceID)
 	must(err)
 	fmt.Printf("seed complete (%d swimlanes present)\n", n)
 }

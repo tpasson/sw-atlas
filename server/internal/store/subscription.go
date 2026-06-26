@@ -28,15 +28,15 @@ type Subscription struct {
 	CreatedAt       string  `json:"createdAt"`
 }
 
-func (s *Store) CreateSubscription(ctx context.Context, id, label, remoteURL, token string, interval int) (Subscription, error) {
+func (s *Store) CreateSubscription(ctx context.Context, ws, id, label, remoteURL, token string, interval int) (Subscription, error) {
 	if interval <= 0 {
 		interval = 300
 	}
 	var ca time.Time
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO subscription (id, source_label, remote_url, token, interval_seconds)
-		 VALUES ($1, $2, $3, $4, $5) RETURNING created_at`,
-		id, label, remoteURL, token, interval).Scan(&ca)
+		`INSERT INTO subscription (id, source_label, remote_url, token, interval_seconds, workspace_id)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING created_at`,
+		id, label, remoteURL, token, interval, ws).Scan(&ca)
 	if err != nil {
 		return Subscription{}, err
 	}
@@ -60,9 +60,9 @@ func scanSubscription(row pgx.Row) (Subscription, error) {
 	return sub, nil
 }
 
-func (s *Store) ListSubscriptions(ctx context.Context) ([]Subscription, error) {
+func (s *Store) ListSubscriptions(ctx context.Context, ws string) ([]Subscription, error) {
 	out := []Subscription{}
-	rows, err := s.pool.Query(ctx, `SELECT `+subColumns+` FROM subscription ORDER BY created_at DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT `+subColumns+` FROM subscription WHERE workspace_id = $1 ORDER BY created_at DESC`, ws)
 	if err != nil {
 		return out, err
 	}
@@ -77,16 +77,16 @@ func (s *Store) ListSubscriptions(ctx context.Context) ([]Subscription, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) GetSubscription(ctx context.Context, id string) (Subscription, error) {
-	sub, err := scanSubscription(s.pool.QueryRow(ctx, `SELECT `+subColumns+` FROM subscription WHERE id = $1`, id))
+func (s *Store) GetSubscription(ctx context.Context, ws, id string) (Subscription, error) {
+	sub, err := scanSubscription(s.pool.QueryRow(ctx, `SELECT `+subColumns+` FROM subscription WHERE id = $1 AND workspace_id = $2`, id, ws))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Subscription{}, ErrNotFound
 	}
 	return sub, err
 }
 
-func (s *Store) SetSubscriptionPaused(ctx context.Context, id string, paused bool) error {
-	ct, err := s.pool.Exec(ctx, `UPDATE subscription SET paused = $2 WHERE id = $1`, id, paused)
+func (s *Store) SetSubscriptionPaused(ctx context.Context, ws, id string, paused bool) error {
+	ct, err := s.pool.Exec(ctx, `UPDATE subscription SET paused = $2 WHERE id = $1 AND workspace_id = $3`, id, paused, ws)
 	if err != nil {
 		return err
 	}
@@ -97,20 +97,20 @@ func (s *Store) SetSubscriptionPaused(ctx context.Context, id string, paused boo
 }
 
 // DeleteSubscription removes the subscription and everything it mirrored.
-func (s *Store) DeleteSubscription(ctx context.Context, id string) error {
+func (s *Store) DeleteSubscription(ctx context.Context, ws, id string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	// Deleting the external lanes cascades their sub-lanes/items/links.
-	if _, err := tx.Exec(ctx, `DELETE FROM swimlane WHERE source_system = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM swimlane WHERE source_system = $1 AND workspace_id = $2`, id, ws); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM item WHERE source_system = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM item WHERE source_system = $1 AND workspace_id = $2`, id, ws); err != nil {
 		return err
 	}
-	ct, err := tx.Exec(ctx, `DELETE FROM subscription WHERE id = $1`, id)
+	ct, err := tx.Exec(ctx, `DELETE FROM subscription WHERE id = $1 AND workspace_id = $2`, id, ws)
 	if err != nil {
 		return err
 	}
@@ -135,9 +135,9 @@ type subWire struct {
 
 // SyncSubscription polls the remote feed (sending If-None-Match) and mirrors it
 // locally. A 304 is a cheap no-op. The outcome is recorded in last_status.
-func (s *Store) SyncSubscription(ctx context.Context, id string) error {
+func (s *Store) SyncSubscription(ctx context.Context, ws, id string) error {
 	var remoteURL, token, etag string
-	err := s.pool.QueryRow(ctx, `SELECT remote_url, token, etag FROM subscription WHERE id = $1`, id).
+	err := s.pool.QueryRow(ctx, `SELECT remote_url, token, etag FROM subscription WHERE id = $1 AND workspace_id = $2`, id, ws).
 		Scan(&remoteURL, &token, &etag)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -148,32 +148,32 @@ func (s *Store) SyncSubscription(ctx context.Context, id string) error {
 
 	body, newEtag, changed, ferr := fetchFeed(ctx, remoteURL, token, etag)
 	if ferr != nil {
-		s.markSync(ctx, id, "", "error: "+ferr.Error())
+		s.markSync(ctx, ws, id, "", "error: "+ferr.Error())
 		return ferr
 	}
 	if !changed {
-		s.markSync(ctx, id, etag, "ok (unchanged)")
+		s.markSync(ctx, ws, id, etag, "ok (unchanged)")
 		return nil
 	}
 	var wire subWire
 	if err := json.Unmarshal(body, &wire); err != nil {
-		s.markSync(ctx, id, etag, "error: invalid feed")
+		s.markSync(ctx, ws, id, etag, "error: invalid feed")
 		return err
 	}
-	if err := s.applyMirror(ctx, id, remoteURL, wire); err != nil {
-		s.markSync(ctx, id, etag, "error: "+err.Error())
+	if err := s.applyMirror(ctx, ws, id, remoteURL, wire); err != nil {
+		s.markSync(ctx, ws, id, etag, "error: "+err.Error())
 		return err
 	}
-	s.markSync(ctx, id, newEtag, "ok")
+	s.markSync(ctx, ws, id, newEtag, "ok")
 	return nil
 }
 
-func (s *Store) markSync(ctx context.Context, id, etag, status string) {
+func (s *Store) markSync(ctx context.Context, ws, id, etag, status string) {
 	if etag != "" {
-		_, _ = s.pool.Exec(ctx, `UPDATE subscription SET etag = $2, last_status = $3, last_synced_at = now() WHERE id = $1`, id, etag, status)
+		_, _ = s.pool.Exec(ctx, `UPDATE subscription SET etag = $2, last_status = $3, last_synced_at = now() WHERE id = $1 AND workspace_id = $4`, id, etag, status, ws)
 		return
 	}
-	_, _ = s.pool.Exec(ctx, `UPDATE subscription SET last_status = $2, last_synced_at = now() WHERE id = $1`, id, status)
+	_, _ = s.pool.Exec(ctx, `UPDATE subscription SET last_status = $2, last_synced_at = now() WHERE id = $1 AND workspace_id = $3`, id, status, ws)
 }
 
 // fetchFeed GETs <base>/api/shared with the bearer token and an optional ETag.
@@ -216,7 +216,7 @@ func fetchFeed(ctx context.Context, base, token, etag string) (body []byte, newE
 // applyMirror reconciles the feed into local mirrored entities in one tx.
 // External lanes are upserted (so the consumer's local order + hidden flag
 // survive a re-sync); their sub-lanes/items/links are fully replaced.
-func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire subWire) error {
+func (s *Store) applyMirror(ctx context.Context, ws, subID, remoteURL string, wire subWire) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -224,7 +224,7 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 	defer tx.Rollback(ctx)
 
 	existing := map[string]string{} // remote lane id → local lane id
-	rows, err := tx.Query(ctx, `SELECT external_id, id FROM swimlane WHERE source_system = $1`, subID)
+	rows, err := tx.Query(ctx, `SELECT external_id, id FROM swimlane WHERE source_system = $1 AND workspace_id = $2`, subID, ws)
 	if err != nil {
 		return err
 	}
@@ -251,15 +251,15 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 		}
 		lid, ok := existing[sw.ID]
 		if ok {
-			if _, err := tx.Exec(ctx, `UPDATE swimlane SET name = $2, color = $3 WHERE id = $1`, lid, sw.Name, color); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE swimlane SET name = $2, color = $3 WHERE id = $1 AND workspace_id = $4`, lid, sw.Name, color, ws); err != nil {
 				return err
 			}
 		} else {
 			lid = uuid.NewString()
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO swimlane (id, name, color, sort_order, source_system, external_id)
-				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane), $4, $5)`,
-				lid, sw.Name, color, subID, sw.ID); err != nil {
+				`INSERT INTO swimlane (id, name, color, sort_order, source_system, external_id, workspace_id)
+				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane WHERE workspace_id = $6), $4, $5, $6)`,
+				lid, sw.Name, color, subID, sw.ID, ws); err != nil {
 				return err
 			}
 		}
@@ -267,14 +267,14 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 	}
 	for ext, lid := range existing {
 		if !seen[ext] {
-			if _, err := tx.Exec(ctx, `DELETE FROM swimlane WHERE id = $1`, lid); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM swimlane WHERE id = $1 AND workspace_id = $2`, lid, ws); err != nil {
 				return err
 			}
 		}
 	}
 
 	// Replace this subscription's items + the kept lanes' sub-lanes.
-	if _, err := tx.Exec(ctx, `DELETE FROM item WHERE source_system = $1`, subID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM item WHERE source_system = $1 AND workspace_id = $2`, subID, ws); err != nil {
 		return err
 	}
 	laneIDs := make([]string, 0, len(laneLocal))
@@ -282,7 +282,7 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 		laneIDs = append(laneIDs, lid)
 	}
 	if len(laneIDs) > 0 {
-		if _, err := tx.Exec(ctx, `DELETE FROM sub_lane WHERE swimlane_id = ANY($1)`, laneIDs); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM sub_lane WHERE swimlane_id = ANY($1) AND workspace_id = $2`, laneIDs, ws); err != nil {
 			return err
 		}
 	}
@@ -294,9 +294,9 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 			nsid := uuid.NewString()
 			subLocal[sub.ID] = nsid
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO sub_lane (id, swimlane_id, name, sort_order)
-				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sub_lane WHERE swimlane_id = $2))`,
-				nsid, lid, sub.Name); err != nil {
+				`INSERT INTO sub_lane (id, swimlane_id, name, sort_order, workspace_id)
+				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sub_lane WHERE workspace_id = $4 AND swimlane_id = $2), $4)`,
+				nsid, lid, sub.Name, ws); err != nil {
 				return err
 			}
 		}
@@ -323,11 +323,11 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 		nid := uuid.NewString()
 		itemLocal[it.ID] = nid
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO item (`+itemColumns+`)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+			`INSERT INTO item (`+itemColumns+`, workspace_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
 			nid, lid, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 			whenV, it.Kind, it.Marker, startV, endV, it.Color,
-			subID, it.ID, remoteURL, now, it.Maturity, it.Progress, it.ScmURL); err != nil {
+			subID, it.ID, remoteURL, now, it.Maturity, it.Progress, it.ScmURL, ws); err != nil {
 			return err
 		}
 	}
@@ -339,12 +339,12 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 			continue
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO link (a_item_id, b_item_id)
-			 SELECT $1, $2
+			`INSERT INTO link (a_item_id, b_item_id, workspace_id)
+			 SELECT $1, $2, $3
 			 WHERE NOT EXISTS (
-			   SELECT 1 FROM link WHERE (a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1)
+			   SELECT 1 FROM link WHERE workspace_id = $3 AND ((a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1))
 			 )`,
-			a, b); err != nil {
+			a, b, ws); err != nil {
 			return err
 		}
 	}
@@ -356,21 +356,22 @@ func (s *Store) applyMirror(ctx context.Context, subID, remoteURL string, wire s
 // Used by the background poller.
 func (s *Store) SyncDueSubscriptions(ctx context.Context) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id FROM subscription
+		`SELECT workspace_id, id FROM subscription
 		 WHERE paused = false
 		   AND (last_synced_at IS NULL OR last_synced_at < now() - make_interval(secs => interval_seconds))`)
 	if err != nil {
 		return
 	}
-	var ids []string
+	type due struct{ ws, id string }
+	var pairs []due
 	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		var d due
+		if rows.Scan(&d.ws, &d.id) == nil {
+			pairs = append(pairs, d)
 		}
 	}
 	rows.Close()
-	for _, id := range ids {
-		_ = s.SyncSubscription(ctx, id)
+	for _, d := range pairs {
+		_ = s.SyncSubscription(ctx, d.ws, d.id)
 	}
 }
