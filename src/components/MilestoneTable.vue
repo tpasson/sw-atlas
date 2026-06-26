@@ -191,7 +191,7 @@
               </template>
 
               <span
-                v-if="!props.readOnly && addHint.key === rowKey(g.row) && !hoveredMs && !tooltip.visible"
+                v-if="!props.readOnly && !g.row.swimlane.sourceSystem && addHint.key === rowKey(g.row) && !hoveredMs && !tooltip.visible"
                 class="track-add-hint"
                 :style="{ left: addHint.x + 'px' }"
               >+</span>
@@ -730,6 +730,8 @@ const weekLineDivs = computed(() => {
 function onTrackClick(row, e) {
   // A popup is open → this click just dismisses it (don't also trigger "+" add).
   if (tooltip.visible) { closeTooltip(); return }
+  // Synced (read-only) lanes only get their items from their source.
+  if (row.swimlane.sourceSystem) return
   const rect = e.currentTarget.getBoundingClientRect()
   const x = e.clientX - rect.left
   if (x > MONTHS_W.value) return   // ignore clicks in the empty right gutter

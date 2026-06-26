@@ -114,7 +114,7 @@
                         @keyup.escape="cancelEdit"
                       />
                       <span v-else class="lane-name" @dblclick="!sw.sourceSystem && startEdit(sw)">{{ sw.name }}</span>
-                      <span v-if="sw.sourceSystem" class="ext-badge" title="Mirrored from a subscription — read-only">synced</span>
+                      <span v-if="sw.sourceSystem" class="ext-badge" :title="sourceTitle(sw)">{{ sourceBadge(sw) }}</span>
 
                       <div class="lane-actions">
                         <button class="icon-btn" :title="sw.hidden ? 'Show on board' : 'Hide from board'" @click="setLaneHidden(sw.id, !sw.hidden)">
@@ -139,8 +139,8 @@
                       </div>
                     </div>
 
-                    <!-- Row 2: color swatches (own areas only) -->
-                    <div v-if="!sw.sourceSystem" class="lane-colors">
+                    <!-- Row 2: color swatches (own colour even for synced lanes — it survives re-sync) -->
+                    <div class="lane-colors">
                       <button
                         v-for="c in swatchColors"
                         :key="c"
@@ -586,6 +586,14 @@ defineEmits(['close'])
 const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 
 const tab = ref('areas')
+
+// Label a mirrored lane by what it's synced from (GitHub/Gitea/… or a subscription).
+const SOURCE_LABELS = { github: 'GitHub', gitea: 'Gitea', gitlab: 'GitLab', bitbucket: 'Bitbucket', subscription: 'Subscribed' }
+function sourceBadge(sw) { return SOURCE_LABELS[sw.sourceKind] || 'Synced' }
+function sourceTitle(sw) {
+  const what = sw.sourceKind && sw.sourceKind !== 'subscription' ? `a ${sourceBadge(sw)} repository` : 'a subscription'
+  return `Mirrored from ${what} — its items are read-only, but you can recolour and reorder the lane.`
+}
 
 // ── Areas tab: drag & drop reorder (areas + sub-areas) ──────────────────────
 // dragKind guards against the two nested drags interfering (drag events bubble).
