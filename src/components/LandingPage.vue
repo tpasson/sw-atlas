@@ -4,18 +4,20 @@
     <header class="header">
       <div class="header-inner">
         <div class="brand">
-          <div class="brand-icon">
-            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-              <rect x="2" y="2" width="8" height="8" rx="2" fill="white" opacity="0.9"/>
-              <rect x="12" y="2" width="8" height="8" rx="2" fill="white" opacity="0.6"/>
-              <rect x="2" y="12" width="8" height="8" rx="2" fill="white" opacity="0.6"/>
-              <rect x="12" y="12" width="8" height="8" rx="2" fill="white" opacity="0.35"/>
-            </svg>
-          </div>
-          <div class="brand-text">
-            <span class="brand-title">ATLAS</span>
-            <span class="brand-ver">v{{ version }}</span>
-          </div>
+          <button class="brand-btn" title="About ATLAS" @click="$emit('about')">
+            <div class="brand-icon">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                <rect x="2" y="2" width="8" height="8" rx="2" fill="white" opacity="0.9"/>
+                <rect x="12" y="2" width="8" height="8" rx="2" fill="white" opacity="0.6"/>
+                <rect x="2" y="12" width="8" height="8" rx="2" fill="white" opacity="0.6"/>
+                <rect x="12" y="12" width="8" height="8" rx="2" fill="white" opacity="0.35"/>
+              </svg>
+            </div>
+            <div class="brand-text">
+              <span class="brand-title">ATLAS</span>
+              <span class="brand-ver">v{{ version }}</span>
+            </div>
+          </button>
           <span class="brand-tag">explore plans</span>
         </div>
 
@@ -63,7 +65,7 @@ import { api } from '../api.js'
 import { session, workspace, settings, toggleTheme } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 
-defineEmits(['login', 'logout'])
+defineEmits(['login', 'logout', 'about'])
 
 const version = APP_VERSION
 
@@ -128,6 +130,8 @@ const PlanCard = {
   box-shadow: 0 1px 0 rgba(255,255,255,0.06), var(--sh-md); }
 .header-inner { display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 64px; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-btn { display: flex; align-items: center; gap: 12px; background: none; padding: 4px; margin: -4px; border-radius: 10px; transition: background 0.15s; }
+.brand-btn:hover { background: rgba(255,255,255,0.07); }
 .brand-icon { width: 38px; height: 38px; background: rgba(255,255,255,0.08); border-radius: 10px;
   display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.1); flex-shrink: 0; }
 .brand-text { display: flex; flex-direction: column; gap: 1px; }

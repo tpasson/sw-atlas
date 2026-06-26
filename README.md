@@ -11,10 +11,10 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](deploy/docker-compose.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing)
-[![Status: Stable](https://img.shields.io/badge/status-stable-brightgreen.svg)](#-roadmap)
+[![Status: Stable](https://img.shields.io/badge/status-stable-brightgreen.svg)](https://github.com/tpasson/sw-atlas/issues)
 [![Release](https://img.shields.io/github/v/release/tpasson/sw-atlas)](https://github.com/tpasson/sw-atlas/releases)
 
-[**🚀 Live Demo**](https://tpasson.github.io/sw-atlas/) · [Features](#-features) · [Roadmap](#%EF%B8%8F-roadmap) · [Getting Started](#-getting-started) · [Contributing](#-contributing)
+[**🚀 Live Demo**](https://tpasson.github.io/sw-atlas/) · [Features](#-features) · [Getting Started](#-getting-started) · [Contributing](#-contributing)
 
 </div>
 
@@ -28,28 +28,39 @@ Work is organized into **swimlanes** and **sub-lanes** on a month/year timeline.
 
 ATLAS is **general-purpose** and not tied to any one domain: use the same timeline for product roadmaps, delivery plans, go-to-market calendars, release trains or any program of work that benefits from a shared, date-anchored view.
 
-> **Project status:** ATLAS is a collaborative **client–server** application — a Vue SPA backed by a Go API, PostgreSQL, editor authentication and a self-hostable Docker deployment — stable as of **v1.0.0**. See the [Roadmap](#%EF%B8%8F-roadmap) for what's live today versus what's still coming (export & project-plan sync).
+> **Project status:** ATLAS is a collaborative, **multi-user** client–server application — a Vue SPA backed by a Go API and PostgreSQL, with admin-managed accounts and roles, per-user workspaces (each at its own `/{username}` URL), per-workspace public/private visibility, plan sharing & publishing between users, repository (GitHub/Gitea) import, and a self-hostable Docker deployment. See the [Releases](https://github.com/tpasson/sw-atlas/releases) page for the current version and changelog, and the [open issues](https://github.com/tpasson/sw-atlas/issues) for what's planned.
 
 ## ✨ Features
 
 ### Available today
+
+**Planning & visualization**
 - 📊 **Date-anchored timeline** — swimlanes & sub-lanes across fixed months and years, with a sticky header and lane packing
-- 🧭 **Milestones** with rich detail: *What / Why / Where / Who / When*
-- 🎯 **Events as bars** that span a period, with configurable markers (diamond, circle, cone, flag)
+- 🧭 **Milestones** with rich detail (*What / Why / Where / Who / When*), **maturity** stages and **progress**
+- 🎯 **Events as bars** that span a period, with a configurable marker library
 - 🔗 **Dependency links** between items, highlighted on hover
 - 🏷️ **Groups** — color-coded groupings with a legend
-- 🖱️ **Click-to-inspect** details; quick add/edit via modals
-- 🔎 **Zoom** and year navigation
-- 👁️ **Read-only mode** for sharing
 - 🧬 **Baselines** — save named snapshots and compare any baseline against the live plan (added / moved / removed, with counts)
-- 🗄️ **Backend + PostgreSQL** — a true single source of truth for the whole team
-- 🔐 **Editor login** with a global *public-read* switch (open to everyone, or editors-only at the flip of a toggle)
-- 🐳 **Self-hostable** via Docker Compose, or run the browser-only build with local persistence
+- 🔎 **Zoom** and year navigation; per-workspace display settings that follow your plan across devices
 
-### On the roadmap
-- 📑 **Export & reporting** — PPTX / image export of the timeline
-- 🔄 **Generic project-plan import** (CSV / Excel / ICS, optional API) — imported items stay source-is-master (locked)
-- ⚠️ **Schedule-drift warnings** (in-app) when imported dates shift
+**Multi-user & collaboration**
+- 👥 **Accounts & roles** — an admin manages users (admin / editor); each user gets their own private workspace
+- 🔗 **Per-user dashboards** — every plan lives at its own `/{username}` URL
+- 🔓 **Per-workspace visibility** — make a plan public or private; viewers see it read-only
+- 🧭 **Discovery landing page** — browse all public plans; admins can feature favourites
+- 📡 **Share & publish** — publish a curated slice of your plan and let others on the server (e.g. a shared "team" account) subscribe to it, mirrored read-only and kept in sync — across separate ATLAS instances too (subscribe links)
+
+**Integrations**
+- 🐙 **Repository sources** — pull a GitHub/Gitea repo's releases, tags, issues and pull requests in as a read-only swimlane, placed on the timeline by date; tokens encrypted at rest; per-status colours configurable
+- 🔖 **Source-control badges** on milestones that link back to the commit / PR / release
+
+**Hosting**
+- 🗄️ **Backend + PostgreSQL** — a true single source of truth for the whole team
+- 🐳 **Self-hostable** via Docker Compose (prebuilt multi-arch image), or run the browser-only build with local persistence
+
+### Planned
+
+Planned work is tracked entirely in **[GitHub issues](https://github.com/tpasson/sw-atlas/issues)** — for example export & reporting (PPTX / image), a month view with day columns, generic project-plan import (CSV / Excel / ICS), and live status for synced sources.
 
 ## 📸 Screenshots
 
@@ -80,18 +91,18 @@ Browser (Vue SPA)
 Reverse Proxy (Caddy/nginx) ── TLS, optional SSO/OIDC   [bring your own]
    ▼
 API (Go · chi)
-   ├─ Auth (editor login) + global "public read" switch
-   ├─ Domain API (swimlanes · sub-lanes · items · links · groups)
-   ├─ Baseline & diff service
-   ├─ Import workers (cron) ── generic project-plan import (CSV/Excel/ICS)   [planned · P4]
-   └─ Export service (PPTX / image)                                          [planned · P3]
+   ├─ Auth — accounts & roles, per-user workspaces, per-workspace public/private
+   ├─ Domain API (swimlanes · sub-lanes · items · links · groups · baselines)
+   ├─ Sharing & federation (publish scopes · subscribe & mirror, local or cross-instance)
+   ├─ Repository sources ── GitHub / Gitea import (releases · tags · issues · PRs)
+   └─ Export service (PPTX / image)                                          [planned]
    ▼
 PostgreSQL  +  file storage (exports)
 ```
 
-The collaborative stack — Vue SPA, Go API, PostgreSQL, editor auth and baselines —
-is live as of **v1.0.0**. Import workers and the export service are still on the
-roadmap; the reverse proxy is provided by you in front of the container.
+The collaborative stack — Vue SPA, Go API, PostgreSQL, multi-user accounts,
+sharing/publishing and repository import — is live; the export service is still
+planned. The TLS-terminating reverse proxy is provided by you in front of the container.
 
 ## 🚀 Getting Started
 
@@ -130,9 +141,10 @@ docker compose -f docker-compose.ghcr.yml up -d
 docker compose -f docker-compose.ghcr.yml run --rm app seed
 ```
 
-ATLAS is then at `http://<host>:8080` (or `ATLAS_PORT`). It is publicly
-**read-only** by default — log in with `ATLAS_EDITOR_USERNAME` + your password to
-edit, or to switch it to editors-only.
+ATLAS is then at `http://<host>:8080` (or `ATLAS_PORT`). The `ATLAS_EDITOR_USERNAME`
++ password you set bootstraps the **first admin** account; log in to edit, manage
+users (admin → editor) and set each plan's visibility. New users each get their own
+private workspace at `/{username}`, and `/` shows a directory of the public plans.
 
 **Update later:**
 ```bash
@@ -141,7 +153,7 @@ docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compo
 
 **Public deployment:** put a TLS-terminating reverse proxy (Caddy, Traefik, nginx)
 in front — the container serves plain HTTP on its port. A specific version can be
-pinned by replacing `:latest` with a tag like `:v1.0.0` (created from a `v*` git tag).
+pinned by replacing `:latest` with a release tag (e.g. `:vX.Y.Z`, created from a `v*` git tag).
 
 ### Run from source (Docker)
 
@@ -157,10 +169,9 @@ docker compose up -d --build
 docker compose run --rm app seed                               # optional: load demo data
 ```
 
-The app is then at `http://localhost:8080` (or `ATLAS_PORT`). It is publicly
-**read-only** by default — log in as the editor to make changes or to toggle
-public access off. All settings live in [`deploy/.env.example`](deploy/.env.example)
-and [`server/README.md`](server/README.md).
+The app is then at `http://localhost:8080` (or `ATLAS_PORT`). Log in with the
+bootstrapped admin account to edit and manage users. All settings live in
+[`deploy/.env.example`](deploy/.env.example) and [`server/README.md`](server/README.md).
 
 ### Frontend only (UI development)
 
@@ -201,10 +212,11 @@ sw-atlas/
 │  ├─ api.js                # backend API client (demoApi.js for the Pages demo)
 │  ├─ style.css
 │  ├─ components/
-│  │  ├─ TheHeader.vue      # toolbar: year nav, zoom, baselines, manage
+│  │  ├─ TheHeader.vue      # toolbar: year nav, zoom, baselines, settings
+│  │  ├─ LandingPage.vue    # discovery directory of public plans (the "/" home)
 │  │  ├─ MilestoneTable.vue # the timeline grid
 │  │  ├─ MilestoneModal.vue # add/edit a milestone
-│  │  └─ ManageModal.vue    # swimlanes, sub-lanes, settings
+│  │  └─ ManageModal.vue    # areas · display · sources · sharing · users · account
 │  └─ stores/
 │     └─ useAppStore.js     # reactive client state, synced with the API
 ├─ server/                  # Go backend (chi, pgx, goose)
@@ -213,19 +225,6 @@ sw-atlas/
 ├─ deploy/                  # docker-compose (+ ghcr) & .env example
 └─ dist/                    # production build output (generated)
 ```
-
-## 🗺️ Roadmap
-
-ATLAS is delivered in phases — each phase is independently usable. The full plan
-lives in [`ROADMAP.md`](ROADMAP.md).
-
-- **P0 · Foundation** ✅ — Go backend + PostgreSQL + Docker, editor auth & public-read switch, frontend moved from `localStorage` to the API *(→ the real single source of truth)*
-- **P1 · Visualization** ✅ — milestone vs. event types, time-spanning bars, marker shapes
-- **P2 · Baselines** ✅ — named snapshots with switch & diff (added / moved / removed)
-- **P3 · Export & reporting** — PPTX / image export of the timeline
-- **P4 · Sync & drift** — generic project-plan import (CSV / Excel / ICS, optional API) & schedule-drift warnings
-
-ATLAS stays a **general-purpose** milestone planner, not tied to any one domain.
 
 ## ⚙️ Configuration
 
@@ -242,7 +241,7 @@ Contributions are welcome! To propose a change:
 2. Fork the repo and create a branch (`git checkout -b feature/my-change`).
 3. Commit with clear messages and open a **pull request** against `main`.
 
-Please keep PRs focused and describe the user-facing impact. For larger features, start a discussion in an issue first so we can align on direction (see the [Roadmap](#%EF%B8%8F-roadmap)).
+Please keep PRs focused and describe the user-facing impact. For larger features, start a discussion in an issue first so we can align on direction.
 
 ## 📄 License
 
