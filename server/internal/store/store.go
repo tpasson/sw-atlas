@@ -21,6 +21,10 @@ var (
 	ErrLocked   = errors.New("item is managed by an external source and is read-only")
 )
 
+// DefaultWorkspaceID is the id of the single workspace that holds all data in
+// Slice A of multi-tenancy. Use it instead of bare "default" string literals.
+const DefaultWorkspaceID = "default"
+
 type Store struct{ pool *pgxpool.Pool }
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
@@ -84,10 +88,10 @@ const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why
 
 // ── Plan (read) ─────────────────────────────────────────────────────────────
 
-func (s *Store) GetPlan(ctx context.Context) (Plan, error) {
+func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 	p := Plan{Swimlanes: []Swimlane{}, Milestones: []Item{}, Links: []Link{}}
 
-	swRows, err := s.pool.Query(ctx, `SELECT id, name, color, source_system, hidden FROM swimlane ORDER BY sort_order, name`)
+	swRows, err := s.pool.Query(ctx, `SELECT id, name, color, source_system, hidden FROM swimlane WHERE workspace_id = $1 ORDER BY sort_order, name`, ws)
 	if err != nil {
 		return p, err
 	}
@@ -107,7 +111,7 @@ func (s *Store) GetPlan(ctx context.Context) (Plan, error) {
 		return p, err
 	}
 
-	subRows, err := s.pool.Query(ctx, `SELECT id, swimlane_id, name FROM sub_lane ORDER BY sort_order, name`)
+	subRows, err := s.pool.Query(ctx, `SELECT id, swimlane_id, name FROM sub_lane WHERE workspace_id = $1 ORDER BY sort_order, name`, ws)
 	if err != nil {
 		return p, err
 	}
@@ -127,7 +131,7 @@ func (s *Store) GetPlan(ctx context.Context) (Plan, error) {
 		return p, err
 	}
 
-	itRows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM item ORDER BY year, month, title`)
+	itRows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM item WHERE workspace_id = $1 ORDER BY year, month, title`, ws)
 	if err != nil {
 		return p, err
 	}
@@ -144,7 +148,7 @@ func (s *Store) GetPlan(ctx context.Context) (Plan, error) {
 		return p, err
 	}
 
-	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id FROM link`)
+	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id FROM link WHERE workspace_id = $1`, ws)
 	if err != nil {
 		return p, err
 	}
@@ -198,7 +202,7 @@ type ImportSummary struct {
 // items become native, editable items (Copy-mode — distinct from a live mirror).
 // Items referencing a swimlane absent from the payload, and links with a missing
 // endpoint, are skipped rather than failing the whole import.
-func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
+func (s *Store) ImportPlan(ctx context.Context, ws string, p Plan) (ImportSummary, error) {
 	var sum ImportSummary
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -218,9 +222,9 @@ func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
 			color = "#0A84FF"
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO swimlane (id, name, color, sort_order)
-			 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane))`,
-			nid, sw.Name, color); err != nil {
+			`INSERT INTO swimlane (id, name, color, sort_order, workspace_id)
+			 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane WHERE workspace_id = $4), $4)`,
+			nid, sw.Name, color, ws); err != nil {
 			return sum, err
 		}
 		sum.Swimlanes++
@@ -228,9 +232,9 @@ func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
 			nsid := uuid.NewString()
 			subID[sub.ID] = nsid
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO sub_lane (id, swimlane_id, name, sort_order)
-				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sub_lane WHERE swimlane_id = $2))`,
-				nsid, nid, sub.Name); err != nil {
+				`INSERT INTO sub_lane (id, swimlane_id, name, sort_order, workspace_id)
+				 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sub_lane WHERE workspace_id = $4 AND swimlane_id = $2), $4)`,
+				nsid, nid, sub.Name, ws); err != nil {
 				return sum, err
 			}
 			sum.SubLanes++
@@ -256,11 +260,11 @@ func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
 		nid := uuid.NewString()
 		itID[it.ID] = nid
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO item (`+itemColumns+`)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+			`INSERT INTO item (`+itemColumns+`, workspace_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
 			nid, nsw, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 			whenV, it.Kind, it.Marker, startV, endV, it.Color,
-			nil, nil, nil, nil, it.Maturity, it.Progress, it.ScmURL); err != nil { // provenance stripped → native item
+			nil, nil, nil, nil, it.Maturity, it.Progress, it.ScmURL, ws); err != nil { // provenance stripped → native item
 			return sum, err
 		}
 		sum.Items++
@@ -273,12 +277,12 @@ func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
 			continue
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO link (a_item_id, b_item_id)
-			 SELECT $1, $2
+			`INSERT INTO link (a_item_id, b_item_id, workspace_id)
+			 SELECT $1, $2, $3
 			 WHERE NOT EXISTS (
-			   SELECT 1 FROM link WHERE (a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1)
+			   SELECT 1 FROM link WHERE workspace_id = $3 AND ((a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1))
 			 )`,
-			na, nb); err != nil {
+			na, nb, ws); err != nil {
 			return sum, err
 		}
 		sum.Links++
@@ -292,27 +296,27 @@ func (s *Store) ImportPlan(ctx context.Context, p Plan) (ImportSummary, error) {
 
 // ── Swimlanes ───────────────────────────────────────────────────────────────
 
-func (s *Store) CreateSwimlane(ctx context.Context, id, name, color string) (Swimlane, error) {
+func (s *Store) CreateSwimlane(ctx context.Context, ws, id, name, color string) (Swimlane, error) {
 	if color == "" {
 		color = "#0A84FF"
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO swimlane (id, name, color, sort_order)
-		 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane))`,
-		id, name, color)
+		`INSERT INTO swimlane (id, name, color, sort_order, workspace_id)
+		 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM swimlane WHERE workspace_id = $4), $4)`,
+		id, name, color, ws)
 	if err != nil {
 		return Swimlane{}, err
 	}
 	return Swimlane{ID: id, Name: name, Color: color, SubLanes: []SubLane{}}, nil
 }
 
-func (s *Store) UpdateSwimlane(ctx context.Context, id string, name, color *string) error {
-	if err := s.ensureSwimlaneUnlocked(ctx, id); err != nil {
+func (s *Store) UpdateSwimlane(ctx context.Context, ws, id string, name, color *string) error {
+	if err := s.ensureSwimlaneUnlocked(ctx, ws, id); err != nil {
 		return err
 	}
 	ct, err := s.pool.Exec(ctx,
-		`UPDATE swimlane SET name = COALESCE($2, name), color = COALESCE($3, color) WHERE id = $1`,
-		id, name, color)
+		`UPDATE swimlane SET name = COALESCE($2, name), color = COALESCE($3, color) WHERE id = $1 AND workspace_id = $4`,
+		id, name, color, ws)
 	if err != nil {
 		return err
 	}
@@ -322,11 +326,11 @@ func (s *Store) UpdateSwimlane(ctx context.Context, id string, name, color *stri
 	return nil
 }
 
-func (s *Store) DeleteSwimlane(ctx context.Context, id string) error {
-	if err := s.ensureSwimlaneUnlocked(ctx, id); err != nil {
+func (s *Store) DeleteSwimlane(ctx context.Context, ws, id string) error {
+	if err := s.ensureSwimlaneUnlocked(ctx, ws, id); err != nil {
 		return err
 	}
-	ct, err := s.pool.Exec(ctx, `DELETE FROM swimlane WHERE id = $1`, id)
+	ct, err := s.pool.Exec(ctx, `DELETE FROM swimlane WHERE id = $1 AND workspace_id = $2`, id, ws)
 	if err != nil {
 		return err
 	}
@@ -338,9 +342,9 @@ func (s *Store) DeleteSwimlane(ctx context.Context, id string) error {
 
 // ensureSwimlaneUnlocked rejects edits to mirrored (external) swimlanes — like
 // items, the source subscription is master. Native lanes pass.
-func (s *Store) ensureSwimlaneUnlocked(ctx context.Context, id string) error {
+func (s *Store) ensureSwimlaneUnlocked(ctx context.Context, ws, id string) error {
 	var src *string
-	err := s.pool.QueryRow(ctx, `SELECT source_system FROM swimlane WHERE id = $1`, id).Scan(&src)
+	err := s.pool.QueryRow(ctx, `SELECT source_system FROM swimlane WHERE id = $1 AND workspace_id = $2`, id, ws).Scan(&src)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -355,8 +359,8 @@ func (s *Store) ensureSwimlaneUnlocked(ctx context.Context, id string) error {
 
 // SetSwimlaneHidden toggles a lane's consumer-local visibility (allowed on
 // external lanes — it's a local view preference, not a change to the source).
-func (s *Store) SetSwimlaneHidden(ctx context.Context, id string, hidden bool) error {
-	ct, err := s.pool.Exec(ctx, `UPDATE swimlane SET hidden = $2 WHERE id = $1`, id, hidden)
+func (s *Store) SetSwimlaneHidden(ctx context.Context, ws, id string, hidden bool) error {
+	ct, err := s.pool.Exec(ctx, `UPDATE swimlane SET hidden = $2 WHERE id = $1 AND workspace_id = $3`, id, hidden, ws)
 	if err != nil {
 		return err
 	}
@@ -367,7 +371,7 @@ func (s *Store) SetSwimlaneHidden(ctx context.Context, id string, hidden bool) e
 }
 
 // MoveSwimlane swaps the sort order of a swimlane with its neighbour (dir -1 up, +1 down).
-func (s *Store) MoveSwimlane(ctx context.Context, id string, dir int) error {
+func (s *Store) MoveSwimlane(ctx context.Context, ws, id string, dir int) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -375,29 +379,29 @@ func (s *Store) MoveSwimlane(ctx context.Context, id string, dir int) error {
 	defer tx.Rollback(ctx)
 
 	var cur int
-	if err := tx.QueryRow(ctx, `SELECT sort_order FROM swimlane WHERE id = $1`, id).Scan(&cur); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT sort_order FROM swimlane WHERE id = $1 AND workspace_id = $2`, id, ws).Scan(&cur); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
 
-	q := `SELECT id, sort_order FROM swimlane WHERE sort_order > $1 ORDER BY sort_order ASC LIMIT 1`
+	q := `SELECT id, sort_order FROM swimlane WHERE workspace_id = $2 AND sort_order > $1 ORDER BY sort_order ASC LIMIT 1`
 	if dir < 0 {
-		q = `SELECT id, sort_order FROM swimlane WHERE sort_order < $1 ORDER BY sort_order DESC LIMIT 1`
+		q = `SELECT id, sort_order FROM swimlane WHERE workspace_id = $2 AND sort_order < $1 ORDER BY sort_order DESC LIMIT 1`
 	}
 	var nbID string
 	var nbOrder int
-	if err := tx.QueryRow(ctx, q, cur).Scan(&nbID, &nbOrder); err != nil {
+	if err := tx.QueryRow(ctx, q, cur, ws).Scan(&nbID, &nbOrder); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already at the edge: no-op
 		}
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE swimlane SET sort_order = $2 WHERE id = $1`, id, nbOrder); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE swimlane SET sort_order = $2 WHERE id = $1 AND workspace_id = $3`, id, nbOrder, ws); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE swimlane SET sort_order = $2 WHERE id = $1`, nbID, cur); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE swimlane SET sort_order = $2 WHERE id = $1 AND workspace_id = $3`, nbID, cur, ws); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -405,14 +409,14 @@ func (s *Store) MoveSwimlane(ctx context.Context, id string, dir int) error {
 
 // ReorderSwimlanes sets sort_order to match the given id order (drag & drop).
 // Ids not present are left untouched; the client sends the full ordered list.
-func (s *Store) ReorderSwimlanes(ctx context.Context, ids []string) error {
+func (s *Store) ReorderSwimlanes(ctx context.Context, ws string, ids []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	for i, id := range ids {
-		if _, err := tx.Exec(ctx, `UPDATE swimlane SET sort_order = $2 WHERE id = $1`, id, i); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE swimlane SET sort_order = $2 WHERE id = $1 AND workspace_id = $3`, id, i, ws); err != nil {
 			return err
 		}
 	}
@@ -421,19 +425,19 @@ func (s *Store) ReorderSwimlanes(ctx context.Context, ids []string) error {
 
 // ── Sub-lanes ───────────────────────────────────────────────────────────────
 
-func (s *Store) CreateSubLane(ctx context.Context, swimlaneID, id, name string) (SubLane, error) {
+func (s *Store) CreateSubLane(ctx context.Context, ws, swimlaneID, id, name string) (SubLane, error) {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO sub_lane (id, swimlane_id, name, sort_order)
-		 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sub_lane WHERE swimlane_id = $2))`,
-		id, swimlaneID, name)
+		`INSERT INTO sub_lane (id, swimlane_id, name, sort_order, workspace_id)
+		 VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM sub_lane WHERE workspace_id = $4 AND swimlane_id = $2), $4)`,
+		id, swimlaneID, name, ws)
 	if err != nil {
 		return SubLane{}, err
 	}
 	return SubLane{ID: id, Name: name}, nil
 }
 
-func (s *Store) UpdateSubLane(ctx context.Context, id, name string) error {
-	ct, err := s.pool.Exec(ctx, `UPDATE sub_lane SET name = $2 WHERE id = $1`, id, name)
+func (s *Store) UpdateSubLane(ctx context.Context, ws, id, name string) error {
+	ct, err := s.pool.Exec(ctx, `UPDATE sub_lane SET name = $2 WHERE id = $1 AND workspace_id = $3`, id, name, ws)
 	if err != nil {
 		return err
 	}
@@ -443,8 +447,8 @@ func (s *Store) UpdateSubLane(ctx context.Context, id, name string) error {
 	return nil
 }
 
-func (s *Store) DeleteSubLane(ctx context.Context, id string) error {
-	ct, err := s.pool.Exec(ctx, `DELETE FROM sub_lane WHERE id = $1`, id)
+func (s *Store) DeleteSubLane(ctx context.Context, ws, id string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM sub_lane WHERE id = $1 AND workspace_id = $2`, id, ws)
 	if err != nil {
 		return err
 	}
@@ -456,14 +460,14 @@ func (s *Store) DeleteSubLane(ctx context.Context, id string) error {
 
 // ReorderSubLanes sets sort_order to match the given id order (drag & drop within
 // one swimlane). The client sends the full ordered list of that lane's sub-lanes.
-func (s *Store) ReorderSubLanes(ctx context.Context, ids []string) error {
+func (s *Store) ReorderSubLanes(ctx context.Context, ws string, ids []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	for i, id := range ids {
-		if _, err := tx.Exec(ctx, `UPDATE sub_lane SET sort_order = $2 WHERE id = $1`, id, i); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE sub_lane SET sort_order = $2 WHERE id = $1 AND workspace_id = $3`, id, i, ws); err != nil {
 			return err
 		}
 	}
@@ -472,18 +476,18 @@ func (s *Store) ReorderSubLanes(ctx context.Context, ids []string) error {
 
 // ── Items ───────────────────────────────────────────────────────────────────
 
-func (s *Store) CreateItem(ctx context.Context, it Item) (Item, error) {
+func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error) {
 	defaultsForItem(&it)
 	whenV, startV, endV, err := itemDates(it)
 	if err != nil {
 		return it, err
 	}
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO item (`+itemColumns+`)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+		`INSERT INTO item (`+itemColumns+`, workspace_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
 		it.ID, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 		whenV, it.Kind, it.Marker, startV, endV, it.Color,
-		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL)
+		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, ws)
 	if err != nil {
 		return it, err
 	}
@@ -493,8 +497,8 @@ func (s *Store) CreateItem(ctx context.Context, it Item) (Item, error) {
 // UpdateItem updates the editable fields of a native item. Items with a
 // source_system are rejected with ErrLocked (the source is master). Provenance
 // columns are never changed here.
-func (s *Store) UpdateItem(ctx context.Context, id string, it Item) error {
-	if err := s.ensureUnlocked(ctx, id); err != nil {
+func (s *Store) UpdateItem(ctx context.Context, ws, id string, it Item) error {
+	if err := s.ensureUnlocked(ctx, ws, id); err != nil {
 		return err
 	}
 	defaultsForItem(&it)
@@ -507,24 +511,24 @@ func (s *Store) UpdateItem(ctx context.Context, id string, it Item) error {
 		   swimlane_id=$2, sub_lane_id=$3, year=$4, month=$5, title=$6,
 		   what=$7, why=$8, how=$9, who=$10, when_date=$11,
 		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19
-		 WHERE id=$1`,
+		 WHERE id=$1 AND workspace_id=$20`,
 		id, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title,
 		it.What, it.Why, it.How, it.Who, whenV,
-		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL)
+		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, ws)
 	return err
 }
 
-func (s *Store) DeleteItem(ctx context.Context, id string) error {
-	if err := s.ensureUnlocked(ctx, id); err != nil {
+func (s *Store) DeleteItem(ctx context.Context, ws, id string) error {
+	if err := s.ensureUnlocked(ctx, ws, id); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM item WHERE id = $1`, id)
+	_, err := s.pool.Exec(ctx, `DELETE FROM item WHERE id = $1 AND workspace_id = $2`, id, ws)
 	return err
 }
 
-func (s *Store) ensureUnlocked(ctx context.Context, id string) error {
+func (s *Store) ensureUnlocked(ctx context.Context, ws, id string) error {
 	var src *string
-	err := s.pool.QueryRow(ctx, `SELECT source_system FROM item WHERE id = $1`, id).Scan(&src)
+	err := s.pool.QueryRow(ctx, `SELECT source_system FROM item WHERE id = $1 AND workspace_id = $2`, id, ws).Scan(&src)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -559,32 +563,32 @@ func itemDates(it Item) (whenV, startV, endV interface{}, err error) {
 
 // ── Links ───────────────────────────────────────────────────────────────────
 
-func (s *Store) AddLink(ctx context.Context, a, b string) error {
+func (s *Store) AddLink(ctx context.Context, ws, a, b string) error {
 	if a == b {
 		return nil
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO link (a_item_id, b_item_id)
-		 SELECT $1, $2
+		`INSERT INTO link (a_item_id, b_item_id, workspace_id)
+		 SELECT $1, $2, $3
 		 WHERE NOT EXISTS (
-		   SELECT 1 FROM link WHERE (a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1)
+		   SELECT 1 FROM link WHERE workspace_id = $3 AND ((a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1))
 		 )`,
-		a, b)
+		a, b, ws)
 	return err
 }
 
-func (s *Store) RemoveLink(ctx context.Context, a, b string) error {
+func (s *Store) RemoveLink(ctx context.Context, ws, a, b string) error {
 	_, err := s.pool.Exec(ctx,
-		`DELETE FROM link WHERE (a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1)`,
-		a, b)
+		`DELETE FROM link WHERE workspace_id = $3 AND ((a_item_id=$1 AND b_item_id=$2) OR (a_item_id=$2 AND b_item_id=$1))`,
+		a, b, ws)
 	return err
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
-func (s *Store) GetPublicRead(ctx context.Context) (bool, error) {
+func (s *Store) GetPublicRead(ctx context.Context, ws string) (bool, error) {
 	var v string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'public_read_enabled'`).Scan(&v)
+	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'public_read_enabled' AND workspace_id = $1`, ws).Scan(&v)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return true, nil
 	}
@@ -594,21 +598,21 @@ func (s *Store) GetPublicRead(ctx context.Context) (bool, error) {
 	return v == "true", nil
 }
 
-func (s *Store) SetPublicRead(ctx context.Context, enabled bool) error {
+func (s *Store) SetPublicRead(ctx context.Context, ws string, enabled bool) error {
 	v := "false"
 	if enabled {
 		v = "true"
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO app_setting (key, value) VALUES ('public_read_enabled', $1)
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, v)
+		`INSERT INTO app_setting (workspace_id, key, value) VALUES ($1, 'public_read_enabled', $2)
+		 ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`, ws, v)
 	return err
 }
 
 // GetPalette returns the shared, editor-managed list of custom area colours.
-func (s *Store) GetPalette(ctx context.Context) ([]string, error) {
+func (s *Store) GetPalette(ctx context.Context, ws string) ([]string, error) {
 	var v string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'area_palette'`).Scan(&v)
+	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'area_palette' AND workspace_id = $1`, ws).Scan(&v)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil // never configured → caller seeds defaults
 	}
@@ -623,7 +627,7 @@ func (s *Store) GetPalette(ctx context.Context) ([]string, error) {
 }
 
 // SetPalette replaces the shared custom area-colour palette.
-func (s *Store) SetPalette(ctx context.Context, colors []string) error {
+func (s *Store) SetPalette(ctx context.Context, ws string, colors []string) error {
 	if colors == nil {
 		colors = []string{}
 	}
@@ -632,8 +636,8 @@ func (s *Store) SetPalette(ctx context.Context, colors []string) error {
 		return err
 	}
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO app_setting (key, value) VALUES ('area_palette', $1)
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, string(b))
+		`INSERT INTO app_setting (workspace_id, key, value) VALUES ($1, 'area_palette', $2)
+		 ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`, ws, string(b))
 	return err
 }
 
@@ -646,9 +650,9 @@ type Group struct {
 }
 
 // GetGroups returns the shared item groups.
-func (s *Store) GetGroups(ctx context.Context) ([]Group, error) {
+func (s *Store) GetGroups(ctx context.Context, ws string) ([]Group, error) {
 	var v string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'groups'`).Scan(&v)
+	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'groups' AND workspace_id = $1`, ws).Scan(&v)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []Group{}, nil
 	}
@@ -663,7 +667,7 @@ func (s *Store) GetGroups(ctx context.Context) ([]Group, error) {
 }
 
 // SetGroups replaces the shared item groups.
-func (s *Store) SetGroups(ctx context.Context, groups []Group) error {
+func (s *Store) SetGroups(ctx context.Context, ws string, groups []Group) error {
 	if groups == nil {
 		groups = []Group{}
 	}
@@ -672,15 +676,15 @@ func (s *Store) SetGroups(ctx context.Context, groups []Group) error {
 		return err
 	}
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO app_setting (key, value) VALUES ('groups', $1)
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, string(b))
+		`INSERT INTO app_setting (workspace_id, key, value) VALUES ($1, 'groups', $2)
+		 ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`, ws, string(b))
 	return err
 }
 
 // CountSwimlanes is used by the seed command to avoid double-seeding.
-func (s *Store) CountSwimlanes(ctx context.Context) (int, error) {
+func (s *Store) CountSwimlanes(ctx context.Context, ws string) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM swimlane`).Scan(&n)
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM swimlane WHERE workspace_id = $1`, ws).Scan(&n)
 	return n, err
 }
 

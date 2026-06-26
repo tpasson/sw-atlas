@@ -45,7 +45,8 @@ func (s *Server) createGitHubSource(w http.ResponseWriter, r *http.Request) {
 		in.MaxPerType = 0
 	}
 
-	src, err := s.store.CreateGitHubSource(r.Context(), uuid.NewString(), store.GitHubSourceInput{
+	ws := s.currentWorkspace(r)
+	src, err := s.store.CreateGitHubSource(r.Context(), ws, uuid.NewString(), store.GitHubSourceInput{
 		Owner: owner, Repo: repo, HTMLURL: htmlURL, Provider: provider, APIBase: apiBase, Token: in.Token,
 		Releases: in.IncludeReleases, Tags: in.IncludeTags, Issues: in.IncludeIssues, PRs: in.IncludePrs,
 		StableOnly: in.StableOnly, StateFilter: state, SinceDate: strings.TrimSpace(in.SinceDate), MaxPerType: in.MaxPerType,
@@ -54,8 +55,8 @@ func (s *Server) createGitHubSource(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	_ = s.store.SyncGitHubSource(r.Context(), src.ID)
-	out, err := s.store.GetGitHubSource(r.Context(), src.ID)
+	_ = s.store.SyncGitHubSource(r.Context(), ws, src.ID)
+	out, err := s.store.GetGitHubSource(r.Context(), ws, src.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -64,7 +65,7 @@ func (s *Server) createGitHubSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listGitHubSources(w http.ResponseWriter, r *http.Request) {
-	srcs, err := s.store.ListGitHubSources(r.Context())
+	srcs, err := s.store.ListGitHubSources(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -73,15 +74,16 @@ func (s *Server) listGitHubSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) syncGitHubSource(w http.ResponseWriter, r *http.Request) {
+	ws := s.currentWorkspace(r)
 	id := chi.URLParam(r, "id")
-	if err := s.store.SyncGitHubSource(r.Context(), id); err != nil {
+	if err := s.store.SyncGitHubSource(r.Context(), ws, id); err != nil {
 		if err == store.ErrNotFound {
 			s.fail(w, err)
 			return
 		}
 		// A fetch error is recorded in last_status; still return the source.
 	}
-	out, err := s.store.GetGitHubSource(r.Context(), id)
+	out, err := s.store.GetGitHubSource(r.Context(), ws, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -96,14 +98,15 @@ func (s *Server) setGitHubSourceToken(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	ws := s.currentWorkspace(r)
 	id := chi.URLParam(r, "id")
-	if err := s.store.SetGitHubSourceToken(r.Context(), id, strings.TrimSpace(in.Token)); err != nil {
+	if err := s.store.SetGitHubSourceToken(r.Context(), ws, id, strings.TrimSpace(in.Token)); err != nil {
 		s.fail(w, err)
 		return
 	}
 	// re-sync with the new token so the result is immediate
-	_ = s.store.SyncGitHubSource(r.Context(), id)
-	out, err := s.store.GetGitHubSource(r.Context(), id)
+	_ = s.store.SyncGitHubSource(r.Context(), ws, id)
+	out, err := s.store.GetGitHubSource(r.Context(), ws, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -112,7 +115,7 @@ func (s *Server) setGitHubSourceToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteGitHubSource(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteGitHubSource(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.DeleteGitHubSource(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}

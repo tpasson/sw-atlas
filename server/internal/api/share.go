@@ -42,7 +42,7 @@ func (s *Server) createShareScope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.ID = uuid.NewString()
-	sc, err := s.store.CreateShareScope(r.Context(), in)
+	sc, err := s.store.CreateShareScope(r.Context(), s.currentWorkspace(r), in)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -51,7 +51,7 @@ func (s *Server) createShareScope(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listShareScopes(w http.ResponseWriter, r *http.Request) {
-	scopes, err := s.store.ListShareScopes(r.Context())
+	scopes, err := s.store.ListShareScopes(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -60,7 +60,7 @@ func (s *Server) listShareScopes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getShareScope(w http.ResponseWriter, r *http.Request) {
-	sc, err := s.store.GetShareScope(r.Context(), chi.URLParam(r, "id"))
+	sc, err := s.store.GetShareScope(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -69,7 +69,7 @@ func (s *Server) getShareScope(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteShareScope(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteShareScope(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.DeleteShareScope(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -100,7 +100,7 @@ func (s *Server) createShareToken(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	tok, err := s.store.CreateShareToken(r.Context(), uuid.NewString(), chi.URLParam(r, "id"), hashToken(raw), in.Label, exp)
+	tok, err := s.store.CreateShareToken(r.Context(), s.currentWorkspace(r), uuid.NewString(), chi.URLParam(r, "id"), hashToken(raw), in.Label, exp)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -110,7 +110,7 @@ func (s *Server) createShareToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listShareTokens(w http.ResponseWriter, r *http.Request) {
-	tokens, err := s.store.ListShareTokens(r.Context(), chi.URLParam(r, "id"))
+	tokens, err := s.store.ListShareTokens(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -119,7 +119,7 @@ func (s *Server) listShareTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) revokeShareToken(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.RevokeShareToken(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.RevokeShareToken(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -137,7 +137,7 @@ func (s *Server) sharedFeed(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "missing bearer token")
 		return
 	}
-	scopeID, detail, err := s.store.ResolveToken(r.Context(), hashToken(raw))
+	ws, scopeID, detail, err := s.store.ResolveToken(r.Context(), hashToken(raw))
 	if err != nil {
 		if err == store.ErrInvalidToken {
 			writeErr(w, http.StatusUnauthorized, err.Error())
@@ -146,7 +146,7 @@ func (s *Server) sharedFeed(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	plan, err := s.store.ResolveScopePlan(r.Context(), scopeID, detail)
+	plan, err := s.store.ResolveScopePlan(r.Context(), ws, scopeID, detail)
 	if err != nil {
 		s.fail(w, err)
 		return

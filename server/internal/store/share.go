@@ -37,7 +37,7 @@ type ShareToken struct {
 
 // ── Scopes ──────────────────────────────────────────────────────────────────
 
-func (s *Store) CreateShareScope(ctx context.Context, sc ShareScope) (ShareScope, error) {
+func (s *Store) CreateShareScope(ctx context.Context, ws string, sc ShareScope) (ShareScope, error) {
 	if sc.DetailLevel != "full" {
 		sc.DetailLevel = "timing"
 	}
@@ -49,8 +49,8 @@ func (s *Store) CreateShareScope(ctx context.Context, sc ShareScope) (ShareScope
 
 	var ca time.Time
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO share_scope (id, name, detail_level) VALUES ($1, $2, $3) RETURNING created_at`,
-		sc.ID, sc.Name, sc.DetailLevel).Scan(&ca); err != nil {
+		`INSERT INTO share_scope (id, name, detail_level, workspace_id) VALUES ($1, $2, $3, $4) RETURNING created_at`,
+		sc.ID, sc.Name, sc.DetailLevel, ws).Scan(&ca); err != nil {
 		return sc, err
 	}
 	if err := insertScopeRefs(ctx, tx, `share_scope_lane`, `swimlane_id`, sc.ID, sc.Lanes); err != nil {
@@ -83,15 +83,16 @@ func insertScopeRefs(ctx context.Context, tx pgx.Tx, table, col, scopeID string,
 	return nil
 }
 
-func (s *Store) ListShareScopes(ctx context.Context) ([]ShareScope, error) {
+func (s *Store) ListShareScopes(ctx context.Context, ws string) ([]ShareScope, error) {
 	out := []ShareScope{}
 	rows, err := s.pool.Query(ctx,
 		`SELECT sc.id, sc.name, sc.detail_level, sc.created_at,
 		        COUNT(t.id) FILTER (WHERE t.revoked = false)
 		 FROM share_scope sc
 		 LEFT JOIN share_token t ON t.scope_id = sc.id
+		 WHERE sc.workspace_id = $1
 		 GROUP BY sc.id, sc.name, sc.detail_level, sc.created_at
-		 ORDER BY sc.created_at DESC`)
+		 ORDER BY sc.created_at DESC`, ws)
 	if err != nil {
 		return out, err
 	}
@@ -116,11 +117,11 @@ func (s *Store) ListShareScopes(ctx context.Context) ([]ShareScope, error) {
 	return out, nil
 }
 
-func (s *Store) GetShareScope(ctx context.Context, id string) (ShareScope, error) {
+func (s *Store) GetShareScope(ctx context.Context, ws, id string) (ShareScope, error) {
 	var sc ShareScope
 	var ca time.Time
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, detail_level, created_at FROM share_scope WHERE id = $1`, id).
+		`SELECT id, name, detail_level, created_at FROM share_scope WHERE id = $1 AND workspace_id = $2`, id, ws).
 		Scan(&sc.ID, &sc.Name, &sc.DetailLevel, &ca)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sc, ErrNotFound
@@ -164,8 +165,8 @@ func (s *Store) scopeRefs(ctx context.Context, table, col, scopeID string) ([]st
 	return out, rows.Err()
 }
 
-func (s *Store) DeleteShareScope(ctx context.Context, id string) error {
-	ct, err := s.pool.Exec(ctx, `DELETE FROM share_scope WHERE id = $1`, id)
+func (s *Store) DeleteShareScope(ctx context.Context, ws, id string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM share_scope WHERE id = $1 AND workspace_id = $2`, id, ws)
 	if err != nil {
 		return err
 	}
@@ -177,12 +178,12 @@ func (s *Store) DeleteShareScope(ctx context.Context, id string) error {
 
 // ── Tokens ──────────────────────────────────────────────────────────────────
 
-func (s *Store) CreateShareToken(ctx context.Context, id, scopeID, hash, label string, expiresAt *time.Time) (ShareToken, error) {
+func (s *Store) CreateShareToken(ctx context.Context, ws, id, scopeID, hash, label string, expiresAt *time.Time) (ShareToken, error) {
 	var ca time.Time
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO share_token (id, scope_id, token_hash, label, expires_at)
-		 VALUES ($1, $2, $3, $4, $5) RETURNING created_at`,
-		id, scopeID, hash, label, expiresAt).Scan(&ca)
+		`INSERT INTO share_token (id, scope_id, token_hash, label, expires_at, workspace_id)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING created_at`,
+		id, scopeID, hash, label, expiresAt, ws).Scan(&ca)
 	if err != nil {
 		return ShareToken{}, err
 	}
@@ -194,11 +195,11 @@ func (s *Store) CreateShareToken(ctx context.Context, id, scopeID, hash, label s
 	return t, nil
 }
 
-func (s *Store) ListShareTokens(ctx context.Context, scopeID string) ([]ShareToken, error) {
+func (s *Store) ListShareTokens(ctx context.Context, ws, scopeID string) ([]ShareToken, error) {
 	out := []ShareToken{}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, label, created_at, expires_at, last_accessed_at, revoked
-		 FROM share_token WHERE scope_id = $1 ORDER BY created_at DESC`, scopeID)
+		 FROM share_token WHERE scope_id = $1 AND workspace_id = $2 ORDER BY created_at DESC`, scopeID, ws)
 	if err != nil {
 		return out, err
 	}
@@ -224,8 +225,8 @@ func (s *Store) ListShareTokens(ctx context.Context, scopeID string) ([]ShareTok
 	return out, rows.Err()
 }
 
-func (s *Store) RevokeShareToken(ctx context.Context, id string) error {
-	ct, err := s.pool.Exec(ctx, `UPDATE share_token SET revoked = true WHERE id = $1`, id)
+func (s *Store) RevokeShareToken(ctx context.Context, ws, id string) error {
+	ct, err := s.pool.Exec(ctx, `UPDATE share_token SET revoked = true WHERE id = $1 AND workspace_id = $2`, id, ws)
 	if err != nil {
 		return err
 	}
@@ -235,26 +236,27 @@ func (s *Store) RevokeShareToken(ctx context.Context, id string) error {
 	return nil
 }
 
-// ResolveToken validates a token hash and returns its scope id + detail level,
-// bumping last_accessed_at. Unknown/revoked/expired tokens yield ErrInvalidToken.
-func (s *Store) ResolveToken(ctx context.Context, hash string) (scopeID, detailLevel string, err error) {
+// ResolveToken validates a token hash and returns the workspace it belongs to,
+// its scope id + detail level, bumping last_accessed_at. The token (not a session)
+// determines the workspace. Unknown/revoked/expired tokens yield ErrInvalidToken.
+func (s *Store) ResolveToken(ctx context.Context, hash string) (ws, scopeID, detailLevel string, err error) {
 	var revoked bool
 	var exp *time.Time
 	err = s.pool.QueryRow(ctx,
-		`SELECT t.scope_id, t.revoked, t.expires_at, sc.detail_level
+		`SELECT t.workspace_id, t.scope_id, t.revoked, t.expires_at, sc.detail_level
 		 FROM share_token t JOIN share_scope sc ON sc.id = t.scope_id
-		 WHERE t.token_hash = $1`, hash).Scan(&scopeID, &revoked, &exp, &detailLevel)
+		 WHERE t.token_hash = $1`, hash).Scan(&ws, &scopeID, &revoked, &exp, &detailLevel)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", ErrInvalidToken
+		return "", "", "", ErrInvalidToken
 	}
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if revoked || (exp != nil && exp.Before(time.Now())) {
-		return "", "", ErrInvalidToken
+		return "", "", "", ErrInvalidToken
 	}
 	_, _ = s.pool.Exec(ctx, `UPDATE share_token SET last_accessed_at = now() WHERE token_hash = $1`, hash)
-	return scopeID, detailLevel, nil
+	return ws, scopeID, detailLevel, nil
 }
 
 // ── Scope resolution ──────────────────────────────────────────────────────────
@@ -263,17 +265,18 @@ func (s *Store) ResolveToken(ctx context.Context, hash string) (scopeID, detailL
 // items − excludes), the swimlanes/sub-lanes those items reference, and only the
 // links whose endpoints are both included. With detailLevel "timing", the
 // narrative fields are dropped; provenance is always stripped.
-func (s *Store) ResolveScopePlan(ctx context.Context, scopeID, detailLevel string) (Plan, error) {
+func (s *Store) ResolveScopePlan(ctx context.Context, ws, scopeID, detailLevel string) (Plan, error) {
 	p := Plan{Swimlanes: []Swimlane{}, Milestones: []Item{}, Links: []Link{}}
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+itemColumns+` FROM item
-		 WHERE (
+		 WHERE workspace_id = $2
+		 AND (
 		     swimlane_id IN (SELECT swimlane_id FROM share_scope_lane WHERE scope_id = $1)
 		     OR id IN (SELECT item_id FROM share_scope_item WHERE scope_id = $1)
 		 )
 		 AND id NOT IN (SELECT item_id FROM share_scope_exclude WHERE scope_id = $1)
-		 ORDER BY year, month, title`, scopeID)
+		 ORDER BY year, month, title`, scopeID, ws)
 	if err != nil {
 		return p, err
 	}
@@ -305,7 +308,7 @@ func (s *Store) ResolveScopePlan(ctx context.Context, scopeID, detailLevel strin
 	if len(swSet) > 0 {
 		idx := map[string]int{}
 		swRows, err := s.pool.Query(ctx,
-			`SELECT id, name, color FROM swimlane WHERE id = ANY($1) ORDER BY sort_order, name`, keysOf(swSet))
+			`SELECT id, name, color FROM swimlane WHERE id = ANY($1) AND workspace_id = $2 ORDER BY sort_order, name`, keysOf(swSet), ws)
 		if err != nil {
 			return p, err
 		}
@@ -325,7 +328,7 @@ func (s *Store) ResolveScopePlan(ctx context.Context, scopeID, detailLevel strin
 		}
 		if len(subSet) > 0 {
 			subRows, err := s.pool.Query(ctx,
-				`SELECT id, swimlane_id, name FROM sub_lane WHERE id = ANY($1) ORDER BY sort_order, name`, keysOf(subSet))
+				`SELECT id, swimlane_id, name FROM sub_lane WHERE id = ANY($1) AND workspace_id = $2 ORDER BY sort_order, name`, keysOf(subSet), ws)
 			if err != nil {
 				return p, err
 			}
@@ -347,7 +350,7 @@ func (s *Store) ResolveScopePlan(ctx context.Context, scopeID, detailLevel strin
 		}
 	}
 
-	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id FROM link`)
+	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id FROM link WHERE workspace_id = $1`, ws)
 	if err != nil {
 		return p, err
 	}
