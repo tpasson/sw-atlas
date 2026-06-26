@@ -84,6 +84,8 @@ const realApi = {
   listShareTokens: (scopeId) => req('GET', `/share-scopes/${scopeId}/tokens`),
   createShareToken: (scopeId, label) => req('POST', `/share-scopes/${scopeId}/tokens`, { label }),
   revokeShareToken: (id) => req('DELETE', `/share-tokens/${id}`),
+  setShareScopePublished: (id, published) => req('POST', `/share-scopes/${id}/publish`, { published }),
+  listAvailableShares: () => req('GET', '/shares/available'),
 
   // subscriptions — federation consumer side
   listSubscriptions: () => req('GET', '/subscriptions'),

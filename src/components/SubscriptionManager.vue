@@ -1,31 +1,55 @@
 <template>
-  <div class="card">
-    <p class="section-label">Subscriptions</p>
-    <p class="card-hint">
-      Subscribe to a colleague's published schedule — paste the subscribe link they sent.
-      Their milestones appear as read-only areas you can link your own work to, kept fresh
-      automatically. Hide or reorder them in the <strong>Areas</strong> tab.
-    </p>
-
-    <div class="sub-new">
-      <input v-model="code" class="field-input" placeholder="Paste subscribe link…" @keyup.enter="onSubscribe" />
-      <button class="btn-add" :disabled="busy || !code.trim()" @click="onSubscribe">Subscribe</button>
-    </div>
-    <p v-if="msg" class="data-msg" :class="msg.type">{{ msg.text }}</p>
-
-    <div v-if="subs.length" class="sub-list">
-      <div v-for="s in subs" :key="s.id" class="sub-row">
-        <div class="sub-meta">
-          <span class="sub-name">{{ s.sourceLabel }}</span>
-          <span class="sub-sub" :class="{ err: (s.lastStatus || '').startsWith('error') }">{{ statusText(s) }}</span>
-        </div>
-        <div class="sub-actions">
-          <button class="link-btn" :disabled="busy" @click="onSync(s)">Sync now</button>
-          <button class="link-btn danger" :disabled="busy" @click="onRemove(s)">Remove</button>
+  <div>
+    <!-- Directory of plans published by other users on this server -->
+    <div class="card">
+      <p class="section-label">Subscribe to someone on this server</p>
+      <p class="card-hint">
+        Pick a plan another user has <strong>published</strong> here. Their milestones appear as
+        read-only areas you can link your own work to, kept in sync automatically. This is how a
+        shared “team” account aggregates several people's plans.
+      </p>
+      <div v-if="available.length" class="sub-list">
+        <div v-for="a in available" :key="a.workspaceSlug + ':' + a.scopeId" class="sub-row">
+          <div class="sub-meta">
+            <span class="sub-name">{{ a.ownerName }} · {{ a.scopeName }}</span>
+            <span class="sub-sub">/{{ a.workspaceSlug }} · {{ a.detailLevel === 'full' ? 'full detail' : 'timing only' }}</span>
+          </div>
+          <div class="sub-actions">
+            <button class="link-btn" :disabled="busy" @click="onSubscribeLocal(a)">Subscribe</button>
+          </div>
         </div>
       </div>
+      <div v-else class="empty">No one has published a plan on this server yet.</div>
     </div>
-    <div v-else class="empty">No subscriptions yet.</div>
+
+    <!-- External instances + the active subscriptions list -->
+    <div class="card">
+      <p class="section-label">Subscriptions</p>
+      <p class="card-hint">
+        You can also subscribe to a colleague on another ATLAS instance — paste the subscribe link
+        they sent. Hide or reorder mirrored areas in the <strong>Areas</strong> tab.
+      </p>
+
+      <div class="sub-new">
+        <input v-model="code" class="field-input" placeholder="Paste subscribe link…" @keyup.enter="onSubscribe" />
+        <button class="btn-add" :disabled="busy || !code.trim()" @click="onSubscribe">Subscribe</button>
+      </div>
+      <p v-if="msg" class="data-msg" :class="msg.type">{{ msg.text }}</p>
+
+      <div v-if="subs.length" class="sub-list">
+        <div v-for="s in subs" :key="s.id" class="sub-row">
+          <div class="sub-meta">
+            <span class="sub-name">{{ s.sourceLabel }}</span>
+            <span class="sub-sub" :class="{ err: (s.lastStatus || '').startsWith('error') }">{{ statusText(s) }}</span>
+          </div>
+          <div class="sub-actions">
+            <button class="link-btn" :disabled="busy" @click="onSync(s)">Sync now</button>
+            <button class="link-btn danger" :disabled="busy" @click="onRemove(s)">Remove</button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty">No subscriptions yet.</div>
+    </div>
   </div>
 </template>
 
@@ -35,6 +59,7 @@ import { api } from '../api.js'
 import { loadPlan } from '../stores/useAppStore.js'
 
 const subs = ref([])
+const available = ref([])
 const code = ref('')
 const busy = ref(false)
 const msg = ref(null)
@@ -47,8 +72,22 @@ function statusText(s) {
 async function load() {
   try { subs.value = (await api.listSubscriptions()).subscriptions || [] }
   catch (e) { msg.value = { type: 'err', text: e.message || 'Failed to load' } }
+  try { available.value = (await api.listAvailableShares()).shares || [] }
+  catch { /* directory is best-effort */ }
 }
 onMounted(load)
+
+async function onSubscribeLocal(a) {
+  msg.value = null; busy.value = true
+  try {
+    const s = await api.createSubscription({ sourceSlug: a.workspaceSlug, scopeId: a.scopeId })
+    await load(); await loadPlan()
+    msg.value = (s.lastStatus || '').startsWith('ok')
+      ? { type: 'ok', text: `Subscribed to ${a.ownerName}'s "${a.scopeName}".` }
+      : { type: 'err', text: `Subscribed, but first sync said: ${s.lastStatus}` }
+  } catch (e) { msg.value = { type: 'err', text: e.message || 'Subscribe failed' } }
+  busy.value = false
+}
 
 async function onSubscribe() {
   msg.value = null; busy.value = true

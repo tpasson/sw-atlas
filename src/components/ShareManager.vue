@@ -4,6 +4,8 @@
     <p class="card-hint">
       Publish a selection of your plan and let colleagues <strong>subscribe</strong> to it.
       They see your milestones read-only and can hang their own dependencies off them.
+      Use <strong>Publish here</strong> to let other users on this server find and subscribe to it
+      directly; use <strong>Links</strong> to share with someone on another ATLAS instance.
     </p>
 
     <!-- existing scopes -->
@@ -19,6 +21,12 @@
             </span>
           </div>
           <div class="scope-actions">
+            <button
+              class="link-btn"
+              :class="{ on: sc.published }"
+              :title="sc.published ? 'Visible to other users on this server — click to unpublish' : 'Let other users on this server discover and subscribe to this'"
+              @click="onTogglePublish(sc)"
+            >{{ sc.published ? 'Published ✓' : 'Publish here' }}</button>
             <button class="link-btn" @click="toggleTokens(sc)">{{ openScope === sc.id ? 'Hide links' : 'Links' }}</button>
             <button class="link-btn danger" @click="onDeleteScope(sc)">Delete</button>
           </div>
@@ -195,6 +203,13 @@ async function onDeleteScope(sc) {
   } catch (e) { error.value = e.message || 'Delete failed' }
 }
 
+async function onTogglePublish(sc) {
+  try {
+    await api.setShareScopePublished(sc.id, !sc.published)
+    sc.published = !sc.published
+  } catch (e) { error.value = e.message || 'Could not change publish state' }
+}
+
 async function toggleTokens(sc) {
   newSecret.value = null
   if (openScope.value === sc.id) { openScope.value = null; return }
@@ -248,6 +263,7 @@ async function copy(text) {
 .btn-add:disabled { opacity: 0.4; cursor: not-allowed; }
 .link-btn { background: none; font-size: 12px; font-weight: 600; color: var(--clr-accent); padding: 4px 6px; border-radius: var(--r-sm); }
 .link-btn.danger { color: var(--clr-danger); }
+.link-btn.on { color: var(--clr-success, #30A46C); }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 

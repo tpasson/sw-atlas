@@ -43,6 +43,24 @@ func (s *Store) CreateSubscription(ctx context.Context, ws, id, label, remoteURL
 	return Subscription{ID: id, SourceLabel: label, RemoteURL: remoteURL, IntervalSeconds: interval, CreatedAt: ca.Format(time.RFC3339)}, nil
 }
 
+// CreateLocalSubscription subscribes to another workspace's published scope on
+// the same server (Slice D). It records the source workspace + scope instead of
+// an external URL/token; syncing resolves that scope directly (no HTTP).
+func (s *Store) CreateLocalSubscription(ctx context.Context, ws, id, label, sourceWs, scopeID string, interval int) (Subscription, error) {
+	if interval <= 0 {
+		interval = 300
+	}
+	var ca time.Time
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO subscription (id, source_label, remote_url, token, interval_seconds, workspace_id, source_workspace_id, source_scope_id)
+		 VALUES ($1, $2, '', '', $3, $4, $5, $6) RETURNING created_at`,
+		id, label, interval, ws, sourceWs, scopeID).Scan(&ca)
+	if err != nil {
+		return Subscription{}, err
+	}
+	return Subscription{ID: id, SourceLabel: label, IntervalSeconds: interval, CreatedAt: ca.Format(time.RFC3339)}, nil
+}
+
 const subColumns = `id, source_label, remote_url, interval_seconds, paused, last_synced_at, last_status, created_at`
 
 func scanSubscription(row pgx.Row) (Subscription, error) {
@@ -122,28 +140,51 @@ func (s *Store) DeleteSubscription(ctx context.Context, ws, id string) error {
 
 // ── sync engine ───────────────────────────────────────────────────────────────
 
+type wireLane struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Color    string    `json:"color"`
+	SubLanes []SubLane `json:"subLanes"`
+}
+
 type subWire struct {
-	Swimlanes []struct {
-		ID       string    `json:"id"`
-		Name     string    `json:"name"`
-		Color    string    `json:"color"`
-		SubLanes []SubLane `json:"subLanes"`
-	} `json:"swimlanes"`
-	Milestones []Item `json:"milestones"`
-	Links      []Link `json:"links"`
+	Swimlanes  []wireLane `json:"swimlanes"`
+	Milestones []Item     `json:"milestones"`
+	Links      []Link     `json:"links"`
+}
+
+// planToWire adapts a resolved scope Plan into the mirror wire shape, so a local
+// (same-server) subscription can reuse the same applyMirror reconciliation as a
+// remote feed.
+func planToWire(p Plan) subWire {
+	w := subWire{Milestones: p.Milestones, Links: p.Links}
+	for _, sw := range p.Swimlanes {
+		w.Swimlanes = append(w.Swimlanes, wireLane{ID: sw.ID, Name: sw.Name, Color: sw.Color, SubLanes: sw.SubLanes})
+	}
+	return w
 }
 
 // SyncSubscription polls the remote feed (sending If-None-Match) and mirrors it
 // locally. A 304 is a cheap no-op. The outcome is recorded in last_status.
 func (s *Store) SyncSubscription(ctx context.Context, ws, id string) error {
 	var remoteURL, token, etag string
-	err := s.pool.QueryRow(ctx, `SELECT remote_url, token, etag FROM subscription WHERE id = $1 AND workspace_id = $2`, id, ws).
-		Scan(&remoteURL, &token, &etag)
+	var srcWs, srcScope *string
+	err := s.pool.QueryRow(ctx, `SELECT remote_url, token, etag, source_workspace_id, source_scope_id FROM subscription WHERE id = $1 AND workspace_id = $2`, id, ws).
+		Scan(&remoteURL, &token, &etag, &srcWs, &srcScope)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
+	}
+
+	// Local (same-server) subscription: resolve the published scope directly.
+	if srcWs != nil && *srcWs != "" {
+		scopeID := ""
+		if srcScope != nil {
+			scopeID = *srcScope
+		}
+		return s.syncLocalSubscription(ctx, ws, id, *srcWs, scopeID)
 	}
 
 	body, newEtag, changed, ferr := fetchFeed(ctx, remoteURL, token, etag)
@@ -165,6 +206,32 @@ func (s *Store) SyncSubscription(ctx context.Context, ws, id string) error {
 		return err
 	}
 	s.markSync(ctx, ws, id, newEtag, "ok")
+	return nil
+}
+
+// syncLocalSubscription mirrors a same-server published scope into this
+// workspace. It re-checks that the scope is still published (the consent), then
+// resolves it directly and reuses applyMirror — no HTTP, no token.
+func (s *Store) syncLocalSubscription(ctx context.Context, ws, id, sourceWs, scopeID string) error {
+	detail, err := s.publishedScopeDetail(ctx, sourceWs, scopeID)
+	if errors.Is(err, ErrNotFound) {
+		s.markSync(ctx, ws, id, "", "error: source no longer shared")
+		return nil
+	}
+	if err != nil {
+		s.markSync(ctx, ws, id, "", "error: "+err.Error())
+		return err
+	}
+	plan, err := s.ResolveScopePlan(ctx, sourceWs, scopeID, detail)
+	if err != nil {
+		s.markSync(ctx, ws, id, "", "error: "+err.Error())
+		return err
+	}
+	if err := s.applyMirror(ctx, ws, id, "", planToWire(plan)); err != nil {
+		s.markSync(ctx, ws, id, "", "error: "+err.Error())
+		return err
+	}
+	s.markSync(ctx, ws, id, "", "ok")
 	return nil
 }
 

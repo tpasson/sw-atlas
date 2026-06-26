@@ -88,9 +88,12 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/share-scopes", s.listShareScopes)
 			r.Get("/share-scopes/{id}", s.getShareScope)
 			r.Delete("/share-scopes/{id}", s.deleteShareScope)
+			r.Post("/share-scopes/{id}/publish", s.setShareScopePublished)
 			r.Post("/share-scopes/{id}/tokens", s.createShareToken)
 			r.Get("/share-scopes/{id}/tokens", s.listShareTokens)
 			r.Delete("/share-tokens/{id}", s.revokeShareToken)
+			// intra-server directory: scopes other users have published
+			r.Get("/shares/available", s.listAvailableShares)
 
 			// subscriptions (federation, consumer side)
 			r.Post("/subscriptions", s.createSubscription)

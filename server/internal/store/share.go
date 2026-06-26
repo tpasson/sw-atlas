@@ -17,11 +17,22 @@ type ShareScope struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	DetailLevel string   `json:"detailLevel"` // "timing" | "full"
+	Published   bool     `json:"published"`   // opt-in: discoverable by other users on this server
 	CreatedAt   string   `json:"createdAt"`
 	Lanes       []string `json:"lanes"`
 	Items       []string `json:"items"`
 	Excludes    []string `json:"excludes"`
 	TokenCount  int      `json:"tokenCount"`
+}
+
+// PublishedScope is a server-wide directory entry: a scope another user has
+// published, plus who owns it, so others can subscribe to it locally.
+type PublishedScope struct {
+	ScopeID       string `json:"scopeId"`
+	ScopeName     string `json:"scopeName"`
+	DetailLevel   string `json:"detailLevel"`
+	WorkspaceSlug string `json:"workspaceSlug"`
+	OwnerName     string `json:"ownerName"`
 }
 
 // ShareToken is a subscribe token's metadata. The raw secret is never stored or
@@ -49,8 +60,8 @@ func (s *Store) CreateShareScope(ctx context.Context, ws string, sc ShareScope) 
 
 	var ca time.Time
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO share_scope (id, name, detail_level, workspace_id) VALUES ($1, $2, $3, $4) RETURNING created_at`,
-		sc.ID, sc.Name, sc.DetailLevel, ws).Scan(&ca); err != nil {
+		`INSERT INTO share_scope (id, name, detail_level, published, workspace_id) VALUES ($1, $2, $3, $4, $5) RETURNING created_at`,
+		sc.ID, sc.Name, sc.DetailLevel, sc.Published, ws).Scan(&ca); err != nil {
 		return sc, err
 	}
 	if err := insertScopeRefs(ctx, tx, `share_scope_lane`, `swimlane_id`, sc.ID, sc.Lanes); err != nil {
@@ -86,12 +97,12 @@ func insertScopeRefs(ctx context.Context, tx pgx.Tx, table, col, scopeID string,
 func (s *Store) ListShareScopes(ctx context.Context, ws string) ([]ShareScope, error) {
 	out := []ShareScope{}
 	rows, err := s.pool.Query(ctx,
-		`SELECT sc.id, sc.name, sc.detail_level, sc.created_at,
+		`SELECT sc.id, sc.name, sc.detail_level, sc.published, sc.created_at,
 		        COUNT(t.id) FILTER (WHERE t.revoked = false)
 		 FROM share_scope sc
 		 LEFT JOIN share_token t ON t.scope_id = sc.id
 		 WHERE sc.workspace_id = $1
-		 GROUP BY sc.id, sc.name, sc.detail_level, sc.created_at
+		 GROUP BY sc.id, sc.name, sc.detail_level, sc.published, sc.created_at
 		 ORDER BY sc.created_at DESC`, ws)
 	if err != nil {
 		return out, err
@@ -100,7 +111,7 @@ func (s *Store) ListShareScopes(ctx context.Context, ws string) ([]ShareScope, e
 	for rows.Next() {
 		var sc ShareScope
 		var ca time.Time
-		if err := rows.Scan(&sc.ID, &sc.Name, &sc.DetailLevel, &ca, &sc.TokenCount); err != nil {
+		if err := rows.Scan(&sc.ID, &sc.Name, &sc.DetailLevel, &sc.Published, &ca, &sc.TokenCount); err != nil {
 			return out, err
 		}
 		sc.CreatedAt = ca.Format(time.RFC3339)
@@ -121,8 +132,8 @@ func (s *Store) GetShareScope(ctx context.Context, ws, id string) (ShareScope, e
 	var sc ShareScope
 	var ca time.Time
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, detail_level, created_at FROM share_scope WHERE id = $1 AND workspace_id = $2`, id, ws).
-		Scan(&sc.ID, &sc.Name, &sc.DetailLevel, &ca)
+		`SELECT id, name, detail_level, published, created_at FROM share_scope WHERE id = $1 AND workspace_id = $2`, id, ws).
+		Scan(&sc.ID, &sc.Name, &sc.DetailLevel, &sc.Published, &ca)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sc, ErrNotFound
 	}
@@ -174,6 +185,59 @@ func (s *Store) DeleteShareScope(ctx context.Context, ws, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetShareScopePublished toggles a scope's server-wide discoverability (Slice D).
+func (s *Store) SetShareScopePublished(ctx context.Context, ws, id string, published bool) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE share_scope SET published = $3 WHERE id = $1 AND workspace_id = $2`, id, ws, published)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListPublishedScopes is the server-wide directory of scopes other users have
+// published, so a workspace can discover and subscribe to them locally. The
+// caller's own workspace is excluded.
+func (s *Store) ListPublishedScopes(ctx context.Context, excludeWs string) ([]PublishedScope, error) {
+	out := []PublishedScope{}
+	rows, err := s.pool.Query(ctx,
+		`SELECT sc.id, sc.name, sc.detail_level, w.slug, COALESCE(u.username, w.name)
+		 FROM share_scope sc
+		 JOIN workspace w ON w.id = sc.workspace_id
+		 LEFT JOIN app_user u ON u.id = w.owner_user_id
+		 WHERE sc.published = true AND sc.workspace_id <> $1
+		 ORDER BY w.slug, sc.created_at`, excludeWs)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p PublishedScope
+		if err := rows.Scan(&p.ScopeID, &p.ScopeName, &p.DetailLevel, &p.WorkspaceSlug, &p.OwnerName); err != nil {
+			return out, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// publishedScopeDetail fetches a scope's detail level if it exists in the given
+// workspace AND is still published — the consent check for a local subscription
+// sync. Returns ErrNotFound when the scope is gone or no longer shared.
+func (s *Store) publishedScopeDetail(ctx context.Context, sourceWs, scopeID string) (string, error) {
+	var detail string
+	err := s.pool.QueryRow(ctx,
+		`SELECT detail_level FROM share_scope WHERE id = $1 AND workspace_id = $2 AND published = true`,
+		scopeID, sourceWs).Scan(&detail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return detail, err
 }
 
 // ── Tokens ──────────────────────────────────────────────────────────────────
