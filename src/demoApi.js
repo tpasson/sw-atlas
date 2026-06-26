@@ -261,6 +261,9 @@ export const demoApi = {
   setPalette: (colors) => { db.palette = colors || []; save(); return ok({ colors: [...db.palette] }) },
   getGroups: () => ok({ groups: (db.groups || []).map(g => ({ ...g, itemIds: [...(g.itemIds || [])] })) }),
   setGroups: (groups) => { db.groups = groups || []; save(); return ok({ groups: db.groups }) },
+  // Display settings stay per-browser (localStorage) in the backend-less demo.
+  getUISettings: () => ok({ settings: null }),
+  setUISettings: () => ok(),
 
   createSwimlane: (data) => {
     const sw = { id: data.id || uid(), name: data.name, color: data.color || '#0A84FF', subLanes: [] }
