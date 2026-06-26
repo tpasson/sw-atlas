@@ -1,5 +1,8 @@
 <template>
   <div class="app">
+    <LandingPage v-if="workspace.mode === 'landing'" @login="loginOpen = true" @logout="onLogout" />
+
+    <template v-else>
     <TheHeader
       :year="store.year"
       :zoom="zoom"
@@ -51,6 +54,7 @@
     />
 
     <GroupLegend v-if="session.ready && !session.error" :read-only="readOnly" />
+    </template>
 
     <Transition name="modal">
       <MilestoneModal
@@ -90,6 +94,7 @@ import ManageModal from './components/ManageModal.vue'
 import LoginModal from './components/LoginModal.vue'
 import GroupLegend from './components/GroupLegend.vue'
 import AboutModal from './components/AboutModal.vue'
+import LandingPage from './components/LandingPage.vue'
 
 const { prevYear, nextYear, logout } = useAppStore()
 

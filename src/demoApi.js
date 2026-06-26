@@ -208,6 +208,10 @@ export const demoApi = {
   setUserPassword: () => ok(),
   deleteUser: () => ok(),
 
+  // explore — the demo is a single sandbox, no directory
+  listPublicWorkspaces: () => ok({ workspaces: [] }),
+  setWorkspaceFeatured: () => ok(),
+
   // Return clones so the reactive store never shares array refs with the db
   // (otherwise an optimistic push + the db push would duplicate the item).
   getPlan: () => ok({
