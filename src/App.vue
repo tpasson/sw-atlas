@@ -1,6 +1,6 @@
 <template>
   <div class="app">
-    <LandingPage v-if="workspace.mode === 'landing'" @login="loginOpen = true" @logout="onLogout" />
+    <LandingPage v-if="workspace.mode === 'landing'" @login="loginOpen = true" @logout="onLogout" @about="aboutOpen = true" />
 
     <template v-else>
     <TheHeader
