@@ -21,7 +21,7 @@ type Baseline struct {
 }
 
 // CreateBaseline captures all current items into a new baseline.
-func (s *Store) CreateBaseline(ctx context.Context, id, name, note string) (Baseline, error) {
+func (s *Store) CreateBaseline(ctx context.Context, ws, id, name, note string) (Baseline, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Baseline{}, err
@@ -30,15 +30,15 @@ func (s *Store) CreateBaseline(ctx context.Context, id, name, note string) (Base
 
 	var createdAt time.Time
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO baseline (id, name, note) VALUES ($1, $2, $3) RETURNING created_at`,
-		id, name, note).Scan(&createdAt); err != nil {
+		`INSERT INTO baseline (id, name, note, workspace_id) VALUES ($1, $2, $3, $4) RETURNING created_at`,
+		id, name, note, ws).Scan(&createdAt); err != nil {
 		return Baseline{}, err
 	}
 	ct, err := tx.Exec(ctx,
 		`INSERT INTO baseline_item
 		   (baseline_id, item_id, swimlane_id, sub_lane_id, title, year, month, when_date, start_date, end_date, kind, marker)
 		 SELECT $1, id, swimlane_id, sub_lane_id, title, year, month, when_date, start_date, end_date, kind, marker
-		 FROM item`, id)
+		 FROM item WHERE workspace_id = $2`, id, ws)
 	if err != nil {
 		return Baseline{}, err
 	}
@@ -48,13 +48,14 @@ func (s *Store) CreateBaseline(ctx context.Context, id, name, note string) (Base
 	return Baseline{ID: id, Name: name, Note: note, CreatedAt: createdAt.Format(time.RFC3339), ItemCount: int(ct.RowsAffected())}, nil
 }
 
-func (s *Store) ListBaselines(ctx context.Context) ([]Baseline, error) {
+func (s *Store) ListBaselines(ctx context.Context, ws string) ([]Baseline, error) {
 	out := []Baseline{}
 	rows, err := s.pool.Query(ctx,
 		`SELECT b.id, b.name, b.note, b.created_at, COUNT(bi.item_id)
 		 FROM baseline b LEFT JOIN baseline_item bi ON bi.baseline_id = b.id
+		 WHERE b.workspace_id = $1
 		 GROUP BY b.id, b.name, b.note, b.created_at
-		 ORDER BY b.created_at DESC`)
+		 ORDER BY b.created_at DESC`, ws)
 	if err != nil {
 		return out, err
 	}
@@ -71,10 +72,10 @@ func (s *Store) ListBaselines(ctx context.Context) ([]Baseline, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) GetBaseline(ctx context.Context, id string) (Baseline, error) {
+func (s *Store) GetBaseline(ctx context.Context, ws, id string) (Baseline, error) {
 	var b Baseline
 	var ca time.Time
-	err := s.pool.QueryRow(ctx, `SELECT id, name, note, created_at FROM baseline WHERE id = $1`, id).
+	err := s.pool.QueryRow(ctx, `SELECT id, name, note, created_at FROM baseline WHERE id = $1 AND workspace_id = $2`, id, ws).
 		Scan(&b.ID, &b.Name, &b.Note, &ca)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Baseline{}, ErrNotFound
@@ -109,8 +110,8 @@ func (s *Store) GetBaseline(ctx context.Context, id string) (Baseline, error) {
 	return b, rows.Err()
 }
 
-func (s *Store) DeleteBaseline(ctx context.Context, id string) error {
-	ct, err := s.pool.Exec(ctx, `DELETE FROM baseline WHERE id = $1`, id)
+func (s *Store) DeleteBaseline(ctx context.Context, ws, id string) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM baseline WHERE id = $1 AND workspace_id = $2`, id, ws)
 	if err != nil {
 		return err
 	}

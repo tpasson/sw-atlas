@@ -113,6 +113,12 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 	return r
 }
 
+// ── workspace ───────────────────────────────────────────────────────────────
+
+// currentWorkspace resolves the workspace a request operates on. In Slice A this
+// is always the default workspace; later slices derive it from the host/path/user.
+func (s *Server) currentWorkspace(r *http.Request) string { return store.DefaultWorkspaceID }
+
 // ── middleware ──────────────────────────────────────────────────────────────
 
 func (s *Server) requireEditor(next http.Handler) http.Handler {
@@ -131,7 +137,7 @@ func (s *Server) requireReadAccess(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		ok, err := s.store.GetPublicRead(r.Context())
+		ok, err := s.store.GetPublicRead(r.Context(), s.currentWorkspace(r))
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -181,7 +187,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 // ── plan & settings ─────────────────────────────────────────────────────────
 
 func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) {
-	p, err := s.store.GetPlan(r.Context())
+	p, err := s.store.GetPlan(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -218,7 +224,7 @@ func newEnvelope(kind string, p store.Plan) planEnvelope {
 // exportPlan returns the whole plan as a portable JSON envelope (backup / move /
 // hand to a colleague). Gated like /plan (read access).
 func (s *Server) exportPlan(w http.ResponseWriter, r *http.Request) {
-	p, err := s.store.GetPlan(r.Context())
+	p, err := s.store.GetPlan(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -237,7 +243,7 @@ func (s *Server) importPlan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "export was made with a newer ATLAS version")
 		return
 	}
-	sum, err := s.store.ImportPlan(r.Context(), store.Plan{
+	sum, err := s.store.ImportPlan(r.Context(), s.currentWorkspace(r), store.Plan{
 		Swimlanes:  env.Swimlanes,
 		Milestones: env.Milestones,
 		Links:      env.Links,
@@ -250,7 +256,7 @@ func (s *Server) importPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPublicRead(w http.ResponseWriter, r *http.Request) {
-	enabled, err := s.store.GetPublicRead(r.Context())
+	enabled, err := s.store.GetPublicRead(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -265,7 +271,7 @@ func (s *Server) setPublicRead(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.SetPublicRead(r.Context(), in.Enabled); err != nil {
+	if err := s.store.SetPublicRead(r.Context(), s.currentWorkspace(r), in.Enabled); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -273,7 +279,7 @@ func (s *Server) setPublicRead(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPalette(w http.ResponseWriter, r *http.Request) {
-	colors, err := s.store.GetPalette(r.Context())
+	colors, err := s.store.GetPalette(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -288,7 +294,7 @@ func (s *Server) setPalette(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.SetPalette(r.Context(), in.Colors); err != nil {
+	if err := s.store.SetPalette(r.Context(), s.currentWorkspace(r), in.Colors); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -296,7 +302,7 @@ func (s *Server) setPalette(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getGroups(w http.ResponseWriter, r *http.Request) {
-	groups, err := s.store.GetGroups(r.Context())
+	groups, err := s.store.GetGroups(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -311,7 +317,7 @@ func (s *Server) setGroups(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.SetGroups(r.Context(), in.Groups); err != nil {
+	if err := s.store.SetGroups(r.Context(), s.currentWorkspace(r), in.Groups); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -336,7 +342,7 @@ func (s *Server) createSwimlane(w http.ResponseWriter, r *http.Request) {
 	if in.ID == "" {
 		in.ID = uuid.NewString()
 	}
-	sw, err := s.store.CreateSwimlane(r.Context(), in.ID, in.Name, in.Color)
+	sw, err := s.store.CreateSwimlane(r.Context(), s.currentWorkspace(r), in.ID, in.Name, in.Color)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -352,7 +358,7 @@ func (s *Server) updateSwimlane(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.UpdateSwimlane(r.Context(), chi.URLParam(r, "id"), in.Name, in.Color); err != nil {
+	if err := s.store.UpdateSwimlane(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), in.Name, in.Color); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -360,7 +366,7 @@ func (s *Server) updateSwimlane(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteSwimlane(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteSwimlane(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.DeleteSwimlane(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -374,7 +380,7 @@ func (s *Server) reorderSwimlanes(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.ReorderSwimlanes(r.Context(), in.IDs); err != nil {
+	if err := s.store.ReorderSwimlanes(r.Context(), s.currentWorkspace(r), in.IDs); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -388,7 +394,7 @@ func (s *Server) reorderSubLanes(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.ReorderSubLanes(r.Context(), in.IDs); err != nil {
+	if err := s.store.ReorderSubLanes(r.Context(), s.currentWorkspace(r), in.IDs); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -402,7 +408,7 @@ func (s *Server) moveSwimlane(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.MoveSwimlane(r.Context(), chi.URLParam(r, "id"), in.Dir); err != nil {
+	if err := s.store.MoveSwimlane(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), in.Dir); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -426,7 +432,7 @@ func (s *Server) createSubLane(w http.ResponseWriter, r *http.Request) {
 	if in.ID == "" {
 		in.ID = uuid.NewString()
 	}
-	sub, err := s.store.CreateSubLane(r.Context(), chi.URLParam(r, "id"), in.ID, in.Name)
+	sub, err := s.store.CreateSubLane(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), in.ID, in.Name)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -441,7 +447,7 @@ func (s *Server) updateSubLane(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.UpdateSubLane(r.Context(), chi.URLParam(r, "id"), in.Name); err != nil {
+	if err := s.store.UpdateSubLane(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), in.Name); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -449,7 +455,7 @@ func (s *Server) updateSubLane(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteSubLane(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteSubLane(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.DeleteSubLane(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -474,7 +480,7 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 	if it.ID == "" {
 		it.ID = uuid.NewString()
 	}
-	created, err := s.store.CreateItem(r.Context(), it)
+	created, err := s.store.CreateItem(r.Context(), s.currentWorkspace(r), it)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -487,7 +493,7 @@ func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &it) {
 		return
 	}
-	if err := s.store.UpdateItem(r.Context(), chi.URLParam(r, "id"), it); err != nil {
+	if err := s.store.UpdateItem(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), it); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -495,7 +501,7 @@ func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteItem(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.DeleteItem(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -509,7 +515,7 @@ func (s *Server) addLink(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.AddLink(r.Context(), in.A, in.B); err != nil {
+	if err := s.store.AddLink(r.Context(), s.currentWorkspace(r), in.A, in.B); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -521,7 +527,7 @@ func (s *Server) removeLink(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.RemoveLink(r.Context(), in.A, in.B); err != nil {
+	if err := s.store.RemoveLink(r.Context(), s.currentWorkspace(r), in.A, in.B); err != nil {
 		s.fail(w, err)
 		return
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Server) listBaselines(w http.ResponseWriter, r *http.Request) {
-	bs, err := s.store.ListBaselines(r.Context())
+	bs, err := s.store.ListBaselines(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -17,7 +17,7 @@ func (s *Server) listBaselines(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBaseline(w http.ResponseWriter, r *http.Request) {
-	b, err := s.store.GetBaseline(r.Context(), chi.URLParam(r, "id"))
+	b, err := s.store.GetBaseline(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -37,7 +37,7 @@ func (s *Server) createBaseline(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	b, err := s.store.CreateBaseline(r.Context(), uuid.NewString(), in.Name, in.Note)
+	b, err := s.store.CreateBaseline(r.Context(), s.currentWorkspace(r), uuid.NewString(), in.Name, in.Note)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -46,7 +46,7 @@ func (s *Server) createBaseline(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteBaseline(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteBaseline(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.DeleteBaseline(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}

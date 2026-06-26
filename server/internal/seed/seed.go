@@ -10,9 +10,10 @@ import (
 	"github.com/tpasson/sw-atlas/server/internal/store"
 )
 
-// Run seeds demo data and returns the resulting swimlane count.
-func Run(ctx context.Context, st *store.Store) (int, error) {
-	if n, err := st.CountSwimlanes(ctx); err != nil || n > 0 {
+// Run seeds demo data into the given workspace and returns the resulting
+// swimlane count.
+func Run(ctx context.Context, st *store.Store, ws string) (int, error) {
+	if n, err := st.CountSwimlanes(ctx, ws); err != nil || n > 0 {
 		return n, err
 	}
 
@@ -55,11 +56,11 @@ func Run(ctx context.Context, st *store.Store) (int, error) {
 		}},
 	}
 	for _, l := range lanes {
-		if _, err := st.CreateSwimlane(ctx, l.id, l.name, l.color); err != nil {
+		if _, err := st.CreateSwimlane(ctx, ws, l.id, l.name, l.color); err != nil {
 			return 0, err
 		}
 		for _, s := range l.subs {
-			if _, err := st.CreateSubLane(ctx, l.id, s[0], s[1]); err != nil {
+			if _, err := st.CreateSubLane(ctx, ws, l.id, s[0], s[1]); err != nil {
 				return 0, err
 			}
 		}
@@ -135,7 +136,7 @@ func Run(ctx context.Context, st *store.Store) (int, error) {
 	}
 
 	for _, it := range items {
-		if _, err := st.CreateItem(ctx, it); err != nil {
+		if _, err := st.CreateItem(ctx, ws, it); err != nil {
 			return 0, err
 		}
 	}
@@ -149,12 +150,12 @@ func Run(ctx context.Context, st *store.Store) (int, error) {
 		{"m-freeze", "m-release"}, {"m-sso", "m-audit"},
 	}
 	for _, lk := range links {
-		if err := st.AddLink(ctx, lk[0], lk[1]); err != nil {
+		if err := st.AddLink(ctx, ws, lk[0], lk[1]); err != nil {
 			return 0, err
 		}
 	}
 
-	return st.CountSwimlanes(ctx)
+	return st.CountSwimlanes(ctx, ws)
 }
 
 func strptr(s string) *string { return &s }

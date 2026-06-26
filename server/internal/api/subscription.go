@@ -55,14 +55,15 @@ func (s *Server) createSubscription(w http.ResponseWriter, r *http.Request) {
 		label = "Subscription"
 	}
 
-	sub, err := s.store.CreateSubscription(r.Context(), uuid.NewString(), label, url, token, in.IntervalSeconds)
+	ws := s.currentWorkspace(r)
+	sub, err := s.store.CreateSubscription(r.Context(), ws, uuid.NewString(), label, url, token, in.IntervalSeconds)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	// First sync immediately; failures surface in the subscription's last_status.
-	_ = s.store.SyncSubscription(r.Context(), sub.ID)
-	out, err := s.store.GetSubscription(r.Context(), sub.ID)
+	_ = s.store.SyncSubscription(r.Context(), ws, sub.ID)
+	out, err := s.store.GetSubscription(r.Context(), ws, sub.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -71,7 +72,7 @@ func (s *Server) createSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listSubscriptions(w http.ResponseWriter, r *http.Request) {
-	subs, err := s.store.ListSubscriptions(r.Context())
+	subs, err := s.store.ListSubscriptions(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -80,7 +81,7 @@ func (s *Server) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteSubscription(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteSubscription(r.Context(), chi.URLParam(r, "id")); err != nil {
+	if err := s.store.DeleteSubscription(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -88,8 +89,9 @@ func (s *Server) deleteSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) syncSubscription(w http.ResponseWriter, r *http.Request) {
+	ws := s.currentWorkspace(r)
 	id := chi.URLParam(r, "id")
-	if err := s.store.SyncSubscription(r.Context(), id); err != nil {
+	if err := s.store.SyncSubscription(r.Context(), ws, id); err != nil {
 		if err == store.ErrNotFound {
 			s.fail(w, err)
 			return
@@ -97,7 +99,7 @@ func (s *Server) syncSubscription(w http.ResponseWriter, r *http.Request) {
 		// A sync error (e.g. remote unreachable) is recorded in last_status; still
 		// return the subscription so the client can show what happened.
 	}
-	out, err := s.store.GetSubscription(r.Context(), id)
+	out, err := s.store.GetSubscription(r.Context(), ws, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -112,7 +114,7 @@ func (s *Server) setSubscriptionPaused(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.SetSubscriptionPaused(r.Context(), chi.URLParam(r, "id"), in.Paused); err != nil {
+	if err := s.store.SetSubscriptionPaused(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), in.Paused); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -126,7 +128,7 @@ func (s *Server) setSwimlaneHidden(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.SetSwimlaneHidden(r.Context(), chi.URLParam(r, "id"), in.Hidden); err != nil {
+	if err := s.store.SetSwimlaneHidden(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), in.Hidden); err != nil {
 		s.fail(w, err)
 		return
 	}

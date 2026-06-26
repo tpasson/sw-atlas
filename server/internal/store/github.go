@@ -71,34 +71,34 @@ type GitHubSourceInput struct {
 	MaxPerType                  int
 }
 
-func (s *Store) CreateGitHubSource(ctx context.Context, id string, in GitHubSourceInput) (GitHubSource, error) {
+func (s *Store) CreateGitHubSource(ctx context.Context, ws, id string, in GitHubSourceInput) (GitHubSource, error) {
 	if in.Provider == "" {
 		in.Provider = "github"
 	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO github_source
 		   (id, owner, repo, html_url, provider, api_base, token, include_releases, include_tags, include_issues, include_prs,
-		    stable_only, state_filter, since_date, max_per_type)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		    stable_only, state_filter, since_date, max_per_type, workspace_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		id, in.Owner, in.Repo, in.HTMLURL, in.Provider, in.APIBase, encToken(in.Token), in.Releases, in.Tags, in.Issues, in.PRs,
-		in.StableOnly, in.StateFilter, in.SinceDate, in.MaxPerType)
+		in.StableOnly, in.StateFilter, in.SinceDate, in.MaxPerType, ws)
 	if err != nil {
 		return GitHubSource{}, err
 	}
-	return s.GetGitHubSource(ctx, id)
+	return s.GetGitHubSource(ctx, ws, id)
 }
 
-func (s *Store) GetGitHubSource(ctx context.Context, id string) (GitHubSource, error) {
-	g, err := scanGitHubSource(s.pool.QueryRow(ctx, `SELECT `+ghColumns+` FROM github_source WHERE id = $1`, id))
+func (s *Store) GetGitHubSource(ctx context.Context, ws, id string) (GitHubSource, error) {
+	g, err := scanGitHubSource(s.pool.QueryRow(ctx, `SELECT `+ghColumns+` FROM github_source WHERE id = $1 AND workspace_id = $2`, id, ws))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return GitHubSource{}, ErrNotFound
 	}
 	return g, err
 }
 
-func (s *Store) ListGitHubSources(ctx context.Context) ([]GitHubSource, error) {
+func (s *Store) ListGitHubSources(ctx context.Context, ws string) ([]GitHubSource, error) {
 	out := []GitHubSource{}
-	rows, err := s.pool.Query(ctx, `SELECT `+ghColumns+` FROM github_source ORDER BY created_at DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT `+ghColumns+` FROM github_source WHERE workspace_id = $1 ORDER BY created_at DESC`, ws)
 	if err != nil {
 		return out, err
 	}
@@ -113,14 +113,14 @@ func (s *Store) ListGitHubSources(ctx context.Context) ([]GitHubSource, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) markGitHubSync(ctx context.Context, id, status string) {
-	_, _ = s.pool.Exec(ctx, `UPDATE github_source SET last_status = $2, last_synced_at = now() WHERE id = $1`, id, status)
+func (s *Store) markGitHubSync(ctx context.Context, ws, id, status string) {
+	_, _ = s.pool.Exec(ctx, `UPDATE github_source SET last_status = $2, last_synced_at = now() WHERE id = $1 AND workspace_id = $3`, id, status, ws)
 }
 
 // SetGitHubSourceToken updates the stored token (for private / self-hosted repos)
 // without recreating the source.
-func (s *Store) SetGitHubSourceToken(ctx context.Context, id, token string) error {
-	ct, err := s.pool.Exec(ctx, `UPDATE github_source SET token = $2 WHERE id = $1`, id, encToken(token))
+func (s *Store) SetGitHubSourceToken(ctx context.Context, ws, id, token string) error {
+	ct, err := s.pool.Exec(ctx, `UPDATE github_source SET token = $2 WHERE id = $1 AND workspace_id = $3`, id, encToken(token), ws)
 	if err != nil {
 		return err
 	}
@@ -132,12 +132,12 @@ func (s *Store) SetGitHubSourceToken(ctx context.Context, id, token string) erro
 
 // SyncGitHubSource fetches the repo's enabled resources from GitHub and mirrors
 // them locally. The outcome (or any error) is recorded in last_status.
-func (s *Store) SyncGitHubSource(ctx context.Context, id string) error {
+func (s *Store) SyncGitHubSource(ctx context.Context, ws, id string) error {
 	var cfg ghConfig
 	err := s.pool.QueryRow(ctx,
 		`SELECT owner, repo, html_url, provider, api_base, token, include_releases, include_tags, include_issues, include_prs,
 		        stable_only, state_filter, since_date, max_per_type
-		 FROM github_source WHERE id = $1`, id).
+		 FROM github_source WHERE id = $1 AND workspace_id = $2`, id, ws).
 		Scan(&cfg.owner, &cfg.repo, &cfg.htmlURL, &cfg.provider, &cfg.apiBase, &cfg.token, &cfg.releases, &cfg.tags, &cfg.issues, &cfg.prs,
 			&cfg.stableOnly, &cfg.stateFilter, &cfg.since, &cfg.maxPerType)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -149,31 +149,31 @@ func (s *Store) SyncGitHubSource(ctx context.Context, id string) error {
 	cfg.token = decToken(cfg.token) // stored encrypted (or legacy plaintext)
 	wire, ferr := fetchGitHub(ctx, cfg)
 	if ferr != nil {
-		s.markGitHubSync(ctx, id, "error: "+ferr.Error())
+		s.markGitHubSync(ctx, ws, id, "error: "+ferr.Error())
 		return ferr
 	}
-	if err := s.applyMirror(ctx, id, cfg.htmlURL, wire); err != nil {
-		s.markGitHubSync(ctx, id, "error: "+err.Error())
+	if err := s.applyMirror(ctx, ws, id, cfg.htmlURL, wire); err != nil {
+		s.markGitHubSync(ctx, ws, id, "error: "+err.Error())
 		return err
 	}
-	s.markGitHubSync(ctx, id, fmt.Sprintf("ok · %d items", len(wire.Milestones)))
+	s.markGitHubSync(ctx, ws, id, fmt.Sprintf("ok · %d items", len(wire.Milestones)))
 	return nil
 }
 
 // DeleteGitHubSource removes the source and everything it mirrored.
-func (s *Store) DeleteGitHubSource(ctx context.Context, id string) error {
+func (s *Store) DeleteGitHubSource(ctx context.Context, ws, id string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM swimlane WHERE source_system = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM swimlane WHERE source_system = $1 AND workspace_id = $2`, id, ws); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM item WHERE source_system = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM item WHERE source_system = $1 AND workspace_id = $2`, id, ws); err != nil {
 		return err
 	}
-	ct, err := tx.Exec(ctx, `DELETE FROM github_source WHERE id = $1`, id)
+	ct, err := tx.Exec(ctx, `DELETE FROM github_source WHERE id = $1 AND workspace_id = $2`, id, ws)
 	if err != nil {
 		return err
 	}
