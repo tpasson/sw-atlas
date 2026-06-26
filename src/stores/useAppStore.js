@@ -68,8 +68,12 @@ export const workspace = reactive({
   ownSlug: '',
 })
 
-// UI view preferences (today indicator etc.) — per-browser, persisted locally.
+// Appearance settings are stored per-workspace on the server (so a plan looks the
+// same on any device and renders the owner's design for viewers). SETTINGS_KEY is
+// now just a local cache for instant first paint; THEME_KEY keeps the light/dark
+// choice per-browser (a viewing preference, not a plan property).
 const SETTINGS_KEY = 'atlas-ui-settings'
+const THEME_KEY = 'atlas-theme'
 const SETTINGS_DEFAULTS = {
   monthHighlight: { enabled: true, color: '#0A84FF', opacity: 0.06 },
   dayLine: { enabled: true, color: '#FF3B30', opacity: 0.7, width: 2 },
@@ -223,9 +227,61 @@ function loadSettings() {
   return def
 }
 export const settings = reactive(loadSettings())
+// Theme is a per-browser preference, separate from the server-stored appearance.
+try { const t = localStorage.getItem(THEME_KEY); if (t === 'dark' || t === 'light') settings.theme = t } catch { /* ignore */ }
+
+let uiSaveTimer = null
+function saveUISettings() {
+  const v = JSON.parse(JSON.stringify(settings))
+  delete v.theme // theme stays local
+  api.setUISettings(v).catch(() => { /* best-effort */ })
+}
 watch(settings, (v) => {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ }
+  try { localStorage.setItem(THEME_KEY, v.theme) } catch { /* ignore */ }
+  if (IS_DEMO) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ }
+    return
+  }
+  // Appearance is server-backed, but only for your OWN plan — viewing someone
+  // else's plan loads their settings and must not overwrite yours.
+  if (session.authenticated && workspace.isOwn) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ } // cache for instant first paint
+    clearTimeout(uiSaveTimer)
+    uiSaveTimer = setTimeout(saveUISettings, 600)
+  }
 }, { deep: true })
+
+// mergeSettings applies a server-stored appearance object over the live settings
+// (theme excluded — it's per-browser). Mirrors the merge in loadSettings().
+function mergeSettings(raw) {
+  if (!raw || typeof raw !== 'object') return
+  const d = SETTINGS_DEFAULTS
+  if (raw.monthHighlight) settings.monthHighlight = { ...d.monthHighlight, ...raw.monthHighlight }
+  if (raw.dayLine) settings.dayLine = { ...d.dayLine, ...raw.dayLine }
+  if (raw.weekNumbers) settings.weekNumbers = { ...d.weekNumbers, ...raw.weekNumbers }
+  if (raw.monthLines) settings.monthLines = { ...d.monthLines, ...raw.monthLines }
+  if (raw.weekLines) settings.weekLines = { ...d.weekLines, ...raw.weekLines }
+  if (raw.items) settings.items = { ...d.items, ...raw.items }
+  if (raw.layout) settings.layout = { ...d.layout, ...raw.layout }
+  if (Array.isArray(raw.markers) && raw.markers.length) settings.markers = raw.markers.map(m => ({ ...m, fill: m.fill === undefined ? true : m.fill }))
+  if (typeof raw.eventLabel === 'string') settings.eventLabel = raw.eventLabel
+}
+function resetAppearance() {
+  const d = JSON.parse(JSON.stringify(SETTINGS_DEFAULTS))
+  for (const k of Object.keys(d)) { if (k !== 'theme') settings[k] = d[k] }
+}
+
+// loadUISettings loads the VIEWED workspace's appearance from the server. With
+// none set: your own (localStorage/defaults) appearance migrates up; another
+// user's plan with no custom settings falls back to defaults.
+export async function loadUISettings() {
+  if (IS_DEMO) return
+  let r
+  try { r = await api.getUISettings() } catch { return }
+  if (r && r.settings) mergeSettings(r.settings)
+  else if (session.authenticated && workspace.isOwn) saveUISettings()
+  else resetAppearance()
+}
 
 // Apply the light/dark theme to <html> (CSS variables switch via [data-theme]).
 function applyTheme(t) {
@@ -449,6 +505,7 @@ export async function initApp() {
     try { await loadBaselines() } catch { /* baselines non-fatal */ }
     await loadPalette()
     await loadGroups()
+    await loadUISettings()
   }
   session.ready = true
   if (IS_DEMO && !session.error) syncSeededDemoSources()

@@ -60,6 +60,8 @@ const realApi = {
   setPalette: (colors) => req('PUT', '/settings/palette', { colors }),
   getGroups: () => req('GET', '/settings/groups'),
   setGroups: (groups) => req('PUT', '/settings/groups', { groups }),
+  getUISettings: () => req('GET', '/settings/ui'),
+  setUISettings: (settings) => req('PUT', '/settings/ui', { settings }),
 
   // swimlanes
   createSwimlane: (data) => req('POST', '/swimlanes', data),

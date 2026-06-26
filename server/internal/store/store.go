@@ -659,6 +659,35 @@ func (s *Store) SetPalette(ctx context.Context, ws string, colors []string) erro
 	return err
 }
 
+// GetUISettings returns the per-workspace display settings as an opaque JSON blob
+// (nil if never set — the client falls back to its built-in defaults). The server
+// doesn't interpret the shape; it's the frontend's settings object.
+func (s *Store) GetUISettings(ctx context.Context, ws string) (json.RawMessage, error) {
+	var v string
+	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'ui_settings' AND workspace_id = $1`, ws).Scan(&v)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(v), nil
+}
+
+// SetUISettings stores the per-workspace display settings (an opaque JSON object).
+func (s *Store) SetUISettings(ctx context.Context, ws string, raw json.RawMessage) error {
+	if len(raw) == 0 {
+		raw = json.RawMessage("{}")
+	}
+	if !json.Valid(raw) {
+		return errors.New("settings must be a JSON object")
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO app_setting (workspace_id, key, value) VALUES ($1, 'ui_settings', $2)
+		 ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`, ws, string(raw))
+	return err
+}
+
 // Group is a named, colour-coded collection of items (stored as JSON in app_setting).
 type Group struct {
 	ID      string   `json:"id"`

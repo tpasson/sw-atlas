@@ -52,6 +52,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/settings/public-read", s.getPublicRead)
 			r.Get("/settings/palette", s.getPalette)
 			r.Get("/settings/groups", s.getGroups)
+			r.Get("/settings/ui", s.getUISettings)
 			r.Get("/baselines", s.listBaselines)
 			r.Get("/baselines/{id}", s.getBaseline)
 		})
@@ -63,6 +64,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Put("/settings/public-read", s.setPublicRead)
 			r.Put("/settings/palette", s.setPalette)
 			r.Put("/settings/groups", s.setGroups)
+			r.Put("/settings/ui", s.setUISettings)
 
 			r.Post("/swimlanes", s.createSwimlane)
 			r.Post("/swimlanes/reorder", s.reorderSwimlanes)
@@ -445,6 +447,35 @@ func (s *Server) setGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": in.Groups})
+}
+
+// getUISettings returns the viewed workspace's display settings (so a plan
+// renders the way its owner configured it). nil = never set → client defaults.
+func (s *Server) getUISettings(w http.ResponseWriter, r *http.Request) {
+	raw, err := s.store.GetUISettings(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	var settings any
+	if raw != nil {
+		settings = raw
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"settings": settings})
+}
+
+func (s *Server) setUISettings(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Settings json.RawMessage `json:"settings"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.SetUISettings(r.Context(), s.currentWorkspace(r), in.Settings); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
 }
 
 // ── swimlanes ───────────────────────────────────────────────────────────────
