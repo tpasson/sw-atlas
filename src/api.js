@@ -46,6 +46,10 @@ const realApi = {
   setUserPassword: (id, password) => req('PUT', `/users/${id}/password`, { password }),
   deleteUser: (id) => req('DELETE', `/users/${id}`),
 
+  // explore / discovery
+  listPublicWorkspaces: () => req('GET', '/explore'),
+  setWorkspaceFeatured: (slug, featured) => req('PUT', `/workspaces/${slug}/featured`, { featured }),
+
   // plan + settings
   getPlan: () => req('GET', '/plan'),
   exportPlan: () => req('GET', '/export'),

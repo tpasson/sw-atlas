@@ -38,6 +38,9 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		r.Post("/logout", s.logout)
 		r.Get("/me", s.me)
 
+		// Public discovery directory for the landing page (no auth).
+		r.Get("/explore", s.explore)
+
 		// Subscribe feed: authenticated by its bearer token, not a session.
 		r.Get("/shared", s.sharedFeed)
 
@@ -122,6 +125,8 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Put("/users/{id}/role", s.setUserRole)
 			r.Put("/users/{id}/password", s.setUserPassword)
 			r.Delete("/users/{id}", s.deleteUser)
+			// curate the explore page
+			r.Put("/workspaces/{slug}/featured", s.setWorkspaceFeatured)
 		})
 	})
 

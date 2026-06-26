@@ -58,8 +58,11 @@ export const session = reactive({
 })
 
 // Which workspace the SPA is viewing, and whether it's the logged-in user's own
-// (only then is editing unlocked). slug '' means the home/default plan.
+// (only then is editing unlocked). mode 'landing' = the discovery directory at
+// '/', 'plan' = a specific workspace at /{slug}. ownSlug = the logged-in user's
+// own workspace (for the "My plan" link).
 export const workspace = reactive({
+  mode: 'plan',
   slug: '',
   isOwn: false,
   ownSlug: '',
@@ -415,7 +418,19 @@ export async function initApp() {
   session.authenticated = !!me.authenticated
   session.username = me.username || null
   session.role = me.role || null
+  workspace.ownSlug = me.workspace || ''
 
+  // The bare root (outside the demo) is the discovery landing page, not a plan.
+  if (!IS_DEMO && !workspaceSlugFromUrl()) {
+    workspace.mode = 'landing'
+    workspace.slug = ''
+    workspace.isOwn = false
+    setWorkspaceSlug('')
+    session.ready = true
+    return
+  }
+
+  workspace.mode = 'plan'
   resolveWorkspaceTarget(me)
 
   try {
