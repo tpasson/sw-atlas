@@ -104,6 +104,19 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Post("/github-sources/{id}/sync", s.syncGitHubSource)
 			r.Post("/github-sources/{id}/token", s.setGitHubSourceToken)
 			r.Delete("/github-sources/{id}", s.deleteGitHubSource)
+
+			// self-service: change your own password
+			r.Put("/account/password", s.changeOwnPassword)
+		})
+
+		// User administration: admins only.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAdmin)
+			r.Get("/users", s.listUsers)
+			r.Post("/users", s.createUser)
+			r.Put("/users/{id}/role", s.setUserRole)
+			r.Put("/users/{id}/password", s.setUserPassword)
+			r.Delete("/users/{id}", s.deleteUser)
 		})
 	})
 
@@ -115,9 +128,16 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 
 // ── workspace ───────────────────────────────────────────────────────────────
 
-// currentWorkspace resolves the workspace a request operates on. In Slice A this
-// is always the default workspace; later slices derive it from the host/path/user.
-func (s *Server) currentWorkspace(r *http.Request) string { return store.DefaultWorkspaceID }
+// currentWorkspace resolves the workspace a request operates on. An authenticated
+// request operates on the session user's personal workspace; anonymous (public)
+// requests fall back to the default workspace. Slice C will additionally derive
+// it from the URL (/{username}).
+func (s *Server) currentWorkspace(r *http.Request) string {
+	if sess, ok := s.auth.SessionFromRequest(r); ok && sess.WorkspaceID != "" {
+		return sess.WorkspaceID
+	}
+	return store.DefaultWorkspaceID
+}
 
 // ── middleware ──────────────────────────────────────────────────────────────
 
@@ -125,6 +145,22 @@ func (s *Server) requireEditor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.auth.IsAuthed(r) {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireAdmin gates account-management endpoints to admins only.
+func (s *Server) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := s.auth.SessionFromRequest(r)
+		if !ok {
+			writeErr(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		if sess.Role != store.RoleAdmin {
+			writeErr(w, http.StatusForbidden, "admin access required")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -164,15 +200,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if !s.auth.Verify(in.Username, in.Password) {
+	u, hash, err := s.store.GetUserByUsername(r.Context(), in.Username)
+	if err != nil || !auth.CheckPassword(hash, in.Password) {
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	if err := s.auth.SetCookie(w, in.Username); err != nil {
+	sess := auth.Session{UserID: u.ID, Username: u.Username, Role: u.Role, WorkspaceID: u.WorkspaceID}
+	if err := s.auth.SetCookie(w, sess); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true})
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": u.Username, "role": u.Role})
 }
 
 func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
@@ -181,7 +219,13 @@ func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": s.auth.IsAuthed(r)})
+	if sess, ok := s.auth.SessionFromRequest(r); ok {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"authenticated": true, "username": sess.Username, "role": sess.Role,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 }
 
 // ── plan & settings ─────────────────────────────────────────────────────────
@@ -556,6 +600,10 @@ func (s *Server) mountStatic(r chi.Router) {
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrLocked):
+		writeErr(w, http.StatusConflict, err.Error())
+	case errors.Is(err, store.ErrConflict):
+		writeErr(w, http.StatusConflict, err.Error())
+	case errors.Is(err, store.ErrLastAdmin), errors.Is(err, store.ErrProtected):
 		writeErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
