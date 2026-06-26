@@ -101,6 +101,11 @@ function ghItem(extId, sub, title, dt, marker, scmUrl, what, who, progress, matu
     startDate: null, endDate: null, progress: progress ?? null, maturity: maturity ?? null, color: color ?? null,
   }
 }
+// Per-"workspace" synced-item colours (demo: stored locally). '' → inherit lane.
+const DEFAULT_GIT_COLORS = { releaseStable: '', releasePre: '#FF9F0A', tag: '', issueOpen: '#3FB950', issueClosed: '#8957E5', prOpen: '#3FB950', prMerged: '#8957E5', prClosed: '#F85149' }
+const gc = () => ({ ...DEFAULT_GIT_COLORS, ...(db.gitColors || {}) })
+const gcv = (v) => v || null
+
 async function ghReleases(cfg) {
   const rels = await ghFetch(cfg, '/releases?per_page=100')
   const items = [], tagSet = new Set()
@@ -110,7 +115,7 @@ async function ghReleases(cfg) {
     if (cfg.stableOnly && r.prerelease) continue
     const dt = ghDate(r.published_at || r.created_at); if (!dt) continue
     items.push(ghItem('release:' + r.tag_name, 'releases', r.name || r.tag_name, dt, 'l:Tag', r.html_url,
-      ghText(r.body, 4000), r.author && r.author.login, 100, 4, r.prerelease ? '#FF9F0A' : null))
+      ghText(r.body, 4000), r.author && r.author.login, 100, 4, gcv(r.prerelease ? gc().releasePre : gc().releaseStable)))
   }
   return { items: ghLimit(items, cfg.since, cfg.maxPerType), tagSet }
 }
@@ -124,7 +129,7 @@ async function ghTags(cfg, skip) {
     try { const c = await ghFetch(cfg, '/commits/' + t.commit.sha); dt = ghDate(c.commit && c.commit.committer && c.commit.committer.date) } catch { dt = null }
     if (!dt) continue
     items.push(ghItem('tag:' + t.name, 'tags', t.name, dt, 'l:Tag',
-      `https://github.com/${cfg.owner}/${cfg.repo}/releases/tag/${t.name}`, '', '', 100, 4, null))
+      `https://github.com/${cfg.owner}/${cfg.repo}/releases/tag/${t.name}`, '', '', 100, 4, gcv(gc().tag)))
   }
   return ghLimit(items, cfg.since, cfg.maxPerType)
 }
@@ -136,7 +141,7 @@ async function ghIssues(cfg) {
     const closed = is.state === 'closed'
     const dt = ghDate(closed && is.closed_at ? is.closed_at : is.created_at); if (!dt) continue
     items.push(ghItem('issue:' + is.number, 'issues', is.title, dt, 'l:CircleDot', is.html_url,
-      ghText(is.body, 600), is.user && is.user.login, closed ? 100 : 0, null, closed ? '#8957E5' : '#3FB950'))
+      ghText(is.body, 600), is.user && is.user.login, closed ? 100 : 0, null, gcv(closed ? gc().issueClosed : gc().issueOpen)))
   }
   return ghLimit(items, cfg.since, cfg.maxPerType)
 }
@@ -147,11 +152,11 @@ async function ghPulls(cfg) {
     const merged = !!p.merged_at
     const ts = merged ? p.merged_at : (p.state === 'closed' && p.closed_at ? p.closed_at : p.created_at)
     const dt = ghDate(ts); if (!dt) continue
-    let color = '#3FB950', progress = 50
-    if (merged) { color = '#8957E5'; progress = 100 }
-    else if (p.state === 'closed') { color = '#F85149'; progress = 0 }
+    let color = gc().prOpen, progress = 50
+    if (merged) { color = gc().prMerged; progress = 100 }
+    else if (p.state === 'closed') { color = gc().prClosed; progress = 0 }
     items.push(ghItem('pr:' + p.number, 'prs', p.title, dt, 'l:GitPullRequest', p.html_url,
-      ghText(p.body, 600), p.user && p.user.login, progress, null, color))
+      ghText(p.body, 600), p.user && p.user.login, progress, null, gcv(color)))
   }
   return ghLimit(items, cfg.since, cfg.maxPerType)
 }
@@ -264,6 +269,8 @@ export const demoApi = {
   // Display settings stay per-browser (localStorage) in the backend-less demo.
   getUISettings: () => ok({ settings: null }),
   setUISettings: () => ok(),
+  getGitColors: () => ok(gc()),
+  setGitColors: (c) => { db.gitColors = c; save(); return ok(c) },
 
   createSwimlane: (data) => {
     const sw = { id: data.id || uid(), name: data.name, color: data.color || '#0A84FF', subLanes: [] }

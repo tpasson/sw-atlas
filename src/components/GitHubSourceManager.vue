@@ -1,5 +1,6 @@
 <template>
-  <div class="card">
+  <div class="gh-wrap">
+    <div class="card">
     <p class="section-label">Repository sources</p>
     <p class="card-hint">
       Pull a repository's releases, tags, issues and pull requests in as a read-only area,
@@ -66,6 +67,32 @@
       </div>
     </div>
     <div v-else class="empty">No repositories connected yet.</div>
+    </div>
+
+    <!-- Synced item colours (per workspace) -->
+    <div class="card">
+      <p class="section-label">Synced item colours</p>
+      <p class="card-hint">
+        How GitHub/Gitea items are coloured by type &amp; state. <strong>Inherit</strong> = use the area's colour.
+        Changes save automatically and re-sync your repositories to apply.
+      </p>
+      <div class="gc-grid">
+        <div v-for="f in GC_FIELDS" :key="f.key" class="gc-row">
+          <span class="gc-label">{{ f.label }}</span>
+          <input
+            type="color"
+            class="gc-swatch"
+            :value="gitColors[f.key] || '#888888'"
+            :disabled="!gitColors[f.key]"
+            @input="onColor(f.key, $event.target.value)"
+          />
+          <label class="gc-inherit">
+            <input type="checkbox" :checked="!gitColors[f.key]" @change="onInherit(f.key, $event.target.checked)" /> inherit
+          </label>
+        </div>
+      </div>
+      <p v-if="gcMsg" class="data-msg" :class="gcMsg.type">{{ gcMsg.text }}</p>
+    </div>
   </div>
 </template>
 
@@ -102,7 +129,40 @@ async function load() {
   try { sources.value = (await api.listGitHubSources()).sources || [] }
   catch (e) { msg.value = { type: 'err', text: e.message || 'Failed to load' } }
 }
-onMounted(load)
+
+// ── synced item colours (per workspace) ───────────────────────────────────────
+const GC_FIELDS = [
+  { key: 'releaseStable', label: 'Release · stable' },
+  { key: 'releasePre', label: 'Release · pre' },
+  { key: 'tag', label: 'Tag' },
+  { key: 'issueOpen', label: 'Issue · open' },
+  { key: 'issueClosed', label: 'Issue · closed' },
+  { key: 'prOpen', label: 'PR · open' },
+  { key: 'prMerged', label: 'PR · merged' },
+  { key: 'prClosed', label: 'PR · closed' },
+]
+const gitColors = reactive({})
+const gcMsg = ref(null)
+let gcTimer = null
+
+async function loadGitColors() {
+  try { Object.assign(gitColors, await api.getGitColors()) } catch { /* keep defaults */ }
+}
+function onColor(key, val) { gitColors[key] = val; queueSaveColors() }
+function onInherit(key, checked) { gitColors[key] = checked ? '' : (gitColors[key] || '#3FB950'); queueSaveColors() }
+function queueSaveColors() { clearTimeout(gcTimer); gcTimer = setTimeout(saveGitColors, 700) }
+async function saveGitColors() {
+  gcMsg.value = null
+  try {
+    await api.setGitColors({ ...gitColors })
+    // re-sync connected repos so existing items pick up the new colours
+    for (const s of sources.value) { try { await api.syncGitHubSource(s.id) } catch { /* per-source */ } }
+    await load(); await loadPlan()
+    gcMsg.value = { type: 'ok', text: 'Colours saved and applied.' }
+  } catch (e) { gcMsg.value = { type: 'err', text: e.message || 'Could not save colours' } }
+}
+
+onMounted(() => { load(); loadGitColors() })
 
 async function onAdd() {
   msg.value = null; busy.value = true
@@ -161,6 +221,13 @@ async function onSetToken(s) {
 </script>
 
 <style scoped>
+.gh-wrap { display: flex; flex-direction: column; gap: 14px; }
+.gc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 16px; margin-top: 8px; }
+.gc-row { display: flex; align-items: center; gap: 8px; }
+.gc-label { flex: 1; font-size: 12.5px; color: var(--clr-text-2); }
+.gc-swatch { width: 26px; height: 22px; padding: 0; border: 1px solid var(--clr-border-light); border-radius: 6px; background: none; cursor: pointer; }
+.gc-swatch:disabled { opacity: 0.35; cursor: not-allowed; }
+.gc-inherit { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--clr-text-3); white-space: nowrap; }
 .gh-new { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
 .field-input { padding: 7px 10px; font-size: 13px; color: var(--clr-text);
   background: var(--clr-surface); border: 1px solid var(--clr-border-light); border-radius: var(--r-md); }
