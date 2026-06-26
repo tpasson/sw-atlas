@@ -118,8 +118,10 @@ curl -o .env https://raw.githubusercontent.com/tpasson/sw-atlas/main/deploy/.env
 #    and ATLAS_SESSION_SECRET (e.g.  openssl rand -hex 32 )
 nano .env
 
-# 4. Create the editor login hash straight from the image
+# 4. Create the editor login hash. The container runs as a non-root user, so the
+#    hash file must be readable by it — chmod 644 (it's a one-way bcrypt hash).
 docker run --rm ghcr.io/tpasson/sw-atlas:latest hashpw 'your-password' > editor_hash.txt
+chmod 644 editor_hash.txt
 
 # 5. Start it (pulls the image, runs app + PostgreSQL, migrates on startup)
 docker compose -f docker-compose.ghcr.yml up -d
@@ -150,6 +152,7 @@ For development or customization, build the image yourself — a single image
 cd deploy
 cp .env.example .env                                            # then edit secrets
 docker compose run --rm --no-deps app hashpw 'your-password' > editor_hash.txt   # store editor hash
+chmod 644 editor_hash.txt                                       # readable by the non-root container
 docker compose up -d --build
 docker compose run --rm app seed                               # optional: load demo data
 ```

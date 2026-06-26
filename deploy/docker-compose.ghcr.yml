@@ -29,6 +29,7 @@ services:
     environment:
       ATLAS_DATABASE_URL: ${ATLAS_DATABASE_URL:-postgres://atlas:atlas@db:5432/atlas?sslmode=disable}
       ATLAS_SESSION_SECRET: ${ATLAS_SESSION_SECRET:?set ATLAS_SESSION_SECRET in .env}
+      ATLAS_ENCRYPTION_KEY: ${ATLAS_ENCRYPTION_KEY:-}
       ATLAS_EDITOR_USERNAME: ${ATLAS_EDITOR_USERNAME:-editor}
       ATLAS_EDITOR_PASSWORD_HASH_FILE: /run/secrets/editor_password_hash
     secrets:
