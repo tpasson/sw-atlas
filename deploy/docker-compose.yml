@@ -27,6 +27,7 @@ services:
     environment:
       ATLAS_DATABASE_URL: ${ATLAS_DATABASE_URL:-postgres://atlas:atlas@db:5432/atlas?sslmode=disable}
       ATLAS_SESSION_SECRET: ${ATLAS_SESSION_SECRET:?set ATLAS_SESSION_SECRET in deploy/.env}
+      ATLAS_ENCRYPTION_KEY: ${ATLAS_ENCRYPTION_KEY:-}
       ATLAS_EDITOR_USERNAME: ${ATLAS_EDITOR_USERNAME:-editor}
       # The bcrypt hash is read from a file (Docker secret) so its '$' chars are
       # never touched by compose interpolation.
