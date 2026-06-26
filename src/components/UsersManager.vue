@@ -53,15 +53,6 @@
       </div>
       <div v-else class="empty">No accounts yet.</div>
     </div>
-
-    <!-- Self-service -->
-    <div class="card">
-      <p class="section-label">Your password</p>
-      <div class="user-new">
-        <input v-model="ownPassword" class="field-input" type="password" placeholder="New password" autocomplete="new-password" @keyup.enter="onChangeOwn" />
-        <button class="btn-add" :disabled="busy || !ownPassword" @click="onChangeOwn">Update</button>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -72,7 +63,6 @@ import { session } from '../stores/useAppStore.js'
 
 const users = ref([])
 const form = reactive({ username: '', password: '', role: 'editor' })
-const ownPassword = ref('')
 const busy = ref(false)
 const msg = ref(null)
 
@@ -120,13 +110,6 @@ async function onDelete(u) {
   msg.value = null; busy.value = true
   try { await api.deleteUser(u.id); msg.value = { type: 'ok', text: `User "${u.username}" deleted.` }; await load() }
   catch (e) { msg.value = { type: 'err', text: e.message || 'Delete failed' } }
-  busy.value = false
-}
-
-async function onChangeOwn() {
-  msg.value = null; busy.value = true
-  try { await api.changeOwnPassword(ownPassword.value); ownPassword.value = ''; msg.value = { type: 'ok', text: 'Your password was updated.' } }
-  catch (e) { msg.value = { type: 'err', text: e.message || 'Update failed' } }
   busy.value = false
 }
 </script>

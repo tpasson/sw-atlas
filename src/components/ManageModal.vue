@@ -24,6 +24,7 @@
               <button v-if="session.authenticated" class="tab" :class="{ active: tab === 'sources' }" @click="tab = 'sources'">Sources</button>
               <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
               <button v-if="!isDemo && session.role === 'admin'" class="tab" :class="{ active: tab === 'users' }" @click="tab = 'users'">Users</button>
+              <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'account' }" @click="tab = 'account'">Account</button>
             </div>
 
             <div class="panel-body">
@@ -525,6 +526,10 @@
               <section v-if="tab === 'users' && session.role === 'admin'" class="tab-pane">
                 <UsersManager />
               </section>
+
+              <section v-if="tab === 'account' && session.authenticated" class="tab-pane">
+                <AccountManager />
+              </section>
             </div>
 
             <div class="panel-footer">
@@ -546,6 +551,7 @@ import ShareManager from './ShareManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
 import GitHubSourceManager from './GitHubSourceManager.vue'
 import UsersManager from './UsersManager.vue'
+import AccountManager from './AccountManager.vue'
 
 const isDemo = import.meta.env.VITE_DEMO
 
