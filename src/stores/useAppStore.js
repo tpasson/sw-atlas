@@ -38,6 +38,8 @@ export const store = reactive({
 // Session/auth + global settings state.
 export const session = reactive({
   authenticated: false,
+  username: null,
+  role: null, // 'admin' | 'editor' | null
   publicReadEnabled: true,
   ready: false,
   error: null, // 'auth-required' | message string | null
@@ -389,6 +391,8 @@ export async function initApp() {
   try {
     const me = await api.me()
     session.authenticated = !!me.authenticated
+    session.username = me.username || null
+    session.role = me.role || null
   } catch { /* treat as anonymous */ }
 
   try {
@@ -573,8 +577,10 @@ export function useAppStore() {
 
   // ── Session / settings ────────────────────────────────────────────────────
   async function login(username, password) {
-    await api.login(username, password)
+    const res = await api.login(username, password)
     session.authenticated = true
+    session.username = (res && res.username) || username
+    session.role = (res && res.role) || null
     session.error = null
     try {
       const pr = await api.getPublicRead()
@@ -583,7 +589,11 @@ export function useAppStore() {
     await loadPlan()
   }
   async function logout() {
-    try { await api.logout() } finally { session.authenticated = false }
+    try { await api.logout() } finally {
+      session.authenticated = false
+      session.username = null
+      session.role = null
+    }
     try {
       await loadPlan()
     } catch (e) {

@@ -142,6 +142,7 @@
         </span>
 
         <template v-if="authenticated">
+          <span v-if="session.username" class="user-chip" title="Signed in">{{ session.username }}</span>
           <span v-if="!baselines.activeId" class="edit-pill">
             <span class="edit-dot"></span>
             Editing
@@ -160,7 +161,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Sun, Moon, AlertTriangle } from 'lucide-vue-next'
-import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui } from '../stores/useAppStore.js'
+import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 
 defineProps({
@@ -483,6 +484,19 @@ async function onSaveBaseline() {
 .edit-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: #30D158;
+}
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.92);
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 100px;
 }
 
 .view-pill {

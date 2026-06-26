@@ -61,11 +61,14 @@ func runServe(cfg config.Config) {
 	defer pool.Close()
 
 	st := store.New(pool)
-	au := auth.New(cfg.SessionSecret, cfg.EditorUsername, cfg.EditorHash)
+	au := auth.New(cfg.SessionSecret)
 	handler := api.NewRouter(st, au, cfg.StaticDir)
 
-	if cfg.EditorHash == "" {
-		log.Println("WARNING: ATLAS_EDITOR_PASSWORD_HASH is empty — editor login is disabled until you set it (atlas hashpw <password>)")
+	// Bootstrap the first admin from the env editor credentials (no-op once any
+	// account exists). Accounts are managed in-app thereafter.
+	must(st.EnsureBootstrapAdmin(context.Background(), cfg.EditorUsername, cfg.EditorHash))
+	if n, err := st.CountUsers(context.Background()); err == nil && n == 0 {
+		log.Println("WARNING: no user accounts exist and ATLAS_EDITOR_PASSWORD_HASH is empty — login is disabled until you bootstrap an admin (set ATLAS_EDITOR_USERNAME + ATLAS_EDITOR_PASSWORD_HASH, see: atlas hashpw <password>)")
 	}
 
 	// Background smart-poll: sync due subscriptions every minute.

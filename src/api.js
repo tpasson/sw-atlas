@@ -31,6 +31,14 @@ const realApi = {
   me: () => req('GET', '/me'),
   login: (username, password) => req('POST', '/login', { username, password }),
   logout: () => req('POST', '/logout'),
+  changeOwnPassword: (password) => req('PUT', '/account/password', { password }),
+
+  // users (admin only)
+  listUsers: () => req('GET', '/users'),
+  createUser: (data) => req('POST', '/users', data),
+  setUserRole: (id, role) => req('PUT', `/users/${id}/role`, { role }),
+  setUserPassword: (id, password) => req('PUT', `/users/${id}/password`, { password }),
+  deleteUser: (id) => req('DELETE', `/users/${id}`),
 
   // plan + settings
   getPlan: () => req('GET', '/plan'),
