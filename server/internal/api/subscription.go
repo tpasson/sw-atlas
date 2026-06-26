@@ -20,9 +20,17 @@ func (s *Server) createSubscription(w http.ResponseWriter, r *http.Request) {
 		URL             string `json:"url"`
 		Token           string `json:"token"`
 		Label           string `json:"label"`
+		SourceSlug      string `json:"sourceSlug"` // local: another user's workspace slug
+		ScopeID         string `json:"scopeId"`    // local: their published scope
 		IntervalSeconds int    `json:"intervalSeconds"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+
+	// Local (same-server) subscription: subscribe to another user's published scope.
+	if strings.TrimSpace(in.SourceSlug) != "" {
+		s.createLocalSubscription(w, r, in.SourceSlug, in.ScopeID, in.Label, in.IntervalSeconds)
 		return
 	}
 
@@ -62,6 +70,45 @@ func (s *Server) createSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// First sync immediately; failures surface in the subscription's last_status.
+	_ = s.store.SyncSubscription(r.Context(), ws, sub.ID)
+	out, err := s.store.GetSubscription(r.Context(), ws, sub.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+// createLocalSubscription mirrors another user's published scope on this server
+// into the caller's workspace (no URL/token). The scope must be published.
+func (s *Server) createLocalSubscription(w http.ResponseWriter, r *http.Request, sourceSlug, scopeID, label string, interval int) {
+	ws := s.currentWorkspace(r)
+	src, err := s.store.GetWorkspaceBySlug(r.Context(), sourceSlug)
+	if err != nil {
+		s.fail(w, err) // ErrNotFound → 404
+		return
+	}
+	if src.ID == ws {
+		writeErr(w, http.StatusBadRequest, "you can't subscribe to your own plan")
+		return
+	}
+	scope, err := s.store.GetShareScope(r.Context(), src.ID, scopeID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !scope.Published {
+		writeErr(w, http.StatusForbidden, "that plan is not shared")
+		return
+	}
+	if label == "" {
+		label = src.Slug + " · " + scope.Name
+	}
+	sub, err := s.store.CreateLocalSubscription(r.Context(), ws, uuid.NewString(), label, src.ID, scope.ID, interval)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	_ = s.store.SyncSubscription(r.Context(), ws, sub.ID)
 	out, err := s.store.GetSubscription(r.Context(), ws, sub.ID)
 	if err != nil {

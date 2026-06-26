@@ -76,6 +76,32 @@ func (s *Server) deleteShareScope(w http.ResponseWriter, r *http.Request) {
 	writeNoContent(w)
 }
 
+// setShareScopePublished toggles a scope's server-wide discoverability (Slice D).
+func (s *Server) setShareScopePublished(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Published bool `json:"published"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.SetShareScopePublished(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), in.Published); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"published": in.Published})
+}
+
+// listAvailableShares is the server-wide directory of scopes other users have
+// published, so this workspace can subscribe to them locally.
+func (s *Server) listAvailableShares(w http.ResponseWriter, r *http.Request) {
+	shares, err := s.store.ListPublishedScopes(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"shares": shares})
+}
+
 // ── tokens (editor) ───────────────────────────────────────────────────────────
 
 func (s *Server) createShareToken(w http.ResponseWriter, r *http.Request) {
