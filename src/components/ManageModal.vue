@@ -214,18 +214,6 @@
               <!-- ───────────────── DISPLAY ───────────────── -->
               <section v-show="tab === 'display'" class="tab-pane">
                 <div class="card">
-                  <div class="row-between">
-                    <div class="setting-info">
-                      <span class="setting-name">Public read access</span>
-                      <span class="setting-desc">When off, only logged-in editors can view ATLAS</span>
-                    </div>
-                    <button class="toggle" :class="{ active: session.publicReadEnabled }" @click="togglePublicRead">
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                </div>
-
-                <div class="card">
                   <p class="section-label">Today indicator</p>
                   <div class="row-between">
                     <div class="setting-info">
@@ -519,6 +507,19 @@
               </section>
 
               <section v-if="tab === 'sharing'" class="tab-pane">
+                <!-- Plan visibility: make the WHOLE plan public (explore page + /{slug}). -->
+                <div class="card">
+                  <p class="section-label">Plan visibility</p>
+                  <div class="row-between">
+                    <div class="setting-info">
+                      <span class="setting-name">Make this plan public</span>
+                      <span class="setting-desc">When on, anyone can view your <strong>whole plan</strong> read-only — it's listed on the Explore landing page and reachable at its <code>/{slug}</code> link. When off, only you can see it.</span>
+                    </div>
+                    <button class="toggle" :class="{ active: session.publicReadEnabled }" @click="togglePublicRead">
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </div>
+                </div>
                 <ShareManager />
                 <SubscriptionManager />
               </section>
