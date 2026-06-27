@@ -155,11 +155,11 @@ const PlanCard = {
 .lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .lp-empty { font-size: 13.5px; color: var(--clr-text-3); padding: 12px 0; }
 
-/* card (rendered by the inline PlanCard) */
-:deep(.card) { cursor: pointer; border: 1px solid var(--clr-border-light); border-radius: var(--r-lg, 12px);
-  padding: 14px 16px; background: var(--clr-surface); display: flex; flex-direction: column; gap: 4px;
-  transition: border-color 0.15s, transform 0.06s, box-shadow 0.15s; }
-:deep(.card:hover) { border-color: var(--clr-accent); box-shadow: 0 2px 12px rgba(0,0,0,0.06); transform: translateY(-1px); }
+/* card (rendered by the inline PlanCard) — matches the app's card styling */
+:deep(.card) { cursor: pointer; border: 1px solid var(--clr-border-light); border-radius: var(--r-lg);
+  padding: 14px 16px; background: var(--clr-surface); display: flex; flex-direction: column; gap: 5px;
+  box-shadow: var(--sh-sm); transition: border-color 0.15s, box-shadow 0.15s; }
+:deep(.card:hover) { border-color: var(--clr-border); box-shadow: var(--sh-md); }
 :deep(.card-head) { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 :deep(.card-name) { font-size: 15px; font-weight: 700; color: var(--clr-text); }
 :deep(.card-slug) { font-size: 12px; color: var(--clr-text-3); }

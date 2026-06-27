@@ -527,10 +527,15 @@ function rowItems(swId, subId) {
       const hasMarker = !!(m.marker && m.marker !== 'bar')
       // Account for the icon AND the bar padding it needs around it.
       const iconW = hasMarker ? (settings.items.markerSize + settings.items.iconGap + settings.items.padding + 8) : 0
-      // If the icon + title don't fit, the whole icon+title unit moves to the
-      // right of the bar (tight together); otherwise it sits inside the bar.
-      const labelOutside = iconW + labelW + settings.items.labelBuffer > width
-      const x1 = labelOutside ? info.startX + width + 10 + iconW + labelW : info.startX + width
+      // Badges that trail the title and also need room: the maturity glyph (a 2×2
+      // grid, ≈2.3× its cell size) and the risk warning triangle. Without these the
+      // glyph could overflow a bar the title only just fit into.
+      const trailW = (m.maturity ? Math.ceil(settings.items.maturitySize * 2.3) + settings.items.iconGap : 0)
+        + (riskIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
+      // If the icon + title (+ trailing badges) don't fit, the whole unit moves to
+      // the right of the bar (tight together); otherwise it sits inside the bar.
+      const labelOutside = iconW + labelW + trailW + settings.items.labelBuffer > width
+      const x1 = labelOutside ? info.startX + width + 10 + iconW + labelW + trailW : info.startX + width
       items.push({
         key: m.id, m, type: 'bar', x: info.startX, width, labelOutside,
         x0: info.startX, x1,
@@ -542,10 +547,14 @@ function rowItems(swId, subId) {
       const x = dateX(ad)
       const labelW = estTextW(m.title)
       const pad = settings.items.padding
+      // The maturity glyph / risk badge trail the title here too — count them so
+      // lane packing reserves the full extent.
+      const trailW = (m.maturity ? Math.ceil(settings.items.maturitySize * 2.3) + settings.items.iconGap : 0)
+        + (riskIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
       items.push({
         key: m.id, m, type: 'point', x,
         x0: x - 6 - pad,
-        x1: x + 16 + labelW + pad,
+        x1: x + 16 + labelW + trailW + pad,
       })
     }
   }
