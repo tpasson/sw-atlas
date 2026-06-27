@@ -4,9 +4,10 @@
     <div class="card">
       <p class="section-label">Subscribe to someone on this server</p>
       <p class="card-hint">
-        Pick a plan another user has <strong>published</strong> here. Their milestones appear as
-        read-only areas you can link your own work to, kept in sync automatically. This is how a
-        shared “team” account aggregates several people's plans.
+        Pick a slice another user has <strong>listed</strong> (their “Shared schedules”). Its
+        milestones appear as <strong>read-only areas inside your timeline</strong>, kept in sync
+        automatically — you can link your own work to them. This is how a shared “team” account
+        aggregates several people's milestones.
       </p>
       <div v-if="available.length" class="sub-list">
         <div v-for="a in available" :key="a.workspaceSlug + ':' + a.scopeId" class="sub-row">

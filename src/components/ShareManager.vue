@@ -2,10 +2,12 @@
   <div class="card">
     <p class="section-label">Shared schedules</p>
     <p class="card-hint">
-      Publish a selection of your plan and let colleagues <strong>subscribe</strong> to it.
-      They see your milestones read-only and can hang their own dependencies off them.
-      Use <strong>Publish here</strong> to let other users on this server find and subscribe to it
-      directly; use <strong>Links</strong> to share with someone on another ATLAS instance.
+      This is <strong>not</strong> the same as “Make this plan public” above. Here you offer a
+      curated <strong>slice</strong> of your plan that other people <strong>subscribe</strong> to —
+      your milestones then appear <em>inside their own timeline</em>, read-only and kept in sync
+      (this is how a shared “team” account aggregates several people's milestones).
+      Use <strong>List on server</strong> so other users here can find &amp; subscribe to it; use
+      <strong>Links</strong> for someone on a different ATLAS instance.
     </p>
 
     <!-- existing scopes -->
@@ -25,9 +27,9 @@
             <button
               class="link-btn"
               :class="{ on: sc.published }"
-              :title="sc.published ? 'Visible to other users on this server — click to unpublish' : 'Let other users on this server discover and subscribe to this'"
+              :title="sc.published ? 'Listed — other users on this server can subscribe to this slice. Click to unlist.' : 'List this slice so other users on this server can find and subscribe to it'"
               @click="onTogglePublish(sc)"
-            >{{ sc.published ? 'Published ✓' : 'Publish here' }}</button>
+            >{{ sc.published ? 'Listed ✓' : 'List on server' }}</button>
             <button class="link-btn" @click="toggleTokens(sc)">{{ openScope === sc.id ? 'Hide links' : 'Links' }}</button>
             <button class="link-btn danger" @click="onDeleteScope(sc)">Delete</button>
           </div>
