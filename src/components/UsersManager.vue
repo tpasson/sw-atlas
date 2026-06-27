@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="card-stack">
     <!-- Create -->
     <div class="card">
       <p class="section-label">Add user</p>
@@ -137,9 +137,5 @@ async function onDelete(u) {
 .link-btn.danger { color: var(--clr-danger); }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.empty { font-size: 12.5px; color: var(--clr-text-3); padding: 8px 0; }
-.data-msg { font-size: 13px; margin: 8px 0 0; }
-.data-msg.ok { color: var(--clr-accent); }
-.data-msg.err { color: var(--clr-danger); }
-.card-hint { font-size: 12px; color: var(--clr-text-3); margin: 0 0 4px; line-height: 1.45; }
+/* .empty + .data-msg + .card-hint come from the shared Settings template in style.css. */
 </style>

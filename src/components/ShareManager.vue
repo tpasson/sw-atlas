@@ -314,7 +314,5 @@ async function copy(text) {
 }
 .field-input:focus { border-color: var(--clr-accent); }
 .field-input.sm { width: auto; max-width: 160px; padding: 7px 10px; font-size: 13px; }
-.empty, .empty-sm { font-size: 12.5px; color: var(--clr-text-3); padding: 8px 0; }
-.empty-sm { padding: 4px 0; }
-.data-msg.err { color: var(--clr-danger); font-size: 13px; margin-top: 8px; }
+.empty-sm { font-size: 12.5px; color: var(--clr-text-3); padding: 4px 0; }
 </style>

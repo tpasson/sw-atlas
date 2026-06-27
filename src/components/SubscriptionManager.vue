@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="card-stack">
     <!-- Directory of plans published by other users on this server -->
     <div class="card">
       <p class="section-label">Subscribe to someone on this server</p>
@@ -141,8 +141,5 @@ async function onRemove(s) {
 .link-btn.danger { color: var(--clr-danger); }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.empty { font-size: 12.5px; color: var(--clr-text-3); padding: 8px 0; }
-.data-msg { font-size: 13px; margin: 6px 0; }
-.data-msg.ok { color: var(--clr-accent); }
-.data-msg.err { color: var(--clr-danger); }
+/* .empty + .data-msg come from the shared Settings template in style.css. */
 </style>

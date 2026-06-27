@@ -811,33 +811,9 @@ function cancelEdit() {
 }
 .tab-pane { display: flex; flex-direction: column; gap: 14px; }
 
-.card {
-  background: var(--clr-bg);
-  border: 1px solid var(--clr-border-light);
-  border-radius: var(--r-lg);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.card-hint { font-size: 12px; color: var(--clr-text-3); margin-top: -6px; }
-
-.section-label {
-  font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--clr-text-3);
-}
-
-.row-between {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.setting-info { display: flex; flex-direction: column; gap: 2px; }
-.setting-name { font-size: 14px; font-weight: 600; color: var(--clr-text); }
+/* .card · .card-hint · .section-label · .row-between · .setting-info/name/desc
+   come from the shared Settings template in style.css. */
 .setting-sub { display: block; font-size: 11.5px; font-weight: 400; color: var(--clr-text-3); margin-top: 1px; }
-.setting-desc { font-size: 12px; color: var(--clr-text-3); }
 
 /* ── Toggle ──────────────────────────────────────────────────────────── */
 .toggle {
@@ -1012,7 +988,7 @@ function cancelEdit() {
 .fill-toggle.on { background: var(--clr-accent); color: #fff; border-color: var(--clr-accent); }
 
 /* ── Areas grid ──────────────────────────────────────────────────────── */
-.empty { font-size: 13px; color: var(--clr-text-3); text-align: center; padding: 28px 0; }
+/* .empty comes from the shared Settings template in style.css. */
 
 .lanes-grid {
   display: grid;
@@ -1158,9 +1134,7 @@ function cancelEdit() {
 .btn-primary:hover { background: var(--clr-accent-hover); }
 
 .data-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-.data-msg { margin-top: 12px; font-size: 13px; }
-.data-msg.ok { color: var(--clr-accent); }
-.data-msg.err { color: var(--clr-danger); }
+/* .data-msg comes from the shared Settings template in style.css. */
 
 .ext-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
   color: var(--clr-text-3); background: var(--clr-surface-2); padding: 2px 6px; border-radius: 999px; }
