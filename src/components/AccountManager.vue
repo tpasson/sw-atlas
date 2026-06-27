@@ -48,12 +48,10 @@ async function onChange() {
 .field-input { flex: 1; padding: 7px 10px; font-size: 13px; color: var(--clr-text);
   background: var(--clr-surface); border: 1px solid var(--clr-border-light); border-radius: var(--r-md); }
 .field-label { font-size: 12px; font-weight: 600; color: var(--clr-text-2); margin: 10px 0 0; }
-.card-hint { font-size: 12px; color: var(--clr-text-3); margin: 0 0 4px; line-height: 1.45; }
+/* .card-hint comes from the shared Settings template in style.css. */
 .btn-add { padding: 8px 14px; font-size: 13px; font-weight: 600; white-space: nowrap;
   color: var(--clr-accent); background: rgba(0,113,227,0.08); border-radius: var(--r-md); transition: background 0.15s; }
 .btn-add:hover:not(:disabled) { background: rgba(0,113,227,0.14); }
 .btn-add:disabled { opacity: 0.4; cursor: not-allowed; }
-.data-msg { font-size: 13px; margin: 8px 0 0; }
-.data-msg.ok { color: var(--clr-accent); }
-.data-msg.err { color: var(--clr-danger); }
+/* .data-msg comes from the shared Settings template in style.css. */
 </style>
