@@ -16,7 +16,8 @@
             <span class="scope-name">{{ sc.name }}</span>
             <span class="scope-sub">
               {{ sc.detailLevel === 'full' ? 'full detail' : 'timing only' }}
-              · {{ sc.lanes.length }} lanes · {{ sc.items.length }} items
+              · {{ sc.lanes.length }} area{{ sc.lanes.length === 1 ? '' : 's' }}
+              · {{ sharedCount(sc) }} milestone{{ sharedCount(sc) === 1 ? '' : 's' }}
               · {{ sc.tokenCount }} active link(s)
             </span>
           </div>
@@ -133,6 +134,21 @@ const canCreate = computed(() =>
 
 function fmt(s) {
   try { return new Date(s).toLocaleString() } catch { return s }
+}
+
+// How many milestones a scope actually shares: everything in its whole-area
+// includes plus its explicitly-picked items, minus any excluded ones. (Mirrors
+// the backend's ResolveScopePlan, so a whole-area scope no longer reads "0 items".)
+function sharedCount(sc) {
+  const lanes = new Set(sc.lanes || [])
+  const picked = new Set(sc.items || [])
+  const excluded = new Set(sc.excludes || [])
+  let n = 0
+  for (const m of store.milestones) {
+    if (excluded.has(m.id)) continue
+    if (lanes.has(m.swimlaneId) || picked.has(m.id)) n++
+  }
+  return n
 }
 
 async function load() {

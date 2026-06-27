@@ -80,7 +80,7 @@ const SETTINGS_DEFAULTS = {
   weekNumbers: { enabled: true },
   monthLines: { enabled: false, color: '#E5E5EA', opacity: 1, width: 1 },
   weekLines: { enabled: true, color: '#8E8E93', opacity: 0.1, width: 1 },
-  items: { fontSize: 14, fontWeight: 700, padding: 4, margin: 6, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 12, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13, maturitySize: 5, density: 'stack', densityRows: 3 },
+  items: { fontSize: 14, fontWeight: 700, padding: 4, margin: 6, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 18, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13, maturitySize: 5, density: 'stack', densityRows: 3 },
   markers: [
     { shape: 'l:Diamond', label: 'Milestone', fill: true },
     { shape: 'l:Circle', label: 'Circle', fill: true },
