@@ -478,9 +478,21 @@ function fmtDate(dt) {
 function anchorDate(m) {
   return m.when || `${m.year}-${String(m.month).padStart(2, '0')}-01`
 }
+// Measure a label's pixel width with the ACTUAL item font (weight + size + the
+// app's system stack) instead of estimating — bars decide inside/outside layout
+// from this, so a character-count guess left short bars looking cramped.
+const LABEL_FONT_FAMILY = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif"
+let _measureCtx = null
 function estTextW(t) {
-  // Scale with the configured font size (~0.58 × fontSize per character).
-  return Math.ceil((t ? t.length : 0) * settings.items.fontSize * 0.58)
+  if (!t) return 0
+  if (typeof document !== 'undefined') {
+    if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d')
+    if (_measureCtx) {
+      _measureCtx.font = `${settings.items.fontWeight} ${settings.items.fontSize}px ${LABEL_FONT_FAMILY}`
+      return Math.ceil(_measureCtx.measureText(t).width)
+    }
+  }
+  return Math.ceil(t.length * settings.items.fontSize * 0.58) // fallback (no DOM)
 }
 function markerOf(m) {
   if (m.marker && m.marker !== 'bar') return m.marker
