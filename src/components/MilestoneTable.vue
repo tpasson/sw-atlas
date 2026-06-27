@@ -209,16 +209,6 @@
 
     <div class="track-spacer"></div>
 
-    <div class="legend">
-      <span v-for="(m, i) in settings.markers" :key="m.shape + i" class="legend-item">
-        <MarkerIcon :shape="m.shape" color="#8a8a8e" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="m.fill" /> {{ m.label }}
-      </span>
-      <span class="legend-item"><span class="legend-bar"></span> {{ settings.eventLabel }}</span>
-      <span class="legend-sep"></span>
-      <span v-for="(s, i) in MATURITY_STAGES" :key="s" class="legend-item">
-        <MaturityGlyph :level="i + 1" variant="grid" color="#8a8a8e" :title="s" /> {{ s }}
-      </span>
-    </div>
   </div>
 
   <!-- Tooltip -->
@@ -1334,23 +1324,7 @@ thead th {
 .empty-state { text-align: center; padding: 80px 20px; color: var(--clr-text-3); font-size: 14px; }
 
 /* --- Legend --- */
-.legend {
-  position: fixed;
-  bottom: 14px; right: 18px;
-  display: flex; gap: 14px; align-items: center;
-  min-height: 40px; box-sizing: border-box;
-  padding: 0 16px;
-  background: var(--clr-glass);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--clr-border);
-  border-radius: 100px;
-  box-shadow: var(--sh-lg), 0 0 0 1px rgba(0,0,0,0.03);
-  font-size: 11px; color: var(--clr-text-2);
-  z-index: 50;
-}
-.legend-item { display: inline-flex; align-items: center; gap: 5px; }
-.legend-sep { width: 1px; height: 18px; background: var(--clr-border); flex-shrink: 0; }
-.legend-bar { width: 18px; height: 10px; border-radius: 3px; background: rgba(120,120,128,0.3); border: 1px solid rgba(120,120,128,0.55); }
+/* The bottom legend + groups now live in the unified GroupLegend.vue dock. */
 
 /* --- Tooltip --- */
 .ms-tooltip {
