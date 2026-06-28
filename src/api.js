@@ -65,6 +65,9 @@ const realApi = {
   getGitColors: () => req('GET', '/settings/git-colors'),
   setGitColors: (colors) => req('PUT', '/settings/git-colors', colors),
 
+  // Item-type registry (T1 foundation; consumers land in T2/T3).
+  itemTypes: () => req('GET', '/item-types'),
+
   // swimlanes
   createSwimlane: (data) => req('POST', '/swimlanes', data),
   updateSwimlane: (id, patch) => req('PUT', `/swimlanes/${id}`, patch),
