@@ -154,8 +154,29 @@
         <template v-if="authenticated">
           <span v-if="session.username" class="user-chip" title="Signed in">{{ session.username }}</span>
 
-          <!-- Viewing your own plan → full editing controls. -->
-          <template v-if="workspace.isOwn">
+          <!-- Project switcher -->
+          <div v-if="workspace.myWorkspaces.length" class="bl-dd proj-dd" ref="projRef">
+            <button class="bl-select" :class="{ open: projOpen }" title="Switch project" @click="projOpen = !projOpen">
+              <span class="bl-cur">{{ currentProjectName }}</span>
+              <svg class="bl-chevron" width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div v-if="projOpen" class="bl-menu">
+              <button
+                v-for="p in workspace.myWorkspaces"
+                :key="p.slug || 'home'"
+                class="bl-opt"
+                :class="{ active: p.slug === workspace.slug }"
+                @click="goProject(p.slug)"
+              >
+                <span class="bl-opt-name">{{ p.name }}</span>
+                <span class="bl-opt-sub">{{ p.role }}</span>
+              </button>
+              <button class="bl-opt proj-new" @click="newProject">+ New project</button>
+            </div>
+          </div>
+
+          <!-- Editable workspace (owner/editor) → full editing controls. -->
+          <template v-if="canEdit">
             <span v-if="!baselines.activeId" class="edit-pill">
               <span class="edit-dot"></span>
               Editing
@@ -191,7 +212,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Sun, Moon, AlertTriangle } from 'lucide-vue-next'
-import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace } from '../stores/useAppStore.js'
+import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace, canEditWorkspace, createProject } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 
 defineProps({
@@ -202,6 +223,26 @@ defineProps({
 defineEmits(['prev-year', 'next-year', 'manage', 'zoom-in', 'zoom-out', 'login', 'logout', 'about'])
 
 const version = APP_VERSION
+
+const canEdit = computed(() => canEditWorkspace())
+
+// Project switcher
+const projOpen = ref(false)
+const projRef = ref(null)
+const currentProjectName = computed(() => {
+  const cur = workspace.myWorkspaces.find(p => p.slug === workspace.slug)
+  return cur?.name || workspace.slug || 'Plan'
+})
+function goProject(slug) {
+  projOpen.value = false
+  window.location.assign('/' + encodeURIComponent(slug))
+}
+async function newProject() {
+  projOpen.value = false
+  const name = prompt('New project name:')
+  if (!name || !name.trim()) return
+  try { await createProject(name.trim()) } catch (e) { alert(e?.message || 'Could not create the project') }
+}
 
 // Navigate back to your own workspace (full load re-runs initApp for that slug).
 function goToOwn() {
@@ -285,8 +326,11 @@ const currentLabel = computed(() => {
   return b ? b.name : 'Live'
 })
 function pickBaseline(id) { selectBaseline(id); blOpen.value = false }
-function onDocClick(e) { if (blRef.value && !blRef.value.contains(e.target)) blOpen.value = false }
-function onKeyDown(e) { if (e.key === 'Escape') blOpen.value = false }
+function onDocClick(e) {
+  if (blRef.value && !blRef.value.contains(e.target)) blOpen.value = false
+  if (projRef.value && !projRef.value.contains(e.target)) projOpen.value = false
+}
+function onKeyDown(e) { if (e.key === 'Escape') { blOpen.value = false; projOpen.value = false } }
 onMounted(() => { document.addEventListener('click', onDocClick); document.addEventListener('keydown', onKeyDown) })
 onUnmounted(() => { document.removeEventListener('click', onDocClick); document.removeEventListener('keydown', onKeyDown) })
 function nowStamp() {

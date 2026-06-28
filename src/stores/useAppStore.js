@@ -4,7 +4,7 @@ import { LUCIDE_MARKER_SHAPES } from '../lucideMarkers.js'
 
 const IS_DEMO = !!import.meta.env.VITE_DEMO
 // Top-level URL segments that are never workspace slugs.
-const RESERVED_SLUGS = new Set(['api', 'assets', 'favicon.svg', 'w', 'health', 'index.html'])
+const RESERVED_SLUGS = new Set(['api', 'assets', 'favicon.svg', 'w', 'health', 'index.html', 'explore', 'shared', 'projects'])
 
 // workspaceSlugFromUrl reads the first path segment of the current URL as the
 // workspace slug ('' = home/default). Never applies in the demo (single sandbox).
@@ -90,9 +90,16 @@ export const session = reactive({
 export const workspace = reactive({
   mode: 'plan',
   slug: '',
-  isOwn: false,
+  isOwn: false,        // viewing my personal /{username} home workspace
   ownSlug: '',
+  role: null,          // my role in the viewed workspace: owner | editor | viewer | null
+  myWorkspaces: [],    // [{slug, name, role, visibility}] for the switcher
 })
+
+// Can the current user edit the viewed workspace (owner or editor member)?
+export function canEditWorkspace() {
+  return session.authenticated && (workspace.role === 'owner' || workspace.role === 'editor')
+}
 
 // Appearance settings are stored per-workspace on the server (so a plan looks the
 // same on any device and renders the owner's design for viewers). SETTINGS_KEY is
@@ -270,7 +277,7 @@ watch(settings, (v) => {
   }
   // Appearance is server-backed, but only for your OWN plan — viewing someone
   // else's plan loads their settings and must not overwrite yours.
-  if (session.authenticated && workspace.isOwn) {
+  if (canEditWorkspace()) {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ } // cache for instant first paint
     clearTimeout(uiSaveTimer)
     uiSaveTimer = setTimeout(saveUISettings, 600)
@@ -305,7 +312,7 @@ export async function loadUISettings() {
   let r
   try { r = await api.getUISettings() } catch { return }
   if (r && r.settings) mergeSettings(r.settings)
-  else if (session.authenticated && workspace.isOwn) saveUISettings()
+  else if (canEditWorkspace()) saveUISettings()
   else resetAppearance()
 }
 
@@ -533,6 +540,7 @@ export async function initApp() {
 
   workspace.mode = 'plan'
   resolveWorkspaceTarget(me)
+  if (session.authenticated) await loadMyWorkspaces()
 
   try {
     const pr = await api.getPublicRead()
@@ -561,7 +569,7 @@ export async function initApp() {
 // /{slug} in the URL, else the logged-in user's own (reflected into the URL bar),
 // else the home/default plan. Sets the api header + the reactive workspace state.
 function resolveWorkspaceTarget(me) {
-  if (IS_DEMO) { workspace.slug = ''; workspace.isOwn = true; setWorkspaceSlug(''); return }
+  if (IS_DEMO) { workspace.slug = ''; workspace.isOwn = true; workspace.role = 'owner'; setWorkspaceSlug(''); return }
   const ownSlug = me.workspace || ''
   const urlSlug = workspaceSlugFromUrl()
   let target
@@ -576,7 +584,29 @@ function resolveWorkspaceTarget(me) {
   workspace.slug = target
   workspace.ownSlug = ownSlug
   workspace.isOwn = session.authenticated && !!ownSlug && target === ownSlug
+  // Optimistic role for the common case (own home); loadMyWorkspaces() refines it
+  // (e.g. when you're an editor of a shared project, or a non-member viewer).
+  workspace.role = workspace.isOwn ? 'owner' : null
   setWorkspaceSlug(target)
+}
+
+// loadMyWorkspaces fetches the projects the user belongs to (for the switcher)
+// and pins the role for the currently-viewed one.
+export async function loadMyWorkspaces() {
+  if (IS_DEMO || !session.authenticated) { workspace.myWorkspaces = []; return }
+  try {
+    const list = await api.listProjects()
+    workspace.myWorkspaces = list || []
+    const mine = (list || []).find(w => w.slug === workspace.slug)
+    workspace.role = mine ? mine.role : null
+  } catch { workspace.myWorkspaces = [] }
+}
+
+// createProject makes a new project and navigates to it.
+export async function createProject(name) {
+  const ws = await api.createProject({ name })
+  window.location.assign('/' + encodeURIComponent(ws.slug))
+  return ws
 }
 
 // workspaceLoadError maps a failed plan load to a user-facing state.
@@ -774,6 +804,7 @@ export function useAppStore() {
     session.role = (res && res.role) || null
     session.error = null
     workspace.isOwn = true
+    workspace.role = 'owner'
     try {
       const pr = await api.getPublicRead()
       session.publicReadEnabled = !!pr.enabled

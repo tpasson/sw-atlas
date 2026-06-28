@@ -279,6 +279,8 @@ export const demoApi = {
   setUISettings: () => ok(),
   getGitColors: () => ok(gc()),
   setGitColors: (c) => { db.gitColors = c; save(); return ok(c) },
+  listProjects: () => ok([{ slug: '', name: 'Demo plan', role: 'owner', visibility: 'public' }]),
+  createProject: () => ok({ slug: '', name: 'Demo plan', visibility: 'private' }),
   itemTypes: () => ok(itemTypeCatalog()),
   setItemTypes: (types) => {
     const builtin = new Set(['milestone', 'event', 'point'])
