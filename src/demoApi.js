@@ -352,12 +352,12 @@ export const demoApi = {
     save(); return ok()
   },
 
-  addLink: (a, b) => {
-    if (a !== b && !db.links.some(l => (l.a === a && l.b === b) || (l.a === b && l.b === a))) db.links.push({ a, b })
+  addLink: (a, b, rel = 'depends-on') => {
+    if (a !== b && !db.links.some(l => l.a === a && l.b === b && (l.rel || 'depends-on') === rel)) db.links.push({ a, b, rel })
     save(); return ok()
   },
-  removeLink: (a, b) => {
-    db.links = db.links.filter(l => !((l.a === a && l.b === b) || (l.a === b && l.b === a)))
+  removeLink: (a, b, rel = 'depends-on') => {
+    db.links = db.links.filter(l => !(l.a === a && l.b === b && (l.rel || 'depends-on') === rel))
     save(); return ok()
   },
 

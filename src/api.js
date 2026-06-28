@@ -86,8 +86,8 @@ const realApi = {
   deleteItem: (id) => req('DELETE', `/items/${id}`),
 
   // links
-  addLink: (a, b) => req('POST', '/links', { a, b }),
-  removeLink: (a, b) => req('DELETE', '/links', { a, b }),
+  addLink: (a, b, rel = 'depends-on') => req('POST', '/links', { a, b, rel }),
+  removeLink: (a, b, rel = 'depends-on') => req('DELETE', '/links', { a, b, rel }),
 
   // sharing — federation producer side
   listShareScopes: () => req('GET', '/share-scopes'),
