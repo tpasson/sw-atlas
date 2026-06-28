@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -38,6 +41,105 @@ func (s *Store) scanWorkspace(ctx context.Context, where string, arg string) (Wo
 		return Workspace{}, ErrNotFound
 	}
 	return w, err
+}
+
+// UserWorkspace is one switcher entry: a workspace the user belongs to + my role.
+type UserWorkspace struct {
+	Slug       string `json:"slug"`
+	Name       string `json:"name"`
+	Role       string `json:"role"`
+	Visibility string `json:"visibility"`
+}
+
+// ListWorkspacesForUser returns every workspace the user is a member of with the
+// user's role in each (powers the project switcher).
+func (s *Store) ListWorkspacesForUser(ctx context.Context, userID string) ([]UserWorkspace, error) {
+	out := []UserWorkspace{}
+	rows, err := s.pool.Query(ctx,
+		`SELECT w.slug, w.name, m.role, w.visibility
+		   FROM workspace_member m JOIN workspace w ON w.id = m.workspace_id
+		  WHERE m.user_id = $1
+		  ORDER BY w.name`, userID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uw UserWorkspace
+		if err := rows.Scan(&uw.Slug, &uw.Name, &uw.Role, &uw.Visibility); err != nil {
+			return out, err
+		}
+		out = append(out, uw)
+	}
+	return out, rows.Err()
+}
+
+var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+
+func slugify(name string) string {
+	return strings.Trim(slugNonAlnum.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-"), "-")
+}
+
+// reservedSlugs can never be workspace slugs — they collide with app routes.
+// Keep in sync with RESERVED_SLUGS in the frontend store.
+var reservedSlugs = map[string]bool{
+	"api": true, "assets": true, "health": true, "explore": true, "shared": true,
+	"w": true, "default": true, "index.html": true, "favicon.svg": true, "projects": true,
+}
+
+func isReservedSlug(slug string) bool { return reservedSlugs[slug] }
+
+// CreateWorkspace creates a project owned by ownerUserID, seeds the owner
+// membership, and derives a unique slug from the name (numeric suffix on clash).
+func (s *Store) CreateWorkspace(ctx context.Context, ownerUserID, name string) (Workspace, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Workspace{}, errors.New("name is required")
+	}
+	base := slugify(name)
+	if base == "" || isReservedSlug(base) {
+		base = "project"
+	}
+	id := "ws-" + uuid.NewString()
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Workspace{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	slug := base
+	for i := 2; ; i++ {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workspace WHERE slug = $1)`, slug).Scan(&exists); err != nil {
+			return Workspace{}, err
+		}
+		if !exists && !isReservedSlug(slug) {
+			break
+		}
+		if i > 99 {
+			return Workspace{}, ErrConflict
+		}
+		slug = fmt.Sprintf("%s-%d", base, i)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workspace (id, slug, name, owner_user_id, visibility) VALUES ($1, $2, $3, $4, 'private')`,
+		id, slug, name, ownerUserID); err != nil {
+		return Workspace{}, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO app_setting (workspace_id, key, value) VALUES ($1, 'public_read_enabled', 'false')`, id); err != nil {
+		return Workspace{}, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workspace_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, id, ownerUserID); err != nil {
+		return Workspace{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Workspace{}, err
+	}
+	return Workspace{ID: id, Slug: slug, Name: name, OwnerUserID: &ownerUserID, Visibility: "private"}, nil
 }
 
 // PublicWorkspace is a discovery-directory entry: a public plan plus a small

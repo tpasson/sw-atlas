@@ -50,6 +50,10 @@ const realApi = {
   listPublicWorkspaces: () => req('GET', '/explore'),
   setWorkspaceFeatured: (slug, featured) => req('PUT', `/workspaces/${slug}/featured`, { featured }),
 
+  // projects (multi-member workspaces)
+  listProjects: () => req('GET', '/projects'),
+  createProject: (data) => req('POST', '/projects', data),
+
   // plan + settings
   getPlan: () => req('GET', '/plan'),
   exportPlan: () => req('GET', '/export'),

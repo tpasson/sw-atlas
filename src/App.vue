@@ -95,7 +95,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted } from 'vue'
-import { useAppStore, store, session, workspace, baselines, initApp } from './stores/useAppStore.js'
+import { useAppStore, store, session, workspace, baselines, initApp, canEditWorkspace } from './stores/useAppStore.js'
 import TheHeader from './components/TheHeader.vue'
 import MilestoneTable from './components/MilestoneTable.vue'
 import ExplorerView from './components/ExplorerView.vue'
@@ -116,7 +116,7 @@ const zoom = ref(1)
 // Editing is unlocked only when an authenticated user is viewing their OWN
 // workspace — never on someone else's plan, and never while viewing a saved
 // baseline (a historical snapshot, not the live/head plan).
-const readOnly = computed(() => !session.authenticated || !workspace.isOwn || !!baselines.activeId)
+const readOnly = computed(() => !canEditWorkspace() || !!baselines.activeId)
 
 onMounted(initApp)
 

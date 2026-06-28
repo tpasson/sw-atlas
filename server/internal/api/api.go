@@ -59,6 +59,13 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/baselines/{id}", s.getBaseline)
 		})
 
+		// Projects: any authenticated user lists their own + creates new ones.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAuth)
+			r.Get("/projects", s.listProjects)
+			r.Post("/projects", s.createProject)
+		})
+
 		// Write endpoints: editors only.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireEditor)
@@ -220,6 +227,17 @@ func (s *Server) requireEditor(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
+	})
+}
+
+// requireAuth gates an endpoint to any authenticated user (no workspace target).
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.auth.SessionFromRequest(r); !ok {
+			writeErr(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -506,6 +524,34 @@ func (s *Server) getGitColors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// listProjects returns the workspaces the caller belongs to (for the switcher).
+func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.auth.SessionFromRequest(r)
+	list, err := s.store.ListWorkspacesForUser(r.Context(), sess.UserID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// createProject creates a new workspace owned by the caller.
+func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.auth.SessionFromRequest(r)
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	ws, err := s.store.CreateWorkspace(r.Context(), sess.UserID, in.Name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, ws)
 }
 
 // getItemTypes returns the workspace's item-type catalog (built-ins + custom).
