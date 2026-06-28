@@ -1,10 +1,19 @@
 <template>
-  <div class="explorer">
+  <div class="explorer" :class="{ wide: mode !== 'folders' }">
     <div class="ex-head">
-      <h2 class="ex-h">Explorer</h2>
-      <span class="ex-sub">All artifacts, grouped by type</span>
+      <div>
+        <h2 class="ex-h">Explorer</h2>
+        <span class="ex-sub">{{ subtitle }}</span>
+      </div>
+      <div class="ex-modes">
+        <button v-for="m in MODES" :key="m.key" class="ex-mode" :class="{ on: mode === m.key }" @click="setMode(m.key)">{{ m.label }}</button>
+      </div>
     </div>
 
+    <TableView v-if="mode === 'table'" @edit="$emit('edit', $event)" />
+    <BoardView v-else-if="mode === 'board'" :read-only="readOnly" @edit="$emit('edit', $event)" />
+
+    <template v-else>
     <div v-for="g in folders" :key="g.key" class="ex-folder">
       <div class="ex-folder-head">
         <MarkerIcon :shape="g.type.icon || 'l:Diamond'" :color="g.type.color || '#8a8a8e'" :size="15" :fill="true" />
@@ -23,16 +32,28 @@
     </div>
 
     <div v-if="!folders.length" class="ex-blank">No artifacts yet. Add items on the timeline, or define backlog types in Settings → Types.</div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { store, itemTypes, MONTHS } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
+import TableView from './TableView.vue'
+import BoardView from './BoardView.vue'
 
 defineProps({ readOnly: { type: Boolean, default: false } })
 defineEmits(['edit', 'add'])
+
+const MODES = [{ key: 'folders', label: 'Folders' }, { key: 'table', label: 'Table' }, { key: 'board', label: 'Board' }]
+const MODE_KEY = 'atlas-explorer-mode'
+const mode = ref(['folders', 'table', 'board'].includes(localStorage.getItem(MODE_KEY)) ? localStorage.getItem(MODE_KEY) : 'folders')
+function setMode(k) { mode.value = k; try { localStorage.setItem(MODE_KEY, k) } catch { /* ignore */ } }
+const subtitle = computed(() =>
+  mode.value === 'table' ? 'All artifacts as a sortable table'
+    : mode.value === 'board' ? 'Drag cards to advance their maturity stage'
+      : 'All artifacts, grouped by type')
 
 function offTimeline(t) {
   return t.family === 'work-item' || t.family === 'container'
@@ -66,9 +87,14 @@ function meta(m) {
 
 <style scoped>
 .explorer { max-width: 920px; margin: 0 auto; padding: 24px 18px 80px; }
-.ex-head { margin-bottom: 18px; }
+.explorer.wide { max-width: 1320px; }
+.ex-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .ex-h { font-size: 20px; font-weight: 700; color: var(--clr-text); }
 .ex-sub { font-size: 13px; color: var(--clr-text-3); }
+.ex-modes { display: inline-flex; gap: 2px; background: var(--clr-surface-2); border-radius: 100px; padding: 2px; flex-shrink: 0; }
+.ex-mode { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: transparent; border-radius: 100px; padding: 5px 14px; transition: background 0.12s, color 0.12s; }
+.ex-mode.on { background: var(--clr-surface); color: var(--clr-text); box-shadow: var(--sh-sm); }
+.ex-mode:hover:not(.on) { color: var(--clr-text); }
 
 .ex-folder { margin-bottom: 18px; border: 1px solid var(--clr-border-light); border-radius: var(--r-lg); overflow: hidden; background: var(--clr-surface); }
 .ex-folder-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--clr-bg); border-bottom: 1px solid var(--clr-border-light); }
