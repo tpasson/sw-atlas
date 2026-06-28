@@ -71,12 +71,13 @@ func runServe(cfg config.Config) {
 		log.Println("WARNING: no user accounts exist and ATLAS_EDITOR_PASSWORD_HASH is empty — login is disabled until you bootstrap an admin (set ATLAS_EDITOR_USERNAME + ATLAS_EDITOR_PASSWORD_HASH, see: atlas hashpw <password>)")
 	}
 
-	// Background smart-poll: sync due subscriptions every minute.
+	// Background smart-poll: sync due subscriptions + GitHub sources every minute.
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()
 		for range t.C {
 			st.SyncDueSubscriptions(context.Background())
+			st.SyncDueGitHubSources(context.Background())
 		}
 	}()
 

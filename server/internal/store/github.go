@@ -117,6 +117,36 @@ func (s *Store) markGitHubSync(ctx context.Context, ws, id, status string) {
 	_, _ = s.pool.Exec(ctx, `UPDATE github_source SET last_status = $2, last_synced_at = now() WHERE id = $1 AND workspace_id = $3`, id, status, ws)
 }
 
+// markGitHubEtags records a successful poll: status, timestamp and the fresh
+// per-resource ETag map used for the next conditional probe.
+func (s *Store) markGitHubEtags(ctx context.Context, ws, id, status string, etags map[string]string) {
+	b, _ := json.Marshal(etags)
+	_, _ = s.pool.Exec(ctx, `UPDATE github_source SET last_status = $2, last_synced_at = now(), etags = $3 WHERE id = $1 AND workspace_id = $4`, id, status, b, ws)
+}
+
+// SyncDueGitHubSources re-syncs every source whose interval has elapsed. Called
+// from the background ticker; mirrors SyncDueSubscriptions.
+func (s *Store) SyncDueGitHubSources(ctx context.Context) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT workspace_id, id FROM github_source
+		 WHERE last_synced_at IS NULL OR last_synced_at < now() - make_interval(secs => interval_seconds)`)
+	if err != nil {
+		return
+	}
+	type due struct{ ws, id string }
+	var pairs []due
+	for rows.Next() {
+		var d due
+		if rows.Scan(&d.ws, &d.id) == nil {
+			pairs = append(pairs, d)
+		}
+	}
+	rows.Close()
+	for _, d := range pairs {
+		_ = s.SyncGitHubSource(ctx, d.ws, d.id)
+	}
+}
+
 // SetGitHubSourceToken updates the stored token (for private / self-hosted repos)
 // without recreating the source.
 func (s *Store) SetGitHubSourceToken(ctx context.Context, ws, id, token string) error {
@@ -134,12 +164,13 @@ func (s *Store) SetGitHubSourceToken(ctx context.Context, ws, id, token string) 
 // them locally. The outcome (or any error) is recorded in last_status.
 func (s *Store) SyncGitHubSource(ctx context.Context, ws, id string) error {
 	var cfg ghConfig
+	var etagsRaw []byte
 	err := s.pool.QueryRow(ctx,
 		`SELECT owner, repo, html_url, provider, api_base, token, include_releases, include_tags, include_issues, include_prs,
-		        stable_only, state_filter, since_date, max_per_type
+		        stable_only, state_filter, since_date, max_per_type, etags
 		 FROM github_source WHERE id = $1 AND workspace_id = $2`, id, ws).
 		Scan(&cfg.owner, &cfg.repo, &cfg.htmlURL, &cfg.provider, &cfg.apiBase, &cfg.token, &cfg.releases, &cfg.tags, &cfg.issues, &cfg.prs,
-			&cfg.stableOnly, &cfg.stateFilter, &cfg.since, &cfg.maxPerType)
+			&cfg.stableOnly, &cfg.stateFilter, &cfg.since, &cfg.maxPerType, &etagsRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -148,6 +179,39 @@ func (s *Store) SyncGitHubSource(ctx context.Context, ws, id string) error {
 	}
 	cfg.token = decToken(cfg.token) // stored encrypted (or legacy plaintext)
 	cfg.colors, _ = s.GetGitColors(ctx, ws)
+
+	// ETag-aware probe: a cheap conditional page-1 request per enabled resource.
+	// If every enabled resource is unchanged (304), skip the full fetch + mirror.
+	prev := map[string]string{}
+	_ = json.Unmarshal(etagsRaw, &prev)
+	next := map[string]string{}
+	probes := []struct {
+		on   bool
+		key  string
+		path string
+	}{
+		{cfg.releases, "releases", fmt.Sprintf("/repos/%s/%s/releases?per_page=100", cfg.owner, cfg.repo)},
+		{cfg.tags, "tags", fmt.Sprintf("/repos/%s/%s/tags?per_page=100", cfg.owner, cfg.repo)},
+		{cfg.issues, "issues", ghIssuesPath(cfg)},
+		{cfg.prs, "pulls", fmt.Sprintf("/repos/%s/%s/pulls?state=%s&per_page=100", cfg.owner, cfg.repo, ghState(cfg))},
+	}
+	anyEnabled, anyChanged := false, false
+	for _, p := range probes {
+		if !p.on {
+			continue
+		}
+		anyEnabled = true
+		changed, et := ghProbe(ctx, cfg, p.path, prev[p.key])
+		if changed {
+			anyChanged = true
+		}
+		next[p.key] = et
+	}
+	if anyEnabled && !anyChanged {
+		s.markGitHubEtags(ctx, ws, id, "ok · unchanged", next)
+		return nil
+	}
+
 	wire, ferr := fetchGitHub(ctx, cfg)
 	if ferr != nil {
 		s.markGitHubSync(ctx, ws, id, "error: "+ferr.Error())
@@ -157,7 +221,7 @@ func (s *Store) SyncGitHubSource(ctx context.Context, ws, id string) error {
 		s.markGitHubSync(ctx, ws, id, "error: "+err.Error())
 		return err
 	}
-	s.markGitHubSync(ctx, ws, id, fmt.Sprintf("ok · %d items", len(wire.Milestones)))
+	s.markGitHubEtags(ctx, ws, id, fmt.Sprintf("ok · %d items", len(wire.Milestones)), next)
 	return nil
 }
 
@@ -244,18 +308,7 @@ func ghDo(ctx context.Context, cfg ghConfig, rawURL string) ([]byte, string, err
 	if err != nil {
 		return nil, "", err
 	}
-	if cfg.provider == "gitea" {
-		req.Header.Set("Accept", "application/json")
-		if cfg.token != "" {
-			req.Header.Set("Authorization", "token "+cfg.token)
-		}
-	} else {
-		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-		if cfg.token != "" {
-			req.Header.Set("Authorization", "Bearer "+cfg.token)
-		}
-	}
+	ghSetAuth(req, cfg)
 	resp, err := ghClient.Do(req)
 	if err != nil {
 		return nil, "", err
@@ -274,6 +327,61 @@ func ghDo(ctx context.Context, cfg ghConfig, rawURL string) ([]byte, string, err
 	default:
 		return nil, "", fmt.Errorf("the server returned %d", resp.StatusCode)
 	}
+}
+
+// ghSetAuth applies the provider-appropriate Accept + Authorization headers.
+func ghSetAuth(req *http.Request, cfg ghConfig) {
+	if cfg.provider == "gitea" {
+		req.Header.Set("Accept", "application/json")
+		if cfg.token != "" {
+			req.Header.Set("Authorization", "token "+cfg.token)
+		}
+		return
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if cfg.token != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.token)
+	}
+}
+
+// ghProbe issues a cheap conditional GET (If-None-Match) for one resource's
+// first page and reports whether it changed since prevEtag. A 304 means
+// unchanged (keep prevEtag); a 200 returns the fresh ETag. Any transport/other
+// status forces changed=true so the real sync runs and surfaces the outcome.
+func ghProbe(ctx context.Context, cfg ghConfig, path, prevEtag string) (changed bool, etag string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ghBase(cfg)+path, nil)
+	if err != nil {
+		return true, prevEtag
+	}
+	ghSetAuth(req, cfg)
+	if prevEtag != "" {
+		req.Header.Set("If-None-Match", prevEtag)
+	}
+	resp, err := ghClient.Do(req)
+	if err != nil {
+		return true, prevEtag
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	switch resp.StatusCode {
+	case http.StatusNotModified:
+		return false, prevEtag
+	case http.StatusOK:
+		return true, resp.Header.Get("ETag")
+	default:
+		return true, prevEtag
+	}
+}
+
+// ghIssuesPath builds the issues list path (kept identical between the probe and
+// the real fetch so their ETags line up).
+func ghIssuesPath(cfg ghConfig) string {
+	p := fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=100", cfg.owner, cfg.repo, ghState(cfg))
+	if cfg.provider == "gitea" {
+		p += "&type=issues" // Gitea returns PRs on /issues unless filtered
+	}
+	return p
 }
 
 // ghGet fetches a single resource (no pagination) into out.
@@ -525,11 +633,7 @@ func ghTags(ctx context.Context, cfg ghConfig, skip map[string]bool) ([]Item, er
 }
 
 func ghIssues(ctx context.Context, cfg ghConfig) ([]Item, error) {
-	ip := fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=100", cfg.owner, cfg.repo, ghState(cfg))
-	if cfg.provider == "gitea" {
-		ip += "&type=issues" // Gitea returns PRs on /issues unless filtered
-	}
-	issues, err := ghGetAll[ghIssue](ctx, cfg, ip)
+	issues, err := ghGetAll[ghIssue](ctx, cfg, ghIssuesPath(cfg))
 	if err != nil {
 		return nil, err
 	}
