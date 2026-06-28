@@ -24,6 +24,7 @@
               <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
               <button v-if="session.authenticated" class="tab" :class="{ active: tab === 'sources' }" @click="tab = 'sources'">Sources</button>
               <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
+              <button v-if="!isDemo && workspace.role === 'owner'" class="tab" :class="{ active: tab === 'members' }" @click="tab = 'members'">Members</button>
               <button v-if="!isDemo && session.role === 'admin'" class="tab" :class="{ active: tab === 'users' }" @click="tab = 'users'">Users</button>
               <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'account' }" @click="tab = 'account'">Account</button>
             </div>
@@ -512,6 +513,10 @@
                 <GitHubSourceManager />
               </section>
 
+              <section v-if="tab === 'members' && workspace.role === 'owner'" class="tab-pane">
+                <MembersManager :slug="workspace.slug" />
+              </section>
+
               <section v-if="tab === 'sharing'" class="tab-pane">
                 <!-- Plan visibility: make the WHOLE plan public (explore page + /{slug}). -->
                 <div class="card">
@@ -552,12 +557,13 @@
 
 <script setup>
 import { reactive, ref, computed } from 'vue'
-import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, session, settings, resetSettings, MARKER_LIBRARY, exportPlanToFile, importPlanFromFile } from '../stores/useAppStore.js'
+import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, session, settings, resetSettings, MARKER_LIBRARY, exportPlanToFile, importPlanFromFile, workspace } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import ShareManager from './ShareManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
 import GitHubSourceManager from './GitHubSourceManager.vue'
 import UsersManager from './UsersManager.vue'
+import MembersManager from './MembersManager.vue'
 import AccountManager from './AccountManager.vue'
 import TypesManager from './TypesManager.vue'
 

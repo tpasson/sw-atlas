@@ -281,6 +281,11 @@ export const demoApi = {
   setGitColors: (c) => { db.gitColors = c; save(); return ok(c) },
   listProjects: () => ok([{ slug: '', name: 'Demo plan', role: 'owner', visibility: 'public' }]),
   createProject: () => ok({ slug: '', name: 'Demo plan', visibility: 'private' }),
+  leaveProject: () => ok(),
+  listMembers: () => ok([]),
+  inviteMember: () => Promise.reject(new Error('Inviting members is disabled in the demo')),
+  setMemberRole: () => ok(),
+  removeMember: () => ok(),
   itemTypes: () => ok(itemTypeCatalog()),
   setItemTypes: (types) => {
     const builtin = new Set(['milestone', 'event', 'point'])

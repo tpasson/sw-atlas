@@ -59,11 +59,22 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/baselines/{id}", s.getBaseline)
 		})
 
-		// Projects: any authenticated user lists their own + creates new ones.
+		// Projects: any authenticated user lists their own + creates new ones,
+		// and can leave a project they belong to.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/projects", s.listProjects)
 			r.Post("/projects", s.createProject)
+			r.Post("/projects/{slug}/leave", s.leaveProject)
+		})
+
+		// Member management: only the project owner (by path slug).
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireWorkspaceOwnerByPath)
+			r.Get("/projects/{slug}/members", s.listMembers)
+			r.Post("/projects/{slug}/members", s.inviteMember)
+			r.Put("/projects/{slug}/members/{userId}/role", s.setMemberRole)
+			r.Delete("/projects/{slug}/members/{userId}", s.removeMember)
 		})
 
 		// Write endpoints: editors only.
@@ -238,6 +249,38 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// requireWorkspaceOwnerByPath gates member-management endpoints: the caller must
+// be an OWNER of the workspace named by the {slug} path param (which may differ
+// from the active workspace). Stores the resolved id in context for the handler.
+func (s *Server) requireWorkspaceOwnerByPath(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := s.auth.SessionFromRequest(r)
+		if !ok {
+			writeErr(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		ws, err := s.store.GetWorkspaceBySlug(r.Context(), chi.URLParam(r, "slug"))
+		if err == store.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "project not found")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, ws.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if role != store.WSRoleOwner {
+			writeErr(w, http.StatusForbidden, "only the project owner can manage members")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), ws.ID)))
 	})
 }
 
@@ -554,6 +597,80 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, ws)
 }
 
+// listMembers returns the roster of the workspace named by {slug} (owner only).
+func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
+	list, err := s.store.ListMembers(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// inviteMember adds a user (by username) as editor/viewer (owner only).
+func (s *Server) inviteMember(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Username string `json:"username"`
+		Role     string `json:"role"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	m, err := s.store.AddMember(r.Context(), s.currentWorkspace(r), in.Username, in.Role)
+	if err == store.ErrNotFound {
+		writeErr(w, http.StatusNotFound, "no user with that username")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, m)
+}
+
+// setMemberRole changes a member's role (owner only; last-owner protected).
+func (s *Server) setMemberRole(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Role string `json:"role"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.SetMemberRole(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "userId"), in.Role); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
+}
+
+// removeMember removes a member (owner only; last-owner protected).
+func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.RemoveMember(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "userId")); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
+}
+
+// leaveProject removes the caller from a project (any member; last owner can't).
+func (s *Server) leaveProject(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.auth.SessionFromRequest(r)
+	ws, err := s.store.GetWorkspaceBySlug(r.Context(), chi.URLParam(r, "slug"))
+	if err == store.ErrNotFound {
+		writeErr(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.store.RemoveMember(r.Context(), ws.ID, sess.UserID); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
+}
+
 // getItemTypes returns the workspace's item-type catalog (built-ins + custom).
 func (s *Server) getItemTypes(w http.ResponseWriter, r *http.Request) {
 	types, err := s.store.ListItemTypes(r.Context(), s.currentWorkspace(r))
@@ -838,7 +955,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrConflict):
 		writeErr(w, http.StatusConflict, err.Error())
-	case errors.Is(err, store.ErrLastAdmin), errors.Is(err, store.ErrProtected):
+	case errors.Is(err, store.ErrLastAdmin), errors.Is(err, store.ErrProtected), errors.Is(err, store.ErrLastOwner):
 		writeErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
