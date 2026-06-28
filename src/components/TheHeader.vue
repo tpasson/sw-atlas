@@ -152,8 +152,6 @@
         </span>
 
         <template v-if="authenticated">
-          <span v-if="session.username" class="user-chip" title="Signed in">{{ session.username }}</span>
-
           <!-- Project switcher -->
           <div v-if="workspace.myWorkspaces.length" class="bl-dd proj-dd" ref="projRef">
             <button class="bl-select" :class="{ open: projOpen }" title="Switch project" @click="projOpen = !projOpen">
@@ -176,26 +174,23 @@
             </div>
           </div>
 
-          <!-- Editable workspace (owner/editor) → full editing controls. -->
+          <!-- Editable workspace (owner/editor): status + save baseline + settings. -->
           <template v-if="canEdit">
-            <span v-if="!baselines.activeId" class="edit-pill">
-              <span class="edit-dot"></span>
-              Editing
-            </span>
-            <button v-if="!baselines.activeId" class="bl-btn" title="Save current plan as a baseline" @click="onSaveBaseline">Save baseline</button>
-            <button class="btn-manage" @click="$emit('manage')">Settings</button>
+            <span v-if="!baselines.activeId" class="edit-pill"><span class="edit-dot"></span>Editing</span>
+            <button v-if="!baselines.activeId" class="hdr-icon-btn" title="Save current plan as a baseline" @click="onSaveBaseline"><Bookmark :size="16" /></button>
+            <button class="hdr-icon-btn" title="Settings" @click="$emit('manage')"><Settings :size="16" /></button>
           </template>
+          <span v-else class="view-pill" title="You are viewing this plan read-only"><span class="view-dot"></span>Viewing</span>
 
-          <!-- Viewing someone else's plan → read-only, with a way back. -->
-          <template v-else>
-            <span class="view-pill" title="You are viewing another user's plan">
-              <span class="view-dot"></span>
-              Viewing {{ workspace.slug }}
-            </span>
-            <button v-if="workspace.ownSlug" class="btn-manage" @click="goToOwn">My plan</button>
-          </template>
-
-          <button class="btn-manage" @click="$emit('logout')">Log out</button>
+          <!-- Account menu (username + log out). -->
+          <div class="bl-dd user-dd" ref="userRef">
+            <button class="user-av" :title="session.username" @click="userOpen = !userOpen">{{ initials }}</button>
+            <div v-if="userOpen" class="bl-menu user-menu">
+              <div class="user-menu-name">{{ session.username }}</div>
+              <button class="bl-opt" @click="userOpen = false; $emit('about')">About ATLAS</button>
+              <button class="bl-opt" @click="userOpen = false; $emit('logout')">Log out</button>
+            </div>
+          </div>
         </template>
 
         <template v-else>
@@ -212,7 +207,7 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { Sun, Moon, AlertTriangle } from 'lucide-vue-next'
+import { Sun, Moon, AlertTriangle, Settings, Bookmark } from 'lucide-vue-next'
 import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace, canEditWorkspace, createProject } from '../stores/useAppStore.js'
 import { api } from '../api.js'
 import { APP_VERSION } from '../version.js'
@@ -251,10 +246,10 @@ async function leaveCurrent() {
   try { await api.leaveProject(workspace.slug); window.location.assign('/') } catch (e) { alert(e?.message || 'Could not leave the project') }
 }
 
-// Navigate back to your own workspace (full load re-runs initApp for that slug).
-function goToOwn() {
-  if (workspace.ownSlug) window.location.assign('/' + encodeURIComponent(workspace.ownSlug))
-}
+// Account menu (username avatar → log out / about).
+const userOpen = ref(false)
+const userRef = ref(null)
+const initials = computed(() => (session.username || '?').trim().charAt(0).toUpperCase() || '?')
 
 const { selectBaseline, createBaseline, setGranularity, prevMonth, nextMonth, setView } = useAppStore()
 const diff = baselineDiff
@@ -336,8 +331,9 @@ function pickBaseline(id) { selectBaseline(id); blOpen.value = false }
 function onDocClick(e) {
   if (blRef.value && !blRef.value.contains(e.target)) blOpen.value = false
   if (projRef.value && !projRef.value.contains(e.target)) projOpen.value = false
+  if (userRef.value && !userRef.value.contains(e.target)) userOpen.value = false
 }
-function onKeyDown(e) { if (e.key === 'Escape') { blOpen.value = false; projOpen.value = false } }
+function onKeyDown(e) { if (e.key === 'Escape') { blOpen.value = false; projOpen.value = false; userOpen.value = false } }
 onMounted(() => { document.addEventListener('click', onDocClick); document.addEventListener('keydown', onKeyDown) })
 onUnmounted(() => { document.removeEventListener('click', onDocClick); document.removeEventListener('keydown', onKeyDown) })
 function nowStamp() {
@@ -383,6 +379,26 @@ async function onSaveBaseline() {
   transition: background 0.15s, color 0.15s;
 }
 .hdr-icon-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+
+/* Account avatar + its menu (replaces the username chip + Log out button). */
+.user-av {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.16); color: #fff;
+  font-size: 12px; font-weight: 700;
+  transition: background 0.15s;
+}
+.user-av:hover { background: rgba(255,255,255,0.26); }
+.user-menu { min-width: 168px; }
+.user-menu-name {
+  padding: 8px 12px 7px; font-size: 12px; font-weight: 700; color: var(--clr-text-3);
+  border-bottom: 1px solid var(--clr-border-light); margin-bottom: 4px;
+}
+
+/* Free up width on narrower screens so header zones never overlap. */
+@media (max-width: 1200px) {
+  .today-chip { display: none; }
+}
 
 .risk-hdr {
   position: relative;
