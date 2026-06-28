@@ -106,6 +106,14 @@ const DEFAULT_GIT_COLORS = { releaseStable: '', releasePre: '#FF9F0A', tag: '', 
 const gc = () => ({ ...DEFAULT_GIT_COLORS, ...(db.gitColors || {}) })
 const gcv = (v) => v || null
 
+// Item-type registry (demo): built-ins + any locally-saved custom types.
+const BUILTIN_ITEM_TYPES = [
+  { key: 'milestone', label: 'Milestone', family: 'timeline-point', icon: 'l:Diamond', color: '', fields: [], builtin: true },
+  { key: 'event', label: 'Event', family: 'timeline-range', icon: 'l:Flag', color: '', fields: [], builtin: true },
+  { key: 'point', label: 'Point', family: 'timeline-point', icon: 'l:Circle', color: '', fields: [], builtin: true },
+]
+const itemTypeCatalog = () => [...BUILTIN_ITEM_TYPES, ...((db.itemTypes || []).map(t => ({ ...t, builtin: false, fields: t.fields || [] })))]
+
 async function ghReleases(cfg) {
   const rels = await ghFetch(cfg, '/releases?per_page=100')
   const items = [], tagSet = new Set()
@@ -271,11 +279,13 @@ export const demoApi = {
   setUISettings: () => ok(),
   getGitColors: () => ok(gc()),
   setGitColors: (c) => { db.gitColors = c; save(); return ok(c) },
-  itemTypes: () => ok([
-    { key: 'milestone', label: 'Milestone', family: 'timeline-point', icon: 'l:Diamond', color: '', builtin: true },
-    { key: 'event', label: 'Event', family: 'timeline-range', icon: 'l:Flag', color: '', builtin: true },
-    { key: 'point', label: 'Point', family: 'timeline-point', icon: 'l:Circle', color: '', builtin: true },
-  ]),
+  itemTypes: () => ok(itemTypeCatalog()),
+  setItemTypes: (types) => {
+    const builtin = new Set(['milestone', 'event', 'point'])
+    db.itemTypes = (types || []).filter(t => t.key && !builtin.has(t.key)).map(t => ({ ...t, builtin: false, fields: t.fields || [] }))
+    save()
+    return ok(itemTypeCatalog())
+  },
 
   createSwimlane: (data) => {
     const sw = { id: data.id || uid(), name: data.name, color: data.color || '#0A84FF', subLanes: [] }

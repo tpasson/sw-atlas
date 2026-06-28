@@ -68,6 +68,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Put("/settings/groups", s.setGroups)
 			r.Put("/settings/ui", s.setUISettings)
 			r.Put("/settings/git-colors", s.setGitColors)
+			r.Put("/item-types", s.setItemTypes)
 
 			r.Post("/swimlanes", s.createSwimlane)
 			r.Post("/swimlanes/reorder", s.reorderSwimlanes)
@@ -493,8 +494,26 @@ func (s *Server) getGitColors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
-// getItemTypes returns the workspace's item-type catalog (built-ins for now).
+// getItemTypes returns the workspace's item-type catalog (built-ins + custom).
 func (s *Server) getItemTypes(w http.ResponseWriter, r *http.Request) {
+	types, err := s.store.ListItemTypes(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, types)
+}
+
+// setItemTypes persists the workspace's custom item types (built-ins are ignored).
+func (s *Server) setItemTypes(w http.ResponseWriter, r *http.Request) {
+	var in []store.ItemType
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.SetItemTypes(r.Context(), s.currentWorkspace(r), in); err != nil {
+		s.fail(w, err)
+		return
+	}
 	types, err := s.store.ListItemTypes(r.Context(), s.currentWorkspace(r))
 	if err != nil {
 		s.fail(w, err)

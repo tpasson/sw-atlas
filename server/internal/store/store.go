@@ -71,6 +71,24 @@ type Item struct {
 	Maturity     *int    `json:"maturity"` // 1..4 (Concept·Design·Production·Series) or null
 	Progress     *int    `json:"progress"` // 0..100 (% complete) or null
 	ScmURL       *string `json:"scmUrl"`   // link to a source-control resource (release/PR/branch/commit) or null
+	Data         json.RawMessage `json:"data"` // type-specific field values; shape declared by the item's type
+}
+
+// itemData returns the item's JSONB field bag, defaulting to an empty object.
+func itemData(it Item) []byte {
+	if len(it.Data) == 0 {
+		return []byte("{}")
+	}
+	return it.Data
+}
+
+// typeKeyOf is the registry key to store: the explicit type, or the legacy kind
+// as a fallback (older clients and synced items send only kind).
+func typeKeyOf(it Item) string {
+	if it.TypeKey != "" {
+		return it.TypeKey
+	}
+	return it.Kind
 }
 
 type Link struct {
@@ -86,7 +104,7 @@ type Plan struct {
 
 const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why, how, who,
 	when_date, kind, marker, start_date, end_date, color,
-	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url, type_key`
+	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url, type_key, data`
 
 // ── Plan (read) ─────────────────────────────────────────────────────────────
 
@@ -171,16 +189,18 @@ func scanItem(row pgx.Row) (Item, error) {
 	var sub, color, src, extID, extURL, scm *string
 	var maturity, progress *int
 	var when, start, end, last sql.NullTime
+	var dataRaw []byte
 	if err := row.Scan(
 		&it.ID, &it.SwimlaneID, &sub, &it.Year, &it.Month,
 		&it.Title, &it.What, &it.Why, &it.How, &it.Who,
 		&when, &it.Kind, &it.Marker, &start, &end, &color,
-		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey,
+		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey, &dataRaw,
 	); err != nil {
 		return it, err
 	}
 	it.SubLaneID, it.Color, it.SourceSystem, it.ExternalID, it.ExternalURL = sub, color, src, extID, extURL
 	it.Maturity, it.Progress, it.ScmURL = maturity, progress, scm
+	it.Data = json.RawMessage(dataRaw)
 	it.When = dateStr(when)
 	it.StartDate = dateStr(start)
 	it.EndDate = dateStr(end)
@@ -263,10 +283,10 @@ func (s *Store) ImportPlan(ctx context.Context, ws string, p Plan) (ImportSummar
 		itID[it.ID] = nid
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO item (`+itemColumns+`, workspace_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
 			nid, nsw, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 			whenV, it.Kind, it.Marker, startV, endV, it.Color,
-			nil, nil, nil, nil, it.Maturity, it.Progress, it.ScmURL, it.Kind, ws); err != nil { // provenance stripped → native item
+			nil, nil, nil, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws); err != nil { // provenance stripped → native item
 			return sum, err
 		}
 		sum.Items++
@@ -503,10 +523,10 @@ func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error
 	}
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO item (`+itemColumns+`, workspace_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
 		it.ID, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 		whenV, it.Kind, it.Marker, startV, endV, it.Color,
-		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, it.Kind, ws)
+		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws)
 	if err != nil {
 		return it, err
 	}
@@ -529,11 +549,11 @@ func (s *Store) UpdateItem(ctx context.Context, ws, id string, it Item) error {
 		`UPDATE item SET
 		   swimlane_id=$2, sub_lane_id=$3, year=$4, month=$5, title=$6,
 		   what=$7, why=$8, how=$9, who=$10, when_date=$11,
-		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20
-		 WHERE id=$1 AND workspace_id=$21`,
+		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21
+		 WHERE id=$1 AND workspace_id=$22`,
 		id, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title,
 		it.What, it.Why, it.How, it.Who, whenV,
-		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, it.Kind, ws)
+		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws)
 	return err
 }
 
