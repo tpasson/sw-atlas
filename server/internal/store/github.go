@@ -236,10 +236,13 @@ func ghBase(cfg ghConfig) string {
 	return "https://api.github.com"
 }
 
-func ghGet(ctx context.Context, cfg ghConfig, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ghBase(cfg)+path, nil)
+// ghDo performs a GET against an absolute URL and returns the body plus the
+// absolute "next" page URL parsed from the Link header (rel="next"), or "" when
+// there is no next page. Both GitHub and modern Gitea emit rel="next" links.
+func ghDo(ctx context.Context, cfg ghConfig, rawURL string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	if cfg.provider == "gitea" {
 		req.Header.Set("Accept", "application/json")
@@ -255,22 +258,126 @@ func ghGet(ctx context.Context, cfg ghConfig, path string, out any) error {
 	}
 	resp, err := ghClient.Do(req)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return json.Unmarshal(body, out)
+		return body, ghNextLink(resp.Header.Get("Link")), nil
 	case http.StatusNotFound:
-		return fmt.Errorf("repository not found (or private — add a token)")
+		return nil, "", fmt.Errorf("repository not found (or private — add a token)")
 	case http.StatusUnauthorized:
-		return fmt.Errorf("auth failed (check the token)")
+		return nil, "", fmt.Errorf("auth failed (check the token)")
 	case http.StatusForbidden:
-		return fmt.Errorf("forbidden or rate-limited — try later or add a token")
+		return nil, "", fmt.Errorf("forbidden or rate-limited — try later or add a token")
 	default:
-		return fmt.Errorf("the server returned %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("the server returned %d", resp.StatusCode)
 	}
+}
+
+// ghGet fetches a single resource (no pagination) into out.
+func ghGet(ctx context.Context, cfg ghConfig, path string, out any) error {
+	body, _, err := ghDo(ctx, cfg, ghBase(cfg)+path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, out)
+}
+
+// ghPageCap bounds how many pages (100 items each) we follow per resource, so a
+// repo with tens of thousands of items can't stall a sync or exhaust the API.
+const ghPageCap = 20
+
+// ghGetAll follows GitHub/Gitea pagination (Link rel="next") and concatenates
+// every page into one slice, up to ghPageCap pages.
+func ghGetAll[T any](ctx context.Context, cfg ghConfig, path string) ([]T, error) {
+	var all []T
+	rawURL := ghBase(cfg) + path
+	for page := 0; page < ghPageCap && rawURL != ""; page++ {
+		body, next, err := ghDo(ctx, cfg, rawURL)
+		if err != nil {
+			return nil, err
+		}
+		var batch []T
+		if err := json.Unmarshal(body, &batch); err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		rawURL = next
+	}
+	return all, nil
+}
+
+// ghNextLink extracts the rel="next" URL from an RFC 5988 Link header, or "".
+func ghNextLink(link string) string {
+	for _, part := range strings.Split(link, ",") {
+		seg := strings.Split(strings.TrimSpace(part), ";")
+		if len(seg) < 2 {
+			continue
+		}
+		u := strings.TrimSpace(seg[0])
+		if !strings.HasPrefix(u, "<") || !strings.HasSuffix(u, ">") {
+			continue
+		}
+		for _, p := range seg[1:] {
+			if strings.TrimSpace(p) == `rel="next"` {
+				return u[1 : len(u)-1]
+			}
+		}
+	}
+	return ""
+}
+
+// Named response shapes for the list endpoints (reused by ghGetAll's generic).
+type ghRelease struct {
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	PublishedAt string `json:"published_at"`
+	CreatedAt   string `json:"created_at"`
+	HTMLURL     string `json:"html_url"`
+	Body        string `json:"body"`
+	Draft       bool   `json:"draft"`
+	Prerelease  bool   `json:"prerelease"`
+	Author      struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
+type ghTagItem struct {
+	Name   string `json:"name"`
+	Commit struct {
+		SHA     string `json:"sha"`
+		Created string `json:"created"` // Gitea provides the commit date here
+	} `json:"commit"`
+}
+
+type ghIssue struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	State       string `json:"state"`
+	CreatedAt   string `json:"created_at"`
+	ClosedAt    string `json:"closed_at"`
+	HTMLURL     string `json:"html_url"`
+	Body        string `json:"body"`
+	User        struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	PullRequest *struct{} `json:"pull_request"` // present ⇒ it's a PR, not an issue
+}
+
+type ghPull struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
+	ClosedAt  string `json:"closed_at"`
+	MergedAt  string `json:"merged_at"`
+	HTMLURL   string `json:"html_url"`
+	Body      string `json:"body"`
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
 }
 
 // fetchGitHub builds a one-swimlane mirror feed (Releases/Tags/Issues/PRs as
@@ -337,20 +444,8 @@ func ghWire(repo string, subLanes []SubLane, items []Item) subWire {
 }
 
 func ghReleases(ctx context.Context, cfg ghConfig) ([]Item, map[string]bool, error) {
-	var rels []struct {
-		TagName     string `json:"tag_name"`
-		Name        string `json:"name"`
-		PublishedAt string `json:"published_at"`
-		CreatedAt   string `json:"created_at"`
-		HTMLURL     string `json:"html_url"`
-		Body        string `json:"body"`
-		Draft       bool   `json:"draft"`
-		Prerelease  bool   `json:"prerelease"`
-		Author      struct {
-			Login string `json:"login"`
-		} `json:"author"`
-	}
-	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/releases?per_page=100&limit=50", cfg.owner, cfg.repo), &rels); err != nil {
+	rels, err := ghGetAll[ghRelease](ctx, cfg, fmt.Sprintf("/repos/%s/%s/releases?per_page=100", cfg.owner, cfg.repo))
+	if err != nil {
 		return nil, nil, err
 	}
 	items := []Item{}
@@ -386,14 +481,10 @@ func ghReleases(ctx context.Context, cfg ghConfig) ([]Item, map[string]bool, err
 }
 
 func ghTags(ctx context.Context, cfg ghConfig, skip map[string]bool) ([]Item, error) {
-	var tags []struct {
-		Name   string `json:"name"`
-		Commit struct {
-			SHA     string `json:"sha"`
-			Created string `json:"created"` // Gitea provides the commit date here
-		} `json:"commit"`
-	}
-	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/tags?per_page=100&limit=50", cfg.owner, cfg.repo), &tags); err != nil {
+	// Tags are display-capped at maxTags below, so a single page of 100 always
+	// covers the cap — no need to paginate this resource.
+	var tags []ghTagItem
+	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/tags?per_page=100", cfg.owner, cfg.repo), &tags); err != nil {
 		return nil, err
 	}
 	items := []Item{}
@@ -434,24 +525,12 @@ func ghTags(ctx context.Context, cfg ghConfig, skip map[string]bool) ([]Item, er
 }
 
 func ghIssues(ctx context.Context, cfg ghConfig) ([]Item, error) {
-	var issues []struct {
-		Number      int    `json:"number"`
-		Title       string `json:"title"`
-		State       string `json:"state"`
-		CreatedAt   string `json:"created_at"`
-		ClosedAt    string `json:"closed_at"`
-		HTMLURL     string `json:"html_url"`
-		Body        string `json:"body"`
-		User        struct {
-			Login string `json:"login"`
-		} `json:"user"`
-		PullRequest *struct{} `json:"pull_request"` // present ⇒ it's a PR, not an issue
-	}
-	ip := fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=100&limit=50", cfg.owner, cfg.repo, ghState(cfg))
+	ip := fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=100", cfg.owner, cfg.repo, ghState(cfg))
 	if cfg.provider == "gitea" {
 		ip += "&type=issues" // Gitea returns PRs on /issues unless filtered
 	}
-	if err := ghGet(ctx, cfg, ip, &issues); err != nil {
+	issues, err := ghGetAll[ghIssue](ctx, cfg, ip)
+	if err != nil {
 		return nil, err
 	}
 	items := []Item{}
@@ -479,20 +558,8 @@ func ghIssues(ctx context.Context, cfg ghConfig) ([]Item, error) {
 }
 
 func ghPulls(ctx context.Context, cfg ghConfig) ([]Item, error) {
-	var prs []struct {
-		Number    int    `json:"number"`
-		Title     string `json:"title"`
-		State     string `json:"state"`
-		CreatedAt string `json:"created_at"`
-		ClosedAt  string `json:"closed_at"`
-		MergedAt  string `json:"merged_at"`
-		HTMLURL   string `json:"html_url"`
-		Body      string `json:"body"`
-		User      struct {
-			Login string `json:"login"`
-		} `json:"user"`
-	}
-	if err := ghGet(ctx, cfg, fmt.Sprintf("/repos/%s/%s/pulls?state=%s&per_page=100&limit=50", cfg.owner, cfg.repo, ghState(cfg)), &prs); err != nil {
+	prs, err := ghGetAll[ghPull](ctx, cfg, fmt.Sprintf("/repos/%s/%s/pulls?state=%s&per_page=100", cfg.owner, cfg.repo, ghState(cfg)))
+	if err != nil {
 		return nil, err
 	}
 	items := []Item{}
