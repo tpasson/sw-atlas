@@ -994,17 +994,10 @@ function durationDays(s, en) {
   const [y2, m2, d2] = en.split('-').map(Number)
   return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000) + 1
 }
-// Members of the group currently hovered in the left legend.
-const groupMemberIds = computed(() => {
-  if (!ui.hoverGroupId) return null
-  const g = groups.list.find(x => x.id === ui.hoverGroupId)
-  return new Set(g ? (g.itemIds || []) : [])
-})
-
 function chipState(m) {
-  // Hovering a group in the legend highlights its members and dims the rest.
-  if (groupMemberIds.value) {
-    return groupMemberIds.value.has(m.id) ? 'chip-related' : 'chip-dimmed'
+  // Hovering a facet (filter dock) highlights its matching items, dims the rest.
+  if (ui.highlightIds) {
+    return ui.highlightIds.has(m.id) ? 'chip-related' : 'chip-dimmed'
   }
   if (!activeMs.value) return ''
   if (m.id === activeMs.value.id) return 'chip-active'

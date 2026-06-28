@@ -61,6 +61,7 @@
       />
     </template>
 
+    <FacetFilter v-if="session.ready && !session.error && store.view === 'timeline'" />
     <GroupLegend v-if="session.ready && !session.error && store.view === 'timeline'" :read-only="readOnly" />
     </template>
 
@@ -103,6 +104,7 @@ import MilestoneModal from './components/MilestoneModal.vue'
 import ManageModal from './components/ManageModal.vue'
 import LoginModal from './components/LoginModal.vue'
 import GroupLegend from './components/GroupLegend.vue'
+import FacetFilter from './components/FacetFilter.vue'
 import AboutModal from './components/AboutModal.vue'
 import LandingPage from './components/LandingPage.vue'
 
