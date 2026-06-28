@@ -91,6 +91,14 @@ func typeKeyOf(it Item) string {
 	return it.Kind
 }
 
+// nullIfEmpty maps "" to a SQL NULL (used for the now-optional swimlane_id).
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 type Link struct {
 	A   string `json:"a"`
 	B   string `json:"b"`
@@ -187,17 +195,20 @@ func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 
 func scanItem(row pgx.Row) (Item, error) {
 	var it Item
-	var sub, color, src, extID, extURL, scm *string
+	var swl, sub, color, src, extID, extURL, scm *string
 	var maturity, progress *int
 	var when, start, end, last sql.NullTime
 	var dataRaw []byte
 	if err := row.Scan(
-		&it.ID, &it.SwimlaneID, &sub, &it.Year, &it.Month,
+		&it.ID, &swl, &sub, &it.Year, &it.Month,
 		&it.Title, &it.What, &it.Why, &it.How, &it.Who,
 		&when, &it.Kind, &it.Marker, &start, &end, &color,
 		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey, &dataRaw,
 	); err != nil {
 		return it, err
+	}
+	if swl != nil {
+		it.SwimlaneID = *swl
 	}
 	it.SubLaneID, it.Color, it.SourceSystem, it.ExternalID, it.ExternalURL = sub, color, src, extID, extURL
 	it.Maturity, it.Progress, it.ScmURL = maturity, progress, scm
@@ -265,9 +276,13 @@ func (s *Store) ImportPlan(ctx context.Context, ws string, p Plan) (ImportSummar
 	}
 
 	for _, it := range p.Milestones {
-		nsw, ok := swID[it.SwimlaneID]
-		if !ok {
-			continue // item's swimlane is not part of this payload
+		var nsw interface{} // NULL for off-timeline items (no lane)
+		if it.SwimlaneID != "" {
+			v, ok := swID[it.SwimlaneID]
+			if !ok {
+				continue // item's swimlane is not part of this payload
+			}
+			nsw = v
 		}
 		var nsub interface{}
 		if it.SubLaneID != nil {
@@ -514,8 +529,11 @@ func (s *Store) ReorderSubLanes(ctx context.Context, ws string, ids []string) er
 
 func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error) {
 	// A mirrored (read-only) swimlane only gets its items from its source.
-	if err := s.ensureSwimlaneUnlocked(ctx, ws, it.SwimlaneID); err != nil {
-		return it, err
+	// Off-timeline artifacts carry no lane, so the check is skipped for them.
+	if it.SwimlaneID != "" {
+		if err := s.ensureSwimlaneUnlocked(ctx, ws, it.SwimlaneID); err != nil {
+			return it, err
+		}
 	}
 	defaultsForItem(&it)
 	whenV, startV, endV, err := itemDates(it)
@@ -525,7 +543,7 @@ func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO item (`+itemColumns+`, workspace_id)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
-		it.ID, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
+		it.ID, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 		whenV, it.Kind, it.Marker, startV, endV, it.Color,
 		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws)
 	if err != nil {
@@ -552,7 +570,7 @@ func (s *Store) UpdateItem(ctx context.Context, ws, id string, it Item) error {
 		   what=$7, why=$8, how=$9, who=$10, when_date=$11,
 		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21
 		 WHERE id=$1 AND workspace_id=$22`,
-		id, it.SwimlaneID, it.SubLaneID, it.Year, it.Month, it.Title,
+		id, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title,
 		it.What, it.Why, it.How, it.Who, whenV,
 		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws)
 	return err

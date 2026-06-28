@@ -22,7 +22,12 @@
           <span class="today-cw">CW {{ todayWeek }}</span>
         </div>
 
-        <div class="year-nav">
+        <div class="view-toggle">
+          <button class="vt-btn" :class="{ on: store.view === 'timeline' }" @click="setView('timeline')">Timeline</button>
+          <button class="vt-btn" :class="{ on: store.view === 'explorer' }" @click="setView('explorer')">Explorer</button>
+        </div>
+
+        <div v-if="store.view === 'timeline'" class="year-nav">
           <button class="year-btn" :title="store.granularity === 'month' ? 'Previous month' : 'Previous year'" @click="store.granularity === 'month' ? prevMonth() : $emit('prev-year')">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M9 11L5 7l4-4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
@@ -41,7 +46,7 @@
           >{{ store.granularity === 'month' ? 'Year' : 'Month' }}</button>
         </div>
 
-        <div class="zoom-nav">
+        <div v-if="store.view === 'timeline'" class="zoom-nav">
           <button class="year-btn" :disabled="zoom <= 0.6" @click="$emit('zoom-out')">
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
               <path d="M2 6h8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
@@ -203,7 +208,7 @@ function goToOwn() {
   if (workspace.ownSlug) window.location.assign('/' + encodeURIComponent(workspace.ownSlug))
 }
 
-const { selectBaseline, createBaseline, setGranularity, prevMonth, nextMonth } = useAppStore()
+const { selectBaseline, createBaseline, setGranularity, prevMonth, nextMonth, setView } = useAppStore()
 const diff = baselineDiff
 
 // Arrow order left→right: oldest … newest … Live (rightmost = most current).
@@ -489,6 +494,26 @@ async function onSaveBaseline() {
   margin-left: 2px;
   color: rgba(255,255,255,0.85);
 }
+
+/* Timeline ↔ Explorer view toggle. */
+.view-toggle {
+  display: inline-flex;
+  background: rgba(255,255,255,0.08);
+  border-radius: 100px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.vt-btn {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.7);
+  background: transparent;
+  border-radius: 100px;
+  padding: 4px 12px;
+  transition: background 0.15s, color 0.15s;
+}
+.vt-btn.on { background: rgba(255,255,255,0.16); color: #FFFFFF; }
+.vt-btn:hover:not(.on) { color: #FFFFFF; }
 
 .year-label {
   font-size: 13px;

@@ -679,10 +679,8 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &it) {
 		return
 	}
-	if it.SwimlaneID == "" {
-		writeErr(w, http.StatusBadRequest, "swimlaneId is required")
-		return
-	}
+	// swimlaneId is optional: off-timeline artifacts (work-item / container types)
+	// have no lane and live only in the Explorer.
 	if it.Title == "" {
 		writeErr(w, http.StatusBadRequest, "title is required")
 		return

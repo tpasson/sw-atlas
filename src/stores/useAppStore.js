@@ -45,6 +45,10 @@ const uid = () =>
 const YEAR_KEY = 'atlas-view-year'
 const GRAN_KEY = 'atlas-view-gran'
 const MONTH_KEY = 'atlas-view-month'
+const VIEW_KEY = 'atlas-view-mode'
+function initialView() {
+  return localStorage.getItem(VIEW_KEY) === 'explorer' ? 'explorer' : 'timeline'
+}
 function initialYear() {
   const v = parseInt(localStorage.getItem(YEAR_KEY) || '', 10)
   return Number.isFinite(v) ? v : new Date().getFullYear()
@@ -62,6 +66,7 @@ export const store = reactive({
   year: initialYear(),
   granularity: initialGranularity(), // 'year' (12 month columns) | 'month' (day columns)
   viewMonth: initialMonth(),         // 1..12, the focused month when granularity === 'month'
+  view: initialView(),               // 'timeline' | 'explorer'
   swimlanes: [],
   milestones: [],
   links: [],
@@ -595,6 +600,10 @@ export function useAppStore() {
   function prevYear() { store.year--; persistYear() }
   function nextYear() { store.year++; persistYear() }
   function setGranularity(g) { store.granularity = g === 'month' ? 'month' : 'year'; persistYear() }
+  function setView(v) {
+    store.view = v === 'explorer' ? 'explorer' : 'timeline'
+    try { localStorage.setItem(VIEW_KEY, store.view) } catch { /* ignore */ }
+  }
   function prevMonth() {
     if (store.viewMonth <= 1) { store.viewMonth = 12; store.year-- } else { store.viewMonth-- }
     persistYear()
@@ -878,7 +887,7 @@ export function useAppStore() {
 
   return {
     store, session, baselines,
-    prevYear, nextYear, setGranularity, prevMonth, nextMonth,
+    prevYear, nextYear, setGranularity, prevMonth, nextMonth, setView,
     addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder,
     addSubLane, updateSubLane, deleteSubLane,
     addMilestone, updateMilestone, deleteMilestone,
