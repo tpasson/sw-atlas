@@ -424,6 +424,7 @@ const props = defineProps({
   year:      { type: Number,  default: 2026 },
   date:      { type: String,  default: null },
   milestone: { type: Object,  default: null },
+  initialType: { type: String, default: '' }, // preselect a type (Explorer "+ New")
 })
 
 const emit = defineEmits(['close'])
@@ -468,7 +469,7 @@ const displayMonth = computed(() => {
 const form = reactive({
   title:  props.milestone?.title ?? '',
   kind:   props.milestone?.kind ?? 'milestone',
-  typeKey: props.milestone?.typeKey ?? props.milestone?.kind ?? 'milestone',
+  typeKey: props.milestone?.typeKey ?? (props.initialType || props.milestone?.kind || 'milestone'),
   data:   { ...(props.milestone?.data || {}) },
   marker: props.milestone?.marker && props.milestone.marker !== 'bar' ? props.milestone.marker : (settings.markers[0]?.shape || 'l:Flag'),
   what:   props.milestone?.sourceSystem ? stripMarkdown(props.milestone?.what || '') : (props.milestone?.what ?? ''),
@@ -599,7 +600,11 @@ const pickerGroups = computed(() => buildPickerGroups(pickerSearch.value, showOn
 const pickerGroups2 = computed(() => buildPickerGroups(pickerSearch2.value, showOnly2.value && localDependentIds.value.size ? localDependentIds.value : null))
 
 const titleInput = ref(null)
-onMounted(() => titleInput.value?.focus())
+onMounted(() => {
+  // Preselect the Explorer's chosen type (sets kind / marker / colour / fields).
+  if (props.mode === 'add' && props.initialType) applyType(props.initialType)
+  titleInput.value?.focus()
+})
 
 function syncLinks(msId) {
   // Resolve the placeholder self-id, then diff the working edges against the
@@ -629,7 +634,7 @@ function submit() {
   }
 
   const payload = {
-    swimlaneId: props.swimlane?.id,
+    swimlaneId: props.swimlane?.id || '', // "" = off-timeline artifact (no lane)
     subLaneId:  props.subLane?.id ?? null,
     year,
     month,

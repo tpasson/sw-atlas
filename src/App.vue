@@ -45,15 +45,23 @@
       </div>
     </div>
 
-    <MilestoneTable
-      v-else
-      :zoom="zoom"
-      :read-only="readOnly"
-      @add-milestone="openAdd"
-      @edit-milestone="openEdit"
-    />
+    <template v-else>
+      <ExplorerView
+        v-if="store.view === 'explorer'"
+        :read-only="readOnly"
+        @edit="openEdit"
+        @add="openAddType"
+      />
+      <MilestoneTable
+        v-else
+        :zoom="zoom"
+        :read-only="readOnly"
+        @add-milestone="openAdd"
+        @edit-milestone="openEdit"
+      />
+    </template>
 
-    <GroupLegend v-if="session.ready && !session.error" :read-only="readOnly" />
+    <GroupLegend v-if="session.ready && !session.error && store.view === 'timeline'" :read-only="readOnly" />
     </template>
 
     <Transition name="modal">
@@ -66,6 +74,7 @@
         :year="modal.year"
         :date="modal.date"
         :milestone="modal.milestone"
+        :initial-type="modal.initialType"
         @close="modal.show = false"
       />
     </Transition>
@@ -89,6 +98,7 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { useAppStore, store, session, workspace, baselines, initApp } from './stores/useAppStore.js'
 import TheHeader from './components/TheHeader.vue'
 import MilestoneTable from './components/MilestoneTable.vue'
+import ExplorerView from './components/ExplorerView.vue'
 import MilestoneModal from './components/MilestoneModal.vue'
 import ManageModal from './components/ManageModal.vue'
 import LoginModal from './components/LoginModal.vue'
@@ -128,11 +138,20 @@ const modal = reactive({
   year: store.year,
   date: null,
   milestone: null,
+  initialType: '',
 })
 
 function openAdd({ swimlane, subLane, month, date }) {
   Object.assign(modal, {
-    show: true, mode: 'add', swimlane, subLane, month, year: store.year, date: date || null, milestone: null,
+    show: true, mode: 'add', swimlane, subLane, month, year: store.year, date: date || null, milestone: null, initialType: '',
+  })
+}
+
+// Add an off-timeline artifact from the Explorer (no lane; type preselected).
+function openAddType(type) {
+  Object.assign(modal, {
+    show: true, mode: 'add', swimlane: null, subLane: null,
+    month: new Date().getMonth() + 1, year: store.year, date: null, milestone: null, initialType: type.key,
   })
 }
 
@@ -141,7 +160,7 @@ function openEdit(milestone) {
   const subLane = swimlane?.subLanes.find(s => s.id === milestone.subLaneId) ?? null
   Object.assign(modal, {
     show: true, mode: 'edit', swimlane, subLane,
-    month: milestone.month, year: milestone.year, date: null, milestone,
+    month: milestone.month, year: milestone.year, date: null, milestone, initialType: '',
   })
 }
 </script>

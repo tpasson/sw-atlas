@@ -16,9 +16,11 @@
         <div class="tm-head">
           <input class="ti" v-model="t.label" placeholder="Label (e.g. Bug)" style="flex:1;min-width:110px" />
           <input class="ti" v-model="t.key" placeholder="key" style="width:96px" />
-          <select class="ti" v-model="t.family" style="width:96px">
-            <option value="timeline-point">Point</option>
-            <option value="timeline-range">Range</option>
+          <select class="ti" v-model="t.family" style="width:104px" title="Behavior family">
+            <option value="timeline-point">Timeline · point</option>
+            <option value="timeline-range">Timeline · range</option>
+            <option value="work-item">Backlog item</option>
+            <option value="container">Folder</option>
           </select>
           <input class="ti" v-model="t.icon" placeholder="l:Bug" style="width:96px" />
           <input type="color" class="tm-color" :value="t.color || '#0A84FF'" @input="t.color = $event.target.value" title="Colour" />
