@@ -414,13 +414,13 @@ func (s *Store) ResolveScopePlan(ctx context.Context, ws, scopeID, detailLevel s
 		}
 	}
 
-	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id FROM link WHERE workspace_id = $1`, ws)
+	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id, rel FROM link WHERE workspace_id = $1`, ws)
 	if err != nil {
 		return p, err
 	}
 	for lkRows.Next() {
 		var l Link
-		if err := lkRows.Scan(&l.A, &l.B); err != nil {
+		if err := lkRows.Scan(&l.A, &l.B, &l.Rel); err != nil {
 			lkRows.Close()
 			return p, err
 		}

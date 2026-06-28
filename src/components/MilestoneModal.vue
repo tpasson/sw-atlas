@@ -252,11 +252,17 @@
               </div>
 
               <div v-show="tab === 'deps'" class="ms-panel">
-              <!-- Blocked by / Blocks (side by side) -->
+              <div class="field">
+                <label class="field-label">Relationship</label>
+                <select v-model="relType" class="field-input" :disabled="readOnly">
+                  <option v-for="r in RELATIONSHIP_TYPES" :key="r.key" :value="r.key">{{ r.label }} ↔ {{ r.inverse }}</option>
+                </select>
+              </div>
+              <!-- The two directions of the selected relationship (side by side) -->
               <div class="two-col dep-cols">
               <div class="field">
                 <label class="field-label">
-                  Blocked by
+                  {{ relDef.label }}
                   <span v-if="localLinkedIds.size > 0" class="link-count link-toggle" :class="{ on: showOnly1 }" :title="showOnly1 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnly1 = !showOnly1">{{ localLinkedIds.size }}</span>
                 </label>
                 <div class="ms-picker">
@@ -313,7 +319,7 @@
               <!-- Required by (reverse dependency) -->
               <div class="field">
                 <label class="field-label">
-                  Blocks
+                  {{ relDef.inverse }}
                   <span v-if="localDependentIds.size > 0" class="link-count link-toggle" :class="{ on: showOnly2 }" :title="showOnly2 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnly2 = !showOnly2">{{ localDependentIds.size }}</span>
                 </label>
                 <div class="ms-picker">
@@ -404,7 +410,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown, itemTypes, itemTypeByKey } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES } from '../stores/useAppStore.js'
 import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
 import ScmBadge from './ScmBadge.vue'
@@ -421,7 +427,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
-const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, dependsOnIds, dependentIds, itemGroupIds, setItemGroups } = useAppStore()
+const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, itemGroupIds, setItemGroups } = useAppStore()
 
 const tab = ref('details') // details | scm | deps | groups
 
@@ -515,31 +521,33 @@ const dateError = computed(() => {
   return ''
 })
 
-// Local link state — Set of milestone IDs linked to this milestone
-const localLinkedIds = ref(new Set(
-  props.milestone ? dependsOnIds(props.milestone.id) : []
-))
-const localDependentIds = ref(new Set(
-  props.milestone ? dependentIds(props.milestone.id) : []
-))
+// Typed relationships (R1): one relationship kind is edited at a time. `edges`
+// is the working copy of every link touching this item; the pickers operate on
+// the selected rel and the diff is applied on save (preserving cancel).
+const relType = ref('depends-on')
+const relDef = computed(() => RELATIONSHIP_TYPES.find(r => r.key === relType.value) || RELATIONSHIP_TYPES[0])
+const SELF = props.milestone?.id || '__NEW__'
+const originalEdges = (props.milestone ? store.links.filter(l => l.a === SELF || l.b === SELF) : [])
+  .map(l => ({ a: l.a, b: l.b, rel: l.rel || 'depends-on' }))
+const edges = ref(originalEdges.map(e => ({ ...e })))
 
-// "Depends on" and "Required by" are the two ends of one directed link, so they
-// are mutually exclusive for a given milestone (prevents A↔A mutual / cycles).
+// Sets for the SELECTED relationship — drive the two pickers.
+const localLinkedIds = computed(() => new Set(edges.value.filter(e => e.a === SELF && e.rel === relType.value).map(e => e.b)))
+const localDependentIds = computed(() => new Set(edges.value.filter(e => e.b === SELF && e.rel === relType.value).map(e => e.a)))
+
+// The two directions of a relationship are mutually exclusive for one pair
+// (prevents A↔A cycles within the same rel).
 function toggleLocalLink(id) {
-  const deps = new Set(localLinkedIds.value)
-  const dependents = new Set(localDependentIds.value)
-  if (deps.has(id)) deps.delete(id)
-  else { deps.add(id); dependents.delete(id) }
-  localLinkedIds.value = deps
-  localDependentIds.value = dependents
+  const rel = relType.value
+  const had = edges.value.some(e => e.a === SELF && e.b === id && e.rel === rel)
+  edges.value = edges.value.filter(e => !(e.rel === rel && ((e.a === SELF && e.b === id) || (e.a === id && e.b === SELF))))
+  if (!had) edges.value.push({ a: SELF, b: id, rel })
 }
 function toggleLocalDependent(id) {
-  const deps = new Set(localLinkedIds.value)
-  const dependents = new Set(localDependentIds.value)
-  if (dependents.has(id)) dependents.delete(id)
-  else { dependents.add(id); deps.delete(id) }
-  localLinkedIds.value = deps
-  localDependentIds.value = dependents
+  const rel = relType.value
+  const had = edges.value.some(e => e.a === id && e.b === SELF && e.rel === rel)
+  edges.value = edges.value.filter(e => !(e.rel === rel && ((e.a === id && e.b === SELF) || (e.a === SELF && e.b === id))))
+  if (!had) edges.value.push({ a: id, b: SELF, rel })
 }
 
 // Group membership (applied on save).
@@ -594,26 +602,14 @@ const titleInput = ref(null)
 onMounted(() => titleInput.value?.focus())
 
 function syncLinks(msId) {
-  const curDeps = dependsOnIds(msId)        // msId → id (depends on)
-  const curParents = dependentIds(msId)     // id → msId (required by)
-  const wantDeps = localLinkedIds.value
-  const wantParents = localDependentIds.value
-
-  // Add or flip into "depends on" (msId → id).
-  for (const id of wantDeps) {
-    if (!curDeps.has(id)) { removeLink(msId, id); addLink(msId, id) }
-  }
-  // Add or flip into "required by" (id → msId).
-  for (const id of wantParents) {
-    if (!curParents.has(id)) { removeLink(id, msId); addLink(id, msId) }
-  }
-  // Drop links no longer wanted in either direction.
-  for (const id of curDeps) {
-    if (!wantDeps.has(id) && !wantParents.has(id)) removeLink(msId, id)
-  }
-  for (const id of curParents) {
-    if (!wantParents.has(id) && !wantDeps.has(id)) removeLink(id, msId)
-  }
+  // Resolve the placeholder self-id, then diff the working edges against the
+  // originals (keyed a|b|rel) and apply add/remove for the differences.
+  const resolve = (e) => ({ a: e.a === SELF ? msId : e.a, b: e.b === SELF ? msId : e.b, rel: e.rel })
+  const key = (e) => `${e.a}|${e.b}|${e.rel}`
+  const want = new Map(edges.value.map(resolve).map(e => [key(e), e]))
+  const orig = new Map(originalEdges.map(e => [key(e), e]))
+  for (const [k, e] of want) if (!orig.has(k)) addLink(e.a, e.b, e.rel)
+  for (const [k, e] of orig) if (!want.has(k)) removeLink(e.a, e.b, e.rel)
 }
 
 function submit() {

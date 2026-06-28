@@ -736,7 +736,7 @@ func (s *Server) addLink(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.AddLink(r.Context(), s.currentWorkspace(r), in.A, in.B); err != nil {
+	if err := s.store.AddLink(r.Context(), s.currentWorkspace(r), in.A, in.B, in.Rel); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -748,7 +748,7 @@ func (s *Server) removeLink(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.RemoveLink(r.Context(), s.currentWorkspace(r), in.A, in.B); err != nil {
+	if err := s.store.RemoveLink(r.Context(), s.currentWorkspace(r), in.A, in.B, in.Rel); err != nil {
 		s.fail(w, err)
 		return
 	}

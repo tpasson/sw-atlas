@@ -16,6 +16,16 @@ function workspaceSlugFromUrl() {
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+// Typed relationships for links (R1). For an edge a→b: `label` reads it from a's
+// side, `inverse` from b's side. 'depends-on' keeps the legacy blocking wording.
+export const RELATIONSHIP_TYPES = [
+  { key: 'depends-on', label: 'Blocked by', inverse: 'Blocks' },
+  { key: 'relates-to', label: 'Relates to', inverse: 'Relates to' },
+  { key: 'child-of', label: 'Child of', inverse: 'Parent of' },
+  { key: 'implements', label: 'Implements', inverse: 'Implemented by' },
+  { key: 'verifies', label: 'Verifies', inverse: 'Verified by' },
+]
+
 export const PRESET_COLORS = [
   '#0A84FF', '#30D158', '#FF9F0A', '#FF375F',
   '#BF5AF2', '#5AC8FA', '#FFCC00', '#FF6961',
@@ -384,7 +394,7 @@ export const riskWarnings = computed(() => {
     const md = itemDate(m)
     const late = []
     for (const l of store.links) {
-      if (l.a !== m.id) continue
+      if (l.a !== m.id || (l.rel || 'depends-on') !== 'depends-on') continue
       const p = byId[l.b]
       if (p && itemDate(p) > md) late.push(p)
     }
@@ -705,20 +715,16 @@ export function useAppStore() {
   }
 
   // ── Links ─────────────────────────────────────────────────────────────────
-  function addLink(idA, idB) {
+  function addLink(idA, idB, rel = 'depends-on') {
     if (idA === idB) return
-    const exists = store.links.some(l =>
-      (l.a === idA && l.b === idB) || (l.a === idB && l.b === idA)
-    )
+    const exists = store.links.some(l => l.a === idA && l.b === idB && (l.rel || 'depends-on') === rel)
     if (exists) return
-    store.links.push({ a: idA, b: idB })
-    api.addLink(idA, idB).catch(onWriteError)
+    store.links.push({ a: idA, b: idB, rel })
+    api.addLink(idA, idB, rel).catch(onWriteError)
   }
-  function removeLink(idA, idB) {
-    store.links = store.links.filter(l =>
-      !((l.a === idA && l.b === idB) || (l.a === idB && l.b === idA))
-    )
-    api.removeLink(idA, idB).catch(onWriteError)
+  function removeLink(idA, idB, rel = 'depends-on') {
+    store.links = store.links.filter(l => !(l.a === idA && l.b === idB && (l.rel || 'depends-on') === rel))
+    api.removeLink(idA, idB, rel).catch(onWriteError)
   }
   function getLinkedIds(id) {
     return new Set(
@@ -727,13 +733,13 @@ export function useAppStore() {
         .map(l => l.a === id ? l.b : l.a)
     )
   }
-  // Directed: the prerequisites this item depends on (links where a === id).
+  // Directed: the prerequisites this item depends on (depends-on links, a === id).
   function dependsOnIds(id) {
-    return new Set(store.links.filter(l => l.a === id).map(l => l.b))
+    return new Set(store.links.filter(l => l.a === id && (l.rel || 'depends-on') === 'depends-on').map(l => l.b))
   }
-  // Directed: the items that depend on this one — its "parents" (links where b === id).
+  // Directed: the items that depend on this one — its "parents" (depends-on, b === id).
   function dependentIds(id) {
-    return new Set(store.links.filter(l => l.b === id).map(l => l.a))
+    return new Set(store.links.filter(l => l.b === id && (l.rel || 'depends-on') === 'depends-on').map(l => l.a))
   }
 
   function cellMilestones(swimlaneId, subLaneId, month) {
