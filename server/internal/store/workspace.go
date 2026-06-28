@@ -142,6 +142,43 @@ func (s *Store) CreateWorkspace(ctx context.Context, ownerUserID, name string) (
 	return Workspace{ID: id, Slug: slug, Name: name, OwnerUserID: &ownerUserID, Visibility: "private"}, nil
 }
 
+// RenameWorkspace changes a project's display name (owner-gated at the API).
+func (s *Store) RenameWorkspace(ctx context.Context, wsID, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("name is required")
+	}
+	ct, err := s.pool.Exec(ctx, `UPDATE workspace SET name = $2 WHERE id = $1`, wsID, name)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteWorkspace deletes a project and everything it owns (FK ON DELETE CASCADE).
+// A user's personal home workspace can't be deleted this way — that would cascade
+// to the user account itself.
+func (s *Store) DeleteWorkspace(ctx context.Context, wsID string) error {
+	var isHome bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM app_user WHERE workspace_id = $1)`, wsID).Scan(&isHome); err != nil {
+		return err
+	}
+	if isHome {
+		return fmt.Errorf("a personal home workspace can't be deleted as a project: %w", ErrProtected)
+	}
+	ct, err := s.pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // PublicWorkspace is a discovery-directory entry: a public plan plus a small
 // summary so the landing page can render a card and link to /{slug}.
 type PublicWorkspace struct {
