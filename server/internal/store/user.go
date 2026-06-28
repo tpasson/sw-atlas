@@ -96,6 +96,12 @@ func (s *Store) CreateUser(ctx context.Context, username, passwordHash, role str
 		}
 		return User{}, err
 	}
+	// The creator owns their home workspace.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workspace_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		wsID, id); err != nil {
+		return User{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, err
 	}
@@ -244,6 +250,12 @@ func (s *Store) EnsureBootstrapAdmin(ctx context.Context, username, passwordHash
 	if _, err := tx.Exec(ctx,
 		`UPDATE workspace SET owner_user_id = $1 WHERE id = $2 AND owner_user_id IS NULL`,
 		id, DefaultWorkspaceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workspace_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+		 ON CONFLICT DO NOTHING`,
+		DefaultWorkspaceID, id); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

@@ -192,8 +192,8 @@ func (s *Server) resolveTargetWorkspace(r *http.Request) (string, error) {
 
 // ── middleware ──────────────────────────────────────────────────────────────
 
-// requireEditor restricts writes to the authenticated user's own workspace; a
-// request that explicitly targets another workspace is refused.
+// requireEditor allows writes when the caller is an owner or editor MEMBER of the
+// targeted workspace (membership is the authorization source).
 func (s *Server) requireEditor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := s.auth.SessionFromRequest(r)
@@ -210,11 +210,16 @@ func (s *Server) requireEditor(next http.Handler) http.Handler {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if target != sess.WorkspaceID {
-			writeErr(w, http.StatusForbidden, "you can only edit your own plan")
+		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), sess.WorkspaceID)))
+		if role != store.WSRoleOwner && role != store.WSRoleEditor {
+			writeErr(w, http.StatusForbidden, "you don't have edit access to this plan")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
 	})
 }
 
@@ -248,7 +253,16 @@ func (s *Server) requireReadAccess(next http.Handler) http.Handler {
 			return
 		}
 		sess, authed := s.auth.SessionFromRequest(r)
-		if !(authed && sess.WorkspaceID == target) {
+		allowed := false
+		if authed {
+			role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			allowed = role != "" // any member reads, even a private workspace
+		}
+		if !allowed {
 			public, err := s.store.GetPublicRead(r.Context(), target)
 			if err != nil {
 				writeErr(w, http.StatusInternalServerError, err.Error())
