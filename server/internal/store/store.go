@@ -72,6 +72,7 @@ type Item struct {
 	Progress     *int    `json:"progress"` // 0..100 (% complete) or null
 	ScmURL       *string `json:"scmUrl"`   // link to a source-control resource (release/PR/branch/commit) or null
 	Data         json.RawMessage `json:"data"` // type-specific field values; shape declared by the item's type
+	AssigneeID   *string `json:"assigneeId"` // the user this artifact is assigned to (a project member) or null
 }
 
 // itemData returns the item's JSONB field bag, defaulting to an empty object.
@@ -113,7 +114,7 @@ type Plan struct {
 
 const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why, how, who,
 	when_date, kind, marker, start_date, end_date, color,
-	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url, type_key, data`
+	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url, type_key, data, assignee_id`
 
 // ── Plan (read) ─────────────────────────────────────────────────────────────
 
@@ -195,7 +196,7 @@ func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 
 func scanItem(row pgx.Row) (Item, error) {
 	var it Item
-	var swl, sub, color, src, extID, extURL, scm *string
+	var swl, sub, color, src, extID, extURL, scm, assignee *string
 	var maturity, progress *int
 	var when, start, end, last sql.NullTime
 	var dataRaw []byte
@@ -203,7 +204,7 @@ func scanItem(row pgx.Row) (Item, error) {
 		&it.ID, &swl, &sub, &it.Year, &it.Month,
 		&it.Title, &it.What, &it.Why, &it.How, &it.Who,
 		&when, &it.Kind, &it.Marker, &start, &end, &color,
-		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey, &dataRaw,
+		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey, &dataRaw, &assignee,
 	); err != nil {
 		return it, err
 	}
@@ -211,7 +212,7 @@ func scanItem(row pgx.Row) (Item, error) {
 		it.SwimlaneID = *swl
 	}
 	it.SubLaneID, it.Color, it.SourceSystem, it.ExternalID, it.ExternalURL = sub, color, src, extID, extURL
-	it.Maturity, it.Progress, it.ScmURL = maturity, progress, scm
+	it.Maturity, it.Progress, it.ScmURL, it.AssigneeID = maturity, progress, scm, assignee
 	it.Data = json.RawMessage(dataRaw)
 	it.When = dateStr(when)
 	it.StartDate = dateStr(start)
@@ -299,10 +300,10 @@ func (s *Store) ImportPlan(ctx context.Context, ws string, p Plan) (ImportSummar
 		itID[it.ID] = nid
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO item (`+itemColumns+`, workspace_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
 			nid, nsw, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 			whenV, it.Kind, it.Marker, startV, endV, it.Color,
-			nil, nil, nil, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws); err != nil { // provenance stripped → native item
+			nil, nil, nil, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), nil, ws); err != nil { // provenance stripped → native item
 			return sum, err
 		}
 		sum.Items++
@@ -542,10 +543,10 @@ func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error
 	}
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO item (`+itemColumns+`, workspace_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
 		it.ID, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 		whenV, it.Kind, it.Marker, startV, endV, it.Color,
-		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws)
+		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws)
 	if err != nil {
 		return it, err
 	}
@@ -568,11 +569,11 @@ func (s *Store) UpdateItem(ctx context.Context, ws, id string, it Item) error {
 		`UPDATE item SET
 		   swimlane_id=$2, sub_lane_id=$3, year=$4, month=$5, title=$6,
 		   what=$7, why=$8, how=$9, who=$10, when_date=$11,
-		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21
-		 WHERE id=$1 AND workspace_id=$22`,
+		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21, assignee_id=$22
+		 WHERE id=$1 AND workspace_id=$23`,
 		id, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title,
 		it.What, it.Why, it.How, it.Who, whenV,
-		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), ws)
+		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws)
 	return err
 }
 

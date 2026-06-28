@@ -285,6 +285,7 @@ export const demoApi = {
   deleteProject: () => Promise.reject(new Error('Deleting the project is disabled in the demo')),
   leaveProject: () => ok(),
   listMembers: () => ok([]),
+  workspaceMembers: () => ok([]),
   inviteMember: () => Promise.reject(new Error('Inviting members is disabled in the demo')),
   setMemberRole: () => ok(),
   removeMember: () => ok(),

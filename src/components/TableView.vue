@@ -15,6 +15,7 @@
           </td>
           <td>{{ typeLabel(m) }}</td>
           <td>{{ areaName(m) }}</td>
+          <td v-if="hasMembers">{{ memberName(m.assigneeId) }}</td>
           <td class="num">{{ m.when || dateOf(m) }}</td>
           <td>{{ m.maturity ? MATURITY_STAGES[m.maturity - 1] : '' }}</td>
           <td class="num">{{ m.progress != null ? m.progress + '%' : '' }}</td>
@@ -27,14 +28,16 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store, itemTypes, MATURITY_STAGES, MONTHS } from '../stores/useAppStore.js'
+import { store, itemTypes, MATURITY_STAGES, MONTHS, memberName, workspace } from '../stores/useAppStore.js'
 
 defineEmits(['edit'])
 
+const hasMembers = workspace.members.length > 0
 const cols = [
   { key: 'title', label: 'Title' },
   { key: 'type', label: 'Type' },
   { key: 'area', label: 'Area' },
+  ...(hasMembers ? [{ key: 'assignee', label: 'Assignee' }] : []),
   { key: 'date', label: 'Date', num: true },
   { key: 'maturity', label: 'Maturity' },
   { key: 'progress', label: 'Progress', num: true },
@@ -59,6 +62,7 @@ function keyOf(m, k) {
   if (k === 'title') return (m.title || '').toLowerCase()
   if (k === 'type') return typeLabel(m).toLowerCase()
   if (k === 'area') return areaName(m).toLowerCase()
+  if (k === 'assignee') return memberName(m.assigneeId).toLowerCase()
   if (k === 'date') return m.when || `${m.year || 0}-${String(m.month || 0).padStart(2, '0')}`
   if (k === 'maturity') return m.maturity || 0
   if (k === 'progress') return m.progress ?? -1

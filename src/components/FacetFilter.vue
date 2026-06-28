@@ -7,6 +7,7 @@
       <option value="group">Groups</option>
       <option value="type">Type</option>
       <option value="maturity">Maturity</option>
+      <option v-if="workspace.members.length" value="assignee">Assignee</option>
     </select>
     <div class="fd-values">
       <span
@@ -27,10 +28,10 @@
 
 <script setup>
 import { ref, computed, onUnmounted } from 'vue'
-import { store, groups, ui, itemTypes, MATURITY_STAGES } from '../stores/useAppStore.js'
+import { store, groups, ui, itemTypes, MATURITY_STAGES, workspace } from '../stores/useAppStore.js'
 
 const dim = ref('group')
-const dimLabel = computed(() => (dim.value === 'group' ? 'groups' : dim.value === 'type' ? 'types' : 'maturity stages'))
+const dimLabel = computed(() => (dim.value === 'group' ? 'groups' : dim.value === 'type' ? 'types' : dim.value === 'assignee' ? 'assignees' : 'maturity stages'))
 
 const facets = computed(() => {
   if (dim.value === 'group') {
@@ -46,6 +47,11 @@ const facets = computed(() => {
     return itemTypes.list
       .filter(t => by.get(t.key)?.size)
       .map(t => ({ key: t.key, label: t.label, color: t.color, ids: by.get(t.key) }))
+  }
+  if (dim.value === 'assignee') {
+    return workspace.members
+      .map(mb => ({ key: mb.userId, label: mb.username, color: '', ids: new Set(store.milestones.filter(m => m.assigneeId === mb.userId).map(m => m.id)) }))
+      .filter(f => f.ids.size)
   }
   // maturity
   return MATURITY_STAGES
