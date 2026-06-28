@@ -60,6 +60,8 @@ const realApi = {
   inviteMember: (slug, username, role) => req('POST', `/projects/${slug}/members`, { username, role }),
   setMemberRole: (slug, userId, role) => req('PUT', `/projects/${slug}/members/${userId}/role`, { role }),
   removeMember: (slug, userId) => req('DELETE', `/projects/${slug}/members/${userId}`),
+  // roster of the currently-viewed workspace (assignee picker + avatars)
+  workspaceMembers: () => req('GET', '/members'),
 
   // plan + settings
   getPlan: () => req('GET', '/plan'),

@@ -94,7 +94,16 @@ export const workspace = reactive({
   ownSlug: '',
   role: null,          // my role in the viewed workspace: owner | editor | viewer | null
   myWorkspaces: [],    // [{slug, name, role, visibility}] for the switcher
+  members: [],         // roster of the viewed workspace: [{userId, username, role}]
 })
+
+// Resolve an assignee id to its member / initials / name (for X1 avatars).
+export function memberById(id) { return id ? workspace.members.find(m => m.userId === id) || null : null }
+export function memberInitials(id) { const m = memberById(id); return m ? (m.username.trim()[0] || '?').toUpperCase() : '' }
+export function memberName(id) { return memberById(id)?.username || '' }
+export async function loadWorkspaceMembers() {
+  try { workspace.members = await api.workspaceMembers() } catch { workspace.members = [] }
+}
 
 // Can the current user edit the viewed workspace (owner or editor member)?
 export function canEditWorkspace() {
@@ -559,6 +568,7 @@ export async function initApp() {
     await loadPalette()
     await loadGroups()
     await loadItemTypes()
+    await loadWorkspaceMembers()
     await loadUISettings()
   }
   session.ready = true

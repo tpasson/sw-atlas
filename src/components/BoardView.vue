@@ -26,7 +26,10 @@
           @click="$emit('edit', m)"
         >
           <span class="bv-card-title">{{ m.title }}</span>
-          <span class="bv-card-meta">{{ typeLabel(m) }}<template v-if="m.when"> · {{ m.when }}</template></span>
+          <div class="bv-card-foot">
+            <span class="bv-card-meta">{{ typeLabel(m) }}<template v-if="m.when"> · {{ m.when }}</template></span>
+            <span v-if="m.assigneeId" class="bv-av" :title="memberName(m.assigneeId)">{{ memberInitials(m.assigneeId) }}</span>
+          </div>
         </div>
         <div v-if="!col.items.length" class="bv-col-empty">—</div>
       </div>
@@ -36,7 +39,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store, itemTypes, MATURITY_STAGES, useAppStore } from '../stores/useAppStore.js'
+import { store, itemTypes, MATURITY_STAGES, useAppStore, memberInitials, memberName } from '../stores/useAppStore.js'
 
 const props = defineProps({ readOnly: { type: Boolean, default: false } })
 defineEmits(['edit'])
@@ -80,6 +83,12 @@ function onDrop(key) {
 .bv-card:hover { box-shadow: var(--sh-md); }
 .bv-card:active { transform: scale(0.99); }
 .bv-card-title { font-size: 13px; font-weight: 600; color: var(--clr-text); }
+.bv-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .bv-card-meta { font-size: 11px; color: var(--clr-text-3); }
+.bv-av {
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: #fff; background: var(--clr-accent);
+}
 .bv-col-empty { font-size: 12px; color: var(--clr-text-3); text-align: center; padding: 10px 0; }
 </style>

@@ -87,6 +87,14 @@
                 </div>
               </div>
 
+              <div v-if="workspace.members.length" class="field">
+                <label class="field-label">Assignee</label>
+                <select class="field-input" :disabled="readOnly" v-model="form.assigneeId">
+                  <option :value="null">Unassigned</option>
+                  <option v-for="mb in workspace.members" :key="mb.userId" :value="mb.userId">{{ mb.username }}</option>
+                </select>
+              </div>
+
               <!-- Type-specific fields: schema comes from the selected item type. -->
               <div v-if="currentTypeFields.length" class="field type-fields">
                 <label class="field-label">{{ currentTypeLabel }} fields</label>
@@ -410,7 +418,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace } from '../stores/useAppStore.js'
 import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
 import ScmBadge from './ScmBadge.vue'
@@ -471,6 +479,7 @@ const form = reactive({
   kind:   props.milestone?.kind ?? 'milestone',
   typeKey: props.milestone?.typeKey ?? (props.initialType || props.milestone?.kind || 'milestone'),
   data:   { ...(props.milestone?.data || {}) },
+  assigneeId: props.milestone?.assigneeId ?? null,
   marker: props.milestone?.marker && props.milestone.marker !== 'bar' ? props.milestone.marker : (settings.markers[0]?.shape || 'l:Flag'),
   what:   props.milestone?.sourceSystem ? stripMarkdown(props.milestone?.what || '') : (props.milestone?.what ?? ''),
   why:    props.milestone?.why   ?? '',
@@ -646,6 +655,7 @@ function submit() {
     kind:       form.kind,
     typeKey:    form.typeKey,
     data:       form.data,
+    assigneeId: form.assigneeId || null,
     marker:     (form.kind === 'event' && !markerOn.value) ? null : form.marker,
     when:       isEvent ? (form.startDate || null) : (form.when || null),
     startDate:  isEvent ? (form.startDate || null) : null,

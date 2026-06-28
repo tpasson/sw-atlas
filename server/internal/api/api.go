@@ -55,6 +55,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/settings/ui", s.getUISettings)
 			r.Get("/settings/git-colors", s.getGitColors)
 			r.Get("/item-types", s.getItemTypes)
+			r.Get("/members", s.listWorkspaceMembers)
 			r.Get("/baselines", s.listBaselines)
 			r.Get("/baselines/{id}", s.getBaseline)
 		})
@@ -621,6 +622,17 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeNoContent(w)
+}
+
+// listWorkspaceMembers returns the current workspace's roster for any reader —
+// used by the assignee picker and to render assignee avatars.
+func (s *Server) listWorkspaceMembers(w http.ResponseWriter, r *http.Request) {
+	list, err := s.store.ListMembers(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 // listMembers returns the roster of the workspace named by {slug} (owner only).
