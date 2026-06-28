@@ -51,10 +51,9 @@
               <div class="two-col">
                 <div class="field">
                   <label class="field-label">Type</label>
-                  <div class="seg">
-                    <button type="button" class="seg-btn" :class="{ on: form.kind === 'milestone' }" @click="form.kind = 'milestone'">Milestone</button>
-                    <button type="button" class="seg-btn" :class="{ on: form.kind === 'event' }" @click="form.kind = 'event'">Event</button>
-                  </div>
+                  <select class="field-input" :value="form.typeKey" :disabled="readOnly" @change="applyType($event.target.value)">
+                    <option v-for="t in itemTypes.list" :key="t.key" :value="t.key">{{ t.label }}</option>
+                  </select>
                 </div>
                 <div class="field">
                   <label class="field-label">Marker</label>
@@ -85,6 +84,21 @@
                       <MarkerIcon :shape="o.shape" :fill="o.fill" :color="(form.kind !== 'event' || markerOn) && form.marker === o.shape ? (swimlane?.color || '#0A84FF') : '#9aa0a6'" :size="16" />
                     </button>
                   </div>
+                </div>
+              </div>
+
+              <!-- Type-specific fields: schema comes from the selected item type. -->
+              <div v-if="currentTypeFields.length" class="field type-fields">
+                <label class="field-label">{{ currentTypeLabel }} fields</label>
+                <div v-for="f in currentTypeFields" :key="f.key" class="tf-row">
+                  <label class="tf-label">{{ f.label || f.key }}</label>
+                  <select v-if="f.type === 'select'" class="field-input" :disabled="readOnly" v-model="form.data[f.key]">
+                    <option value="">—</option>
+                    <option v-for="o in (f.options || [])" :key="o" :value="o">{{ o }}</option>
+                  </select>
+                  <input v-else-if="f.type === 'number'" type="number" class="field-input" :disabled="readOnly" v-model="form.data[f.key]" />
+                  <input v-else-if="f.type === 'date'" type="date" class="field-input" :disabled="readOnly" v-model="form.data[f.key]" />
+                  <input v-else type="text" class="field-input" :disabled="readOnly" v-model="form.data[f.key]" />
                 </div>
               </div>
 
@@ -390,7 +404,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown, itemTypes, itemTypeByKey } from '../stores/useAppStore.js'
 import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
 import ScmBadge from './ScmBadge.vue'
@@ -448,6 +462,8 @@ const displayMonth = computed(() => {
 const form = reactive({
   title:  props.milestone?.title ?? '',
   kind:   props.milestone?.kind ?? 'milestone',
+  typeKey: props.milestone?.typeKey ?? props.milestone?.kind ?? 'milestone',
+  data:   { ...(props.milestone?.data || {}) },
   marker: props.milestone?.marker && props.milestone.marker !== 'bar' ? props.milestone.marker : (settings.markers[0]?.shape || 'l:Flag'),
   what:   props.milestone?.sourceSystem ? stripMarkdown(props.milestone?.what || '') : (props.milestone?.what ?? ''),
   why:    props.milestone?.why   ?? '',
@@ -461,6 +477,29 @@ const form = reactive({
   progress: props.milestone?.progress ?? null,
   scmUrl: props.milestone?.scmUrl ?? '',
 })
+
+// Type-specific field schema for the selected type.
+const currentType = computed(() => itemTypeByKey(form.typeKey))
+const currentTypeFields = computed(() => currentType.value?.fields || [])
+const currentTypeLabel = computed(() => currentType.value?.label || 'Type')
+
+// Switching the item type derives its rendering kind, and (for custom types)
+// seeds the marker/colour and any new field slots.
+function applyType(key) {
+  const t = itemTypeByKey(key)
+  form.typeKey = key
+  if (!t) return
+  if (t.builtin) {
+    form.kind = key === 'event' ? 'event' : key === 'point' ? 'point' : 'milestone'
+  } else {
+    form.kind = t.family === 'timeline-range' ? 'event' : 'milestone'
+    if (t.icon) { form.marker = t.icon; markerOn.value = true }
+    if (t.color) form.color = t.color
+  }
+  for (const f of (t.fields || [])) {
+    if (!(f.key in form.data)) form.data[f.key] = ''
+  }
+}
 
 // Keep an event's end date on/after its start so the picker opens in the right
 // month instead of defaulting to today/a past date.
@@ -604,6 +643,8 @@ function submit() {
     how:        form.how,
     who:        form.who,
     kind:       form.kind,
+    typeKey:    form.typeKey,
+    data:       form.data,
     marker:     (form.kind === 'event' && !markerOn.value) ? null : form.marker,
     when:       isEvent ? (form.startDate || null) : (form.when || null),
     startDate:  isEvent ? (form.startDate || null) : null,
@@ -770,6 +811,10 @@ function remove() {
 /* Filter toggle: outline (hollow) while ALL are shown, filled while filtered to the selected ones */
 .link-count.link-toggle { background: transparent; color: var(--clr-accent); box-shadow: inset 0 0 0 1.5px var(--clr-accent); }
 .link-count.link-toggle.on { background: var(--clr-accent); color: #fff; box-shadow: none; }
+
+.type-fields .tf-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.type-fields .tf-label { font-size: 12px; color: var(--clr-text-2); min-width: 120px; flex-shrink: 0; }
+.type-fields .tf-row .field-input { flex: 1; }
 
 .field-input,
 .field-textarea {

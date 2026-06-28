@@ -333,6 +333,13 @@ export const swatchColors = computed(() => {
 export const groups = reactive({ list: [] })
 export const ui = reactive({ hoverGroupId: null, focusItemId: null })
 
+// Item-type registry (built-ins + per-workspace custom types). Drives the type
+// picker + the dynamic field set in the item modal.
+export const itemTypes = reactive({ list: [] })
+export function itemTypeByKey(key) {
+  return itemTypes.list.find(t => t.key === key) || null
+}
+
 // Baselines (P2): named snapshots + a diff against the live plan.
 export const baselines = reactive({
   list: [],
@@ -414,6 +421,18 @@ export async function loadGroups() {
     const g = await api.getGroups()
     groups.list = g.groups || []
   } catch { groups.list = [] }
+}
+
+export async function loadItemTypes() {
+  try {
+    itemTypes.list = await api.itemTypes()
+  } catch { itemTypes.list = [] }
+}
+
+// saveItemTypes persists the custom types and refreshes the catalog from the
+// server response (which re-includes the built-ins).
+export async function saveItemTypes(customTypes) {
+  itemTypes.list = await api.setItemTypes(customTypes)
 }
 
 function onWriteError(err) {
@@ -516,6 +535,7 @@ export async function initApp() {
     try { await loadBaselines() } catch { /* baselines non-fatal */ }
     await loadPalette()
     await loadGroups()
+    await loadItemTypes()
     await loadUISettings()
   }
   session.ready = true

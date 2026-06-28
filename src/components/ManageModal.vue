@@ -19,6 +19,7 @@
               <button class="tab" :class="{ active: tab === 'areas' }" @click="tab = 'areas'">Areas</button>
               <button class="tab" :class="{ active: tab === 'display' }" @click="tab = 'display'">Display</button>
               <button class="tab" :class="{ active: tab === 'legend' }" @click="tab = 'legend'">Icons</button>
+              <button v-if="session.authenticated || isDemo" class="tab" :class="{ active: tab === 'types' }" @click="tab = 'types'">Types</button>
               <button class="tab" :class="{ active: tab === 'baselines' }" @click="tab = 'baselines'">Baselines</button>
               <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
               <button v-if="session.authenticated" class="tab" :class="{ active: tab === 'sources' }" @click="tab = 'sources'">Sources</button>
@@ -461,6 +462,11 @@
                 </div>
               </section>
 
+              <!-- ───────────────── ITEM TYPES ───────────────── -->
+              <section v-if="tab === 'types'" class="tab-pane">
+                <TypesManager />
+              </section>
+
               <!-- ───────────────── BASELINES ───────────────── -->
               <section v-show="tab === 'baselines'" class="tab-pane">
                 <div class="card">
@@ -553,6 +559,7 @@ import SubscriptionManager from './SubscriptionManager.vue'
 import GitHubSourceManager from './GitHubSourceManager.vue'
 import UsersManager from './UsersManager.vue'
 import AccountManager from './AccountManager.vue'
+import TypesManager from './TypesManager.vue'
 
 const isDemo = import.meta.env.VITE_DEMO
 
