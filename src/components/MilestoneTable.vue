@@ -407,7 +407,14 @@ const COL_W = computed(() => baseColW.value * props.zoom)
 const MONTHS_W = computed(() => COL_W.value * unitCount.value)
 // The right gutter grows to fill the viewport when zoomed out, so the grid/rows
 // reach the edge instead of leaving the page background showing.
-const gutterW = computed(() => Math.max(RIGHT_PAD, wrapW.value - AREA_W.value - SUB_W.value - MONTHS_W.value))
+// The gutter must be wide enough to (a) fill the viewport and (b) hold the
+// right-most item LABEL — labels overflow freely to the right of their marker, so
+// items near the end of the timeline would otherwise be clipped at the table edge.
+const gutterW = computed(() => Math.max(
+  RIGHT_PAD,
+  wrapW.value - AREA_W.value - SUB_W.value - MONTHS_W.value,
+  maxLabelRight.value - MONTHS_W.value + 32,
+))
 const tableWidth = computed(() => AREA_W.value + SUB_W.value + MONTHS_W.value + gutterW.value)
 
 // ── Rows ────────────────────────────────────────────────────────────────────
@@ -689,6 +696,18 @@ const grid = computed(() =>
     return { row, items, laneCount, laneH, vOffset, trackHeight: laneCount * laneH }
   })
 )
+
+// Right-most pixel reached by any item (marker + overflowing label) across all
+// rows — drives the gutter width so long labels at the timeline end aren't clipped.
+const maxLabelRight = computed(() => {
+  let m = 0
+  for (const g of grid.value) {
+    for (const it of g.items) {
+      if (it.x1 > m) m = it.x1
+    }
+  }
+  return m
+})
 
 function baselineClass(m) {
   const s = baselineDiff.value.status[m.id]
