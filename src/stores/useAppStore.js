@@ -353,7 +353,7 @@ export const swatchColors = computed(() => {
 
 // Item groups (shared, persisted) + transient UI state for group highlighting.
 export const groups = reactive({ list: [] })
-export const ui = reactive({ hoverGroupId: null, focusItemId: null })
+export const ui = reactive({ hoverGroupId: null, focusItemId: null, highlightIds: null })
 
 // Item-type registry (built-ins + per-workspace custom types). Drives the type
 // picker + the dynamic field set in the item modal.
