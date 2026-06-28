@@ -54,6 +54,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/settings/groups", s.getGroups)
 			r.Get("/settings/ui", s.getUISettings)
 			r.Get("/settings/git-colors", s.getGitColors)
+			r.Get("/item-types", s.getItemTypes)
 			r.Get("/baselines", s.listBaselines)
 			r.Get("/baselines/{id}", s.getBaseline)
 		})
@@ -490,6 +491,16 @@ func (s *Server) getGitColors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// getItemTypes returns the workspace's item-type catalog (built-ins for now).
+func (s *Server) getItemTypes(w http.ResponseWriter, r *http.Request) {
+	types, err := s.store.ListItemTypes(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, types)
 }
 
 func (s *Server) setGitColors(w http.ResponseWriter, r *http.Request) {

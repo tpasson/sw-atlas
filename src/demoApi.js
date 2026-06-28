@@ -271,6 +271,11 @@ export const demoApi = {
   setUISettings: () => ok(),
   getGitColors: () => ok(gc()),
   setGitColors: (c) => { db.gitColors = c; save(); return ok(c) },
+  itemTypes: () => ok([
+    { key: 'milestone', label: 'Milestone', family: 'timeline-point', icon: 'l:Diamond', color: '', builtin: true },
+    { key: 'event', label: 'Event', family: 'timeline-range', icon: 'l:Flag', color: '', builtin: true },
+    { key: 'point', label: 'Point', family: 'timeline-point', icon: 'l:Circle', color: '', builtin: true },
+  ]),
 
   createSwimlane: (data) => {
     const sw = { id: data.id || uid(), name: data.name, color: data.color || '#0A84FF', subLanes: [] }
