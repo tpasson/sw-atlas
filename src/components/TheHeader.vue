@@ -23,17 +23,22 @@
         </div>
 
         <div class="year-nav">
-          <button class="year-btn" @click="$emit('prev-year')">
+          <button class="year-btn" :title="store.granularity === 'month' ? 'Previous month' : 'Previous year'" @click="store.granularity === 'month' ? prevMonth() : $emit('prev-year')">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M9 11L5 7l4-4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
-          <span class="year-label">{{ year }}</span>
-          <button class="year-btn" @click="$emit('next-year')">
+          <span class="year-label">{{ store.granularity === 'month' ? MONTHS[store.viewMonth - 1] + ' ' + year : year }}</span>
+          <button class="year-btn" :title="store.granularity === 'month' ? 'Next month' : 'Next year'" @click="store.granularity === 'month' ? nextMonth() : $emit('next-year')">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
+          <button
+            class="year-btn gran-toggle"
+            :title="store.granularity === 'month' ? 'Switch to year view' : 'Switch to month view (day columns)'"
+            @click="setGranularity(store.granularity === 'month' ? 'year' : 'month')"
+          >{{ store.granularity === 'month' ? 'Year' : 'Month' }}</button>
         </div>
 
         <div class="zoom-nav">
@@ -198,7 +203,7 @@ function goToOwn() {
   if (workspace.ownSlug) window.location.assign('/' + encodeURIComponent(workspace.ownSlug))
 }
 
-const { selectBaseline, createBaseline } = useAppStore()
+const { selectBaseline, createBaseline, setGranularity, prevMonth, nextMonth } = useAppStore()
 const diff = baselineDiff
 
 // Arrow order left→right: oldest … newest … Live (rightmost = most current).
@@ -473,6 +478,17 @@ async function onSaveBaseline() {
   color: #FFFFFF;
 }
 .year-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* Year/Month granularity toggle: a compact text button beside the date stepper. */
+.gran-toggle {
+  width: auto;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  margin-left: 2px;
+  color: rgba(255,255,255,0.85);
+}
 
 .year-label {
   font-size: 13px;

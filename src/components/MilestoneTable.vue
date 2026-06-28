@@ -19,20 +19,20 @@
           <th class="th-area" :style="{ width: AREA_W + 'px', minWidth: AREA_W + 'px' }">Area</th>
           <th class="th-sub" :style="{ left: AREA_W + 'px', width: SUB_W + 'px', minWidth: SUB_W + 'px' }">Sub-Area</th>
           <th
-            v-for="(m, i) in MONTHS"
+            v-for="(m, i) in columns"
             :key="i"
             class="th-month"
-            :class="{ 'th-current': isCurrentMonth(i + 1) }"
+            :class="{ 'th-current': isCurrentCol(i) }"
             :style="{ width: COL_W + 'px' }"
           >
             {{ m }}
           </th>
           <th class="th-gutter" :style="{ width: gutterW + 'px' }"></th>
         </tr>
-        <tr v-if="settings.weekNumbers.enabled" class="head-weeks" :style="{ '--wk-top': monthHeadH + 'px' }">
+        <tr v-if="settings.weekNumbers.enabled && granularity !== 'month'" class="head-weeks" :style="{ '--wk-top': monthHeadH + 'px' }">
           <th class="th-area wk-corner" :style="{ width: AREA_W + 'px', minWidth: AREA_W + 'px' }"></th>
           <th class="th-sub wk-corner" :style="{ left: AREA_W + 'px', width: SUB_W + 'px', minWidth: SUB_W + 'px' }"><span class="wk-kw">CW</span></th>
-          <th class="wk-cell" colspan="13">
+          <th class="wk-cell" :colspan="trackColspan">
             <span
               v-for="w in weekTicks"
               :key="w.n + '-' + w.x"
@@ -65,17 +65,17 @@
                  positioned by date and stacked into lanes to avoid collisions. -->
             <td
               class="track"
-              colspan="13"
+              :colspan="trackColspan"
               :style="{ height: g.trackHeight + 'px', '--col': COL_W + 'px' }"
               @click="props.readOnly ? null : onTrackClick(g.row, $event)"
               @mousemove="onTrackMove(rowKey(g.row), $event)"
               @mouseleave="addHint.key = null"
             >
-              <template v-if="currentMonthIndex >= 0">
+              <template v-if="currentColIndex >= 0">
                 <div
                   v-if="settings.monthHighlight.enabled"
                   class="month-now"
-                  :style="{ left: currentMonthIndex * COL_W + 'px', width: COL_W + 'px', background: monthHlColor }"
+                  :style="{ left: currentColIndex * COL_W + 'px', width: COL_W + 'px', background: monthHlColor }"
                 ></div>
               </template>
 
@@ -97,7 +97,7 @@
                 :style="{ left: closeLine.left + 'px', width: closeLine.w + 'px', background: closeLine.color }"
               ></div>
 
-              <template v-if="currentMonthIndex >= 0">
+              <template v-if="currentColIndex >= 0">
                 <div
                   v-if="settings.dayLine.enabled"
                   class="day-line"
@@ -388,9 +388,23 @@ const wrapW = ref(1200)
 const headRowEl = ref(null)     // months header row — measured to stick the week row below it
 const monthHeadH = ref(44)
 let resizeObs = null
-const baseColW = computed(() => Math.max(MIN_COL_W, (wrapW.value - AREA_W.value - SUB_W.value) / 12))
+// View granularity: 'year' = 12 month columns, 'month' = one month of day columns.
+const granularity = computed(() => store.granularity)
+const viewMonth = computed(() => store.viewMonth)
+const unitCount = computed(() => granularity.value === 'month' ? daysInMonth(store.year, viewMonth.value) : 12)
+const minColW = computed(() => granularity.value === 'month' ? 26 : MIN_COL_W)
+// Column header labels: month names, or day numbers 1..N for the focused month.
+const columns = computed(() =>
+  granularity.value === 'month'
+    ? Array.from({ length: unitCount.value }, (_, i) => String(i + 1))
+    : MONTHS)
+const trackColspan = computed(() => unitCount.value + 1) // columns + right gutter
+
+const baseColW = computed(() => Math.max(minColW.value, (wrapW.value - AREA_W.value - SUB_W.value) / unitCount.value))
 const COL_W = computed(() => baseColW.value * props.zoom)
-const MONTHS_W = computed(() => COL_W.value * 12)
+// Total width of the time track (kept named MONTHS_W; it is the column area width
+// in both granularities).
+const MONTHS_W = computed(() => COL_W.value * unitCount.value)
 // The right gutter grows to fill the viewport when zoomed out, so the grid/rows
 // reach the edge instead of leaving the page background showing.
 const gutterW = computed(() => Math.max(RIGHT_PAD, wrapW.value - AREA_W.value - SUB_W.value - MONTHS_W.value))
@@ -423,20 +437,28 @@ function ymOf(dateStr) {
 function daysInMonth(y, mo) {
   return new Date(y, mo, 0).getDate()
 }
-// x within the month track (0..MONTHS_W) for a date in the viewed year, clamped.
+// Whether a (year, month) falls inside the visible window — the whole year, or
+// just the focused month in day-granularity.
+function inWindow(y, mo) {
+  if (y !== store.year) return false
+  return granularity.value === 'year' || mo === viewMonth.value
+}
+// x within the time track (0..MONTHS_W) for a date in view, clamped to the edges.
 function dateX(dateStr) {
   if (!dateStr) return 0
   const { y, mo, day } = ymOf(dateStr)
+  if (granularity.value === 'month') {
+    if (y < store.year || (y === store.year && mo < viewMonth.value)) return 0
+    if (y > store.year || (y === store.year && mo > viewMonth.value)) return MONTHS_W.value
+    return (day - 1) * COL_W.value
+  }
   if (y < store.year) return 0
   if (y > store.year) return MONTHS_W.value
   return ((mo - 1) + (day - 1) / daysInMonth(store.year, mo)) * COL_W.value
 }
-// Same mapping as dateX but for a Date object (used for week ticks).
+// Same mapping for a Date object (week ticks, year-granularity only).
 function dateXOf(dt) {
-  const y = dt.getFullYear(), mo = dt.getMonth() + 1, day = dt.getDate()
-  if (y < store.year) return 0
-  if (y > store.year) return MONTHS_W.value
-  return ((mo - 1) + (day - 1) / daysInMonth(store.year, mo)) * COL_W.value
+  return dateX(fmtDate(dt))
 }
 function isoWeek(dt) {
   const d = new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()))
@@ -450,6 +472,11 @@ function isoWeek(dt) {
 // Inverse of dateXOf: pixel x within the months area → a Date in the viewed year.
 function xToDate(x) {
   const clamped = Math.max(0, Math.min(MONTHS_W.value - 0.001, x))
+  if (granularity.value === 'month') {
+    const di = Math.floor(clamped / COL_W.value)
+    const dim = daysInMonth(store.year, viewMonth.value)
+    return new Date(store.year, viewMonth.value - 1, Math.min(dim, di + 1))
+  }
   const mi = Math.floor(clamped / COL_W.value)
   const frac = (clamped - mi * COL_W.value) / COL_W.value
   const dim = daysInMonth(store.year, mi + 1)
@@ -505,6 +532,19 @@ function isBar(m) {
   return m.kind === 'event' && m.startDate && m.endDate && m.endDate > m.startDate
 }
 function barInfo(m) {
+  if (granularity.value === 'month') {
+    const mm = String(viewMonth.value).padStart(2, '0')
+    const dim = daysInMonth(store.year, viewMonth.value)
+    const winStart = `${store.year}-${mm}-01`
+    const winEnd = `${store.year}-${mm}-${String(dim).padStart(2, '0')}`
+    if (m.endDate < winStart || m.startDate > winEnd) return null
+    return {
+      startX: dateX(m.startDate),
+      endX: dateX(m.endDate),
+      continuesLeft: m.startDate < winStart,
+      continuesRight: m.endDate > winEnd,
+    }
+  }
   const s = ymOf(m.startDate)
   const e = ymOf(m.endDate)
   if (s.y > store.year || e.y < store.year) return null
@@ -545,7 +585,7 @@ function rowItems(swId, subId) {
       })
     } else {
       const ad = anchorDate(m)
-      if (Number(ad.slice(0, 4)) !== store.year) continue
+      { const w = ymOf(ad); if (!inWindow(w.y, w.mo)) continue }
       const x = dateX(ad)
       const labelW = estTextW(m.title)
       const pad = settings.items.padding
@@ -567,7 +607,7 @@ function rowItems(swId, subId) {
       const ghSw = gh.swimlaneId, ghSub = gh.subLaneId ?? null
       if (ghSw !== swId || ghSub !== subId) continue
       const ad = gh.when || `${gh.year}-${String(gh.month).padStart(2, '0')}-01`
-      if (Number(ad.slice(0, 4)) !== store.year) continue
+      { const w = ymOf(ad); if (!inWindow(w.y, w.mo)) continue }
       const x = dateX(ad)
       const labelW = estTextW(gh.title)
       const pad = settings.items.padding
@@ -655,23 +695,29 @@ function baselineClass(m) {
   return s === 'added' ? 'bl-added' : s === 'moved' ? 'bl-moved' : ''
 }
 
-const currentMonthIndex = computed(() => {
+// Index (0-based) of the column representing "now": the current month in
+// year-granularity, or the current day in month-granularity. -1 when off-screen.
+const currentColIndex = computed(() => {
   const now = new Date()
-  return now.getFullYear() === store.year ? now.getMonth() : -1
+  if (now.getFullYear() !== store.year) return -1
+  if (granularity.value === 'month') {
+    return now.getMonth() + 1 === viewMonth.value ? now.getDate() - 1 : -1
+  }
+  return now.getMonth()
 })
-function isCurrentMonth(month) {
-  return currentMonthIndex.value === month - 1
+function isCurrentCol(i) {
+  return currentColIndex.value === i
 }
 const todayX = computed(() => {
-  if (currentMonthIndex.value < 0) return -1
-  const now = new Date()
-  return (now.getMonth() + (now.getDate() - 1) / daysInMonth(store.year, now.getMonth() + 1)) * COL_W.value
+  if (currentColIndex.value < 0) return -1
+  return dateX(fmtDate(new Date()))
 })
 const monthHlColor = computed(() => hexAlpha(settings.monthHighlight.color, settings.monthHighlight.opacity))
 const dayLineColor = computed(() => hexAlpha(settings.dayLine.color, settings.dayLine.opacity))
 
 // ISO week numbers across the viewed year, thinned out when columns get narrow.
 const weekTicks = computed(() => {
+  if (granularity.value === 'month') return [] // day columns already label every day
   if (!settings.weekNumbers.enabled) return []
   const year = store.year
   const weekPx = MONTHS_W.value / 52.1429
@@ -707,7 +753,7 @@ const monthLineDivs = computed(() => {
   const s = settings.monthLines
   if (!s || !s.enabled) return []
   const xs = []
-  for (let i = 1; i <= 11; i++) xs.push(i * COL_W.value)
+  for (let i = 1; i < unitCount.value; i++) xs.push(i * COL_W.value) // between every column
   return lineDivs(xs, hexAlpha(s.color, s.opacity), s.width)
 })
 
@@ -724,6 +770,7 @@ const closeLine = computed(() => {
 // Fine vertical week gridlines, one per Monday so they align with the CW numbers.
 const weekLineDivs = computed(() => {
   const s = settings.weekLines
+  if (granularity.value === 'month') return []
   if (!s || !s.enabled) return []
   const year = store.year
   const offset = (new Date(year, 0, 1).getDay() + 6) % 7
@@ -746,6 +793,11 @@ function onTrackClick(row, e) {
   const rect = e.currentTarget.getBoundingClientRect()
   const x = e.clientX - rect.left
   if (x > MONTHS_W.value) return   // ignore clicks in the empty right gutter
+  if (granularity.value === 'month') {
+    const d = xToDate(x)
+    emit('add-milestone', { swimlane: row.swimlane, subLane: row.subLane, month: viewMonth.value, date: fmtDate(d) })
+    return
+  }
   if (settings.weekNumbers.enabled) {
     // Week-specific: prefill the new item with the clicked week's Monday.
     let monday = mondayOf(xToDate(x))
@@ -765,6 +817,11 @@ function onTrackMove(key, e) {
   const x = e.clientX - rect.left
   if (x > MONTHS_W.value) { addHint.key = null; return }   // empty right gutter
   addHint.key = key
+  if (granularity.value === 'month') {
+    const di = Math.min(unitCount.value - 1, Math.max(0, Math.floor(x / COL_W.value)))
+    addHint.x = (di + 0.5) * COL_W.value
+    return
+  }
   if (settings.weekNumbers.enabled) {
     const monday = mondayOf(xToDate(x))
     const next = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 7)

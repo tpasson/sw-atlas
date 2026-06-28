@@ -33,14 +33,25 @@ const uid = () =>
 // The viewing year is client-side UI state (not domain data); persist it as a
 // lightweight preference so a reload keeps the same view.
 const YEAR_KEY = 'atlas-view-year'
+const GRAN_KEY = 'atlas-view-gran'
+const MONTH_KEY = 'atlas-view-month'
 function initialYear() {
   const v = parseInt(localStorage.getItem(YEAR_KEY) || '', 10)
   return Number.isFinite(v) ? v : new Date().getFullYear()
+}
+function initialGranularity() {
+  return localStorage.getItem(GRAN_KEY) === 'month' ? 'month' : 'year'
+}
+function initialMonth() {
+  const v = parseInt(localStorage.getItem(MONTH_KEY) || '', 10)
+  return v >= 1 && v <= 12 ? v : new Date().getMonth() + 1
 }
 
 // Reactive plan cache, populated from the backend (the single source of truth).
 export const store = reactive({
   year: initialYear(),
+  granularity: initialGranularity(), // 'year' (12 month columns) | 'month' (day columns)
+  viewMonth: initialMonth(),         // 1..12, the focused month when granularity === 'month'
   swimlanes: [],
   milestones: [],
   links: [],
@@ -545,10 +556,23 @@ function workspaceLoadError(e) {
 
 export function useAppStore() {
   function persistYear() {
-    try { localStorage.setItem(YEAR_KEY, String(store.year)) } catch { /* ignore */ }
+    try {
+      localStorage.setItem(YEAR_KEY, String(store.year))
+      localStorage.setItem(GRAN_KEY, store.granularity)
+      localStorage.setItem(MONTH_KEY, String(store.viewMonth))
+    } catch { /* ignore */ }
   }
   function prevYear() { store.year--; persistYear() }
   function nextYear() { store.year++; persistYear() }
+  function setGranularity(g) { store.granularity = g === 'month' ? 'month' : 'year'; persistYear() }
+  function prevMonth() {
+    if (store.viewMonth <= 1) { store.viewMonth = 12; store.year-- } else { store.viewMonth-- }
+    persistYear()
+  }
+  function nextMonth() {
+    if (store.viewMonth >= 12) { store.viewMonth = 1; store.year++ } else { store.viewMonth++ }
+    persistYear()
+  }
 
   // ── Swimlanes ───────────────────────────────────────────────────────────
   function addSwimlane(name, color) {
@@ -828,7 +852,7 @@ export function useAppStore() {
 
   return {
     store, session, baselines,
-    prevYear, nextYear,
+    prevYear, nextYear, setGranularity, prevMonth, nextMonth,
     addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder,
     addSubLane, updateSubLane, deleteSubLane,
     addMilestone, updateMilestone, deleteMilestone,
