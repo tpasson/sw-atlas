@@ -78,6 +78,7 @@ func runServe(cfg config.Config) {
 		for range t.C {
 			st.SyncDueSubscriptions(context.Background())
 			st.SyncDueGitHubSources(context.Background())
+			st.RefreshDueSCM(context.Background())
 		}
 	}()
 

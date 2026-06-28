@@ -82,6 +82,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Post("/items", s.createItem)
 			r.Put("/items/{id}", s.updateItem)
 			r.Delete("/items/{id}", s.deleteItem)
+			r.Post("/items/{id}/scm-refresh", s.scmRefreshItem)
 
 			r.Post("/links", s.addLink)
 			r.Delete("/links", s.removeLink)
@@ -685,6 +686,17 @@ func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeNoContent(w)
+}
+
+// scmRefreshItem polls a native item's linked PR/issue/release and reflects its
+// live state in the item's progress. Returns the resolved status word.
+func (s *Server) scmRefreshItem(w http.ResponseWriter, r *http.Request) {
+	status, err := s.store.RefreshItemSCM(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 // ── links ───────────────────────────────────────────────────────────────────
