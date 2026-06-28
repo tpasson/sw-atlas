@@ -53,6 +53,8 @@ const realApi = {
   // projects (multi-member workspaces)
   listProjects: () => req('GET', '/projects'),
   createProject: (data) => req('POST', '/projects', data),
+  renameProject: (slug, name) => req('PUT', `/projects/${slug}`, { name }),
+  deleteProject: (slug) => req('DELETE', `/projects/${slug}`),
   leaveProject: (slug) => req('POST', `/projects/${slug}/leave`),
   listMembers: (slug) => req('GET', `/projects/${slug}/members`),
   inviteMember: (slug, username, role) => req('POST', `/projects/${slug}/members`, { username, role }),

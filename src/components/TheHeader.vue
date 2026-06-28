@@ -172,6 +172,7 @@
                 <span class="bl-opt-sub">{{ p.role }}</span>
               </button>
               <button class="bl-opt proj-new" @click="newProject">+ New project</button>
+              <button v-if="workspace.role && workspace.role !== 'owner'" class="bl-opt proj-leave" @click="leaveCurrent">Leave this project</button>
             </div>
           </div>
 
@@ -213,6 +214,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Sun, Moon, AlertTriangle } from 'lucide-vue-next'
 import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace, canEditWorkspace, createProject } from '../stores/useAppStore.js'
+import { api } from '../api.js'
 import { APP_VERSION } from '../version.js'
 
 defineProps({
@@ -242,6 +244,11 @@ async function newProject() {
   const name = prompt('New project name:')
   if (!name || !name.trim()) return
   try { await createProject(name.trim()) } catch (e) { alert(e?.message || 'Could not create the project') }
+}
+async function leaveCurrent() {
+  projOpen.value = false
+  if (!confirm('Leave this project? You will lose access until an owner re-invites you.')) return
+  try { await api.leaveProject(workspace.slug); window.location.assign('/') } catch (e) { alert(e?.message || 'Could not leave the project') }
 }
 
 // Navigate back to your own workspace (full load re-runs initApp for that slug).

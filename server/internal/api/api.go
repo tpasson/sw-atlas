@@ -71,6 +71,8 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		// Member management: only the project owner (by path slug).
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireWorkspaceOwnerByPath)
+			r.Put("/projects/{slug}", s.renameProject)
+			r.Delete("/projects/{slug}", s.deleteProject)
 			r.Get("/projects/{slug}/members", s.listMembers)
 			r.Post("/projects/{slug}/members", s.inviteMember)
 			r.Put("/projects/{slug}/members/{userId}/role", s.setMemberRole)
@@ -595,6 +597,30 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, ws)
+}
+
+// renameProject renames a project (owner only).
+func (s *Server) renameProject(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.RenameWorkspace(r.Context(), s.currentWorkspace(r), in.Name); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
+}
+
+// deleteProject deletes a project and all its data (owner only; not a home ws).
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteWorkspace(r.Context(), s.currentWorkspace(r)); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeNoContent(w)
 }
 
 // listMembers returns the roster of the workspace named by {slug} (owner only).

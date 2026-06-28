@@ -1,6 +1,19 @@
 <template>
   <div class="card-stack">
     <div class="card">
+      <span class="section-label">Project</span>
+      <div class="mm-invite">
+        <input class="mm-in mm-name-in" v-model="projectName" placeholder="Project name" autocomplete="off" @keyup.enter="rename" />
+        <button class="mm-btn" @click="rename">Rename</button>
+      </div>
+      <div class="row-between">
+        <span class="setting-desc">Deleting removes the project and all of its data — this can't be undone.</span>
+        <button class="mm-del" @click="del">Delete project</button>
+      </div>
+      <div v-if="projMsg" class="data-msg" :class="{ ok: projOk, err: !projOk }">{{ projMsg }}</div>
+    </div>
+
+    <div class="card">
       <span class="section-label">Members</span>
       <p class="card-hint">
         Invite people to collaborate on this project. <strong>Editors</strong> can change the plan;
@@ -36,8 +49,31 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
+import { workspace } from '../stores/useAppStore.js'
 
 const props = defineProps({ slug: { type: String, required: true } })
+
+const projectName = ref(workspace.myWorkspaces.find(p => p.slug === props.slug)?.name || props.slug)
+const projMsg = ref('')
+const projOk = ref(false)
+
+async function rename() {
+  const name = projectName.value.trim()
+  if (!name) return
+  try {
+    await api.renameProject(props.slug, name)
+    const cur = workspace.myWorkspaces.find(p => p.slug === props.slug)
+    if (cur) cur.name = name
+    projOk.value = true; projMsg.value = 'Renamed.'
+  } catch (e) { projOk.value = false; projMsg.value = e?.message || 'Rename failed' }
+}
+async function del() {
+  if (!confirm(`Delete the project "${projectName.value}" and all of its data? This can't be undone.`)) return
+  try {
+    await api.deleteProject(props.slug)
+    window.location.assign('/')
+  } catch (e) { projOk.value = false; projMsg.value = e?.message || 'Delete failed' }
+}
 
 const members = ref([])
 const inviteName = ref('')
@@ -87,6 +123,8 @@ async function remove(m) {
 .mm-role { width: 100px; }
 .mm-btn { background: var(--clr-accent); color: #fff; border-radius: var(--r-md); padding: 7px 14px; font-weight: 600; font-size: 13px; }
 .mm-btn:hover { background: var(--clr-accent-hover); }
+.mm-del { background: rgba(255,59,48,0.1); color: var(--clr-danger); border-radius: var(--r-md); padding: 7px 14px; font-weight: 600; font-size: 13px; flex-shrink: 0; }
+.mm-del:hover { background: rgba(255,59,48,0.18); }
 .mm-x {
   width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;

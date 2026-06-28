@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -107,5 +108,59 @@ func TestMemberManagement(t *testing.T) {
 
 	if mem, _ := s.ListMembers(ctx, ws); len(mem) != 2 {
 		t.Fatalf("members = %d, want 2", len(mem))
+	}
+}
+
+// TestProjectAdmin covers create / rename / delete and the home-workspace delete
+// guard. Needs ATLAS_TEST_DB.
+func TestProjectAdmin(t *testing.T) {
+	dsn := os.Getenv("ATLAS_TEST_DB")
+	if dsn == "" {
+		t.Skip("set ATLAS_TEST_DB to run the project-admin DB test")
+	}
+	if err := db.Up(dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	s := &Store{pool: pool}
+	ctx := context.Background()
+
+	owner, err := s.CreateUser(ctx, "p4owner", "h", RoleEditor)
+	if err != nil {
+		t.Fatalf("owner: %v", err)
+	}
+
+	// A user's home workspace can't be deleted as a project.
+	if err := s.DeleteWorkspace(ctx, owner.WorkspaceID); !errors.Is(err, ErrProtected) {
+		t.Fatalf("delete home: want ErrProtected, got %v", err)
+	}
+
+	// Create → owner membership + unique slug.
+	ws, err := s.CreateWorkspace(ctx, owner.ID, "Launch Plan")
+	if err != nil || ws.Slug == "" {
+		t.Fatalf("create: %v slug=%q", err, ws.Slug)
+	}
+	if r, _ := s.RoleInWorkspace(ctx, owner.ID, ws.ID); r != WSRoleOwner {
+		t.Fatalf("creator role = %q, want owner", r)
+	}
+
+	// Rename.
+	if err := s.RenameWorkspace(ctx, ws.ID, "Launch v2"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if got, _ := s.GetWorkspace(ctx, ws.ID); got.Name != "Launch v2" {
+		t.Fatalf("rename not applied: %q", got.Name)
+	}
+
+	// Delete a non-home project.
+	if err := s.DeleteWorkspace(ctx, ws.ID); err != nil {
+		t.Fatalf("delete project: %v", err)
+	}
+	if _, err := s.GetWorkspace(ctx, ws.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after delete: want ErrNotFound, got %v", err)
 	}
 }
