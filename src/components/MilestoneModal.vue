@@ -12,15 +12,17 @@
                 </span>
                 <span v-if="subLane" class="panel-sub">{{ subLane.name }}</span>
                 <span class="panel-month">{{ displayMonth }}</span>
+                <button v-if="mode === 'edit' && milestone && !milestone.sourceSystem" type="button" class="panel-ver" :class="{ on: tab === 'history' }" title="View version history" @click="tab = 'history'">v{{ milestone.version || 1 }} <History :size="11" /></button>
                 <span v-if="readOnly" class="ro-badge"><Lock :size="11" :stroke-width="2.5" /> Read-only</span>
               </div>
               <div class="panel-actions-top">
+                <button v-if="canPropose && !proposing" type="button" class="propose-act" @click="proposing = true">{{ mode === 'add' ? 'Propose new item' : 'Propose change' }}</button>
                 <button v-if="mode === 'edit' && !readOnly" type="button" class="icon-act danger" title="Delete milestone" @click="remove">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>
                   </svg>
                 </button>
-                <button v-if="!readOnly" type="button" class="icon-act primary" :title="mode === 'edit' ? 'Save' : 'Create'" @click="submit">
+                <button v-if="!readOnly || proposing" type="button" class="icon-act primary" :title="proposing ? 'Submit proposal' : (mode === 'edit' ? 'Save' : 'Create')" @click="submit">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                     <path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
@@ -33,9 +35,14 @@
               </div>
             </div>
 
+            <div v-if="proposing" class="propose-banner">
+              <span class="pb-text">{{ mode === 'add' ? 'Proposing a new item' : 'Proposing a change' }} — the owner must approve it before it goes live.</span>
+              <input v-model="proposeNote" class="pb-note" placeholder="Reason (optional)" />
+            </div>
+
             <!-- Form -->
             <form class="panel-form" @submit.prevent="submit">
-              <fieldset class="ms-group" :disabled="readOnly">
+              <fieldset class="ms-group" :disabled="formLocked">
               <div class="field">
                 <label class="field-label">Title <span class="req">*</span></label>
                 <input
@@ -48,51 +55,31 @@
                 />
               </div>
 
-              <div class="two-col">
-                <div class="field">
-                  <label class="field-label">Type</label>
-                  <select class="field-input" :value="form.typeKey" :disabled="readOnly" @change="applyType($event.target.value)">
+              <div v-if="mode === 'add' && isTimelineType" class="field">
+                <label class="field-label">Area</label>
+                <select class="field-input" :disabled="formLocked" v-model="form.swimlaneId">
+                  <option value="">— No area (off-timeline) —</option>
+                  <option v-for="sw in timelineLanes" :key="sw.id" :value="sw.id">{{ sw.name }}</option>
+                </select>
+              </div>
+
+              <div v-if="mode === 'add' && isTimelineType && chosenLaneSubs.length" class="field">
+                <label class="field-label">Sub-area</label>
+                <select class="field-input" :disabled="formLocked" v-model="form.subLaneId">
+                  <option value="">— Top of area —</option>
+                  <option v-for="sub in chosenLaneSubs" :key="sub.id" :value="sub.id">{{ sub.name }}</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label class="field-label">Type</label>
+                <div class="type-row">
+                  <span class="type-ico"><MarkerIcon :shape="currentType?.icon || 'l:Diamond'" :color="currentType?.color || swimlane?.color || '#8a8a8e'" :size="18" :fill="currentType?.fill !== false" /></span>
+                  <select class="field-input" :value="form.typeKey" :disabled="formLocked" @change="applyType($event.target.value)">
                     <option v-for="t in itemTypes.list" :key="t.key" :value="t.key">{{ t.label }}</option>
                   </select>
                 </div>
-                <div class="field">
-                  <label class="field-label">Marker</label>
-                  <div class="marker-row">
-                    <button
-                      v-if="form.kind === 'event'"
-                      type="button"
-                      class="marker-btn marker-none"
-                      :class="{ on: !markerOn }"
-                      :style="{ color: !markerOn ? '#0A84FF' : '#9aa0a6' }"
-                      title="No marker"
-                      @click="markerOn = false"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
-                        <path d="M4.5 11.5L11.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                      </svg>
-                    </button>
-                    <button
-                      v-for="o in markerOptions"
-                      :key="o.shape"
-                      type="button"
-                      class="marker-btn"
-                      :class="{ on: (form.kind !== 'event' || markerOn) && form.marker === o.shape }"
-                      :title="o.shape"
-                      @click="markerOn = true; form.marker = o.shape"
-                    >
-                      <MarkerIcon :shape="o.shape" :fill="o.fill" :color="(form.kind !== 'event' || markerOn) && form.marker === o.shape ? (swimlane?.color || '#0A84FF') : '#9aa0a6'" :size="16" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div v-if="workspace.members.length" class="field">
-                <label class="field-label">Assignee</label>
-                <select class="field-input" :disabled="readOnly" v-model="form.assigneeId">
-                  <option :value="null">Unassigned</option>
-                  <option v-for="mb in workspace.members" :key="mb.userId" :value="mb.userId">{{ mb.username }}</option>
-                </select>
+                <p class="type-hint">The icon comes from the type — set it under Settings → Types.</p>
               </div>
 
               <!-- Type-specific fields: schema comes from the selected item type. -->
@@ -100,13 +87,13 @@
                 <label class="field-label">{{ currentTypeLabel }} fields</label>
                 <div v-for="f in currentTypeFields" :key="f.key" class="tf-row">
                   <label class="tf-label">{{ f.label || f.key }}</label>
-                  <select v-if="f.type === 'select'" class="field-input" :disabled="readOnly" v-model="form.data[f.key]">
+                  <select v-if="f.type === 'select'" class="field-input" :disabled="formLocked" v-model="form.data[f.key]">
                     <option value="">—</option>
                     <option v-for="o in (f.options || [])" :key="o" :value="o">{{ o }}</option>
                   </select>
-                  <input v-else-if="f.type === 'number'" type="number" class="field-input" :disabled="readOnly" v-model="form.data[f.key]" />
-                  <input v-else-if="f.type === 'date'" type="date" class="field-input" :disabled="readOnly" v-model="form.data[f.key]" />
-                  <input v-else type="text" class="field-input" :disabled="readOnly" v-model="form.data[f.key]" />
+                  <input v-else-if="f.type === 'number'" type="number" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <input v-else-if="f.type === 'date'" type="date" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <input v-else type="text" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
                 </div>
               </div>
 
@@ -198,12 +185,17 @@
 
               <div class="ms-tabs" role="tablist">
                 <button type="button" class="ms-tab" :class="{ active: tab === 'details' }" @click="tab = 'details'">Details</button>
-                <button type="button" class="ms-tab" :class="{ active: tab === 'scm' }" @click="tab = 'scm'">Source control</button>
                 <button type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'">Dependencies</button>
                 <button type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
+                <button v-if="mode === 'edit' && !milestone?.sourceSystem" type="button" class="ms-tab" :class="{ active: tab === 'history' }" @click="tab = 'history'">History</button>
               </div>
 
-              <fieldset class="ms-tab-body" :disabled="readOnly">
+              <!-- The History tab is read-only display, so it's never form-disabled
+                   (you can browse versions even when the rest is read-only). -->
+              <fieldset class="ms-tab-body" :disabled="formLocked && tab !== 'history'">
+              <div v-show="tab === 'history'" class="ms-panel ms-history">
+                <ItemHistory v-if="milestone" :key="milestone.id" :item-id="milestone.id" />
+              </div>
               <div v-show="tab === 'details'" class="ms-panel">
               <div class="two-col">
                 <div class="field">
@@ -223,46 +215,36 @@
                 </div>
                 <div class="field">
                   <label class="field-label">Who</label>
-                  <input v-model="form.who" class="field-input" placeholder="Responsible person / team"/>
+                  <select class="field-input" :disabled="formLocked" v-model="form.assigneeId">
+                    <option :value="null">Unassigned</option>
+                    <option v-for="mb in workspace.members" :key="mb.userId" :value="mb.userId">{{ mb.username }}</option>
+                  </select>
                 </div>
               </div>
 
-              <div v-if="form.kind === 'event'" class="two-col">
-                <div class="field">
-                  <label class="field-label">Start <span class="req">*</span></label>
-                  <input v-model="form.startDate" type="date" class="field-input field-date" />
+              <template v-if="isTimelineType">
+                <div v-if="form.kind === 'event'" class="two-col">
+                  <div class="field">
+                    <label class="field-label">Start <span class="req">*</span></label>
+                    <input v-model="form.startDate" type="date" class="field-input field-date" />
+                  </div>
+                  <div class="field">
+                    <label class="field-label">End</label>
+                    <input v-model="form.endDate" type="date" class="field-input field-date" :min="form.startDate" />
+                  </div>
                 </div>
-                <div class="field">
-                  <label class="field-label">End</label>
-                  <input v-model="form.endDate" type="date" class="field-input field-date" :min="form.startDate" />
+                <div v-else class="field">
+                  <label class="field-label">When</label>
+                  <input v-model="form.when" type="date" class="field-input field-date" />
                 </div>
-              </div>
-              <div v-else class="field">
-                <label class="field-label">When</label>
-                <input v-model="form.when" type="date" class="field-input field-date" />
-              </div>
+              </template>
               <p v-if="dateError" class="field-error">{{ dateError }}</p>
-              </div>
-
-              <div v-show="tab === 'scm'" class="ms-panel">
-                <div class="field">
-                  <label class="field-label">Link</label>
-                  <input
-                    v-model="form.scmUrl"
-                    class="field-input"
-                    placeholder="https://github.com/owner/repo/releases/tag/v1.0.0"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                  <ScmBadge v-if="form.scmUrl.trim()" :url="form.scmUrl" />
-                  <p class="scm-hint">Paste a GitHub or GitLab URL — release, pull request, branch, commit or issue. It shows as a badge here and in the timeline tooltip.</p>
-                </div>
               </div>
 
               <div v-show="tab === 'deps'" class="ms-panel">
               <div class="field">
                 <label class="field-label">Relationship</label>
-                <select v-model="relType" class="field-input" :disabled="readOnly">
+                <select v-model="relType" class="field-input" :disabled="formLocked">
                   <option v-for="r in RELATIONSHIP_TYPES" :key="r.key" :value="r.key">{{ r.label }} ↔ {{ r.inverse }}</option>
                 </select>
               </div>
@@ -418,11 +400,11 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, settings, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate } from '../stores/useAppStore.js'
 import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
-import ScmBadge from './ScmBadge.vue'
-import { Lock } from 'lucide-vue-next'
+import ItemHistory from './ItemHistory.vue'
+import { Lock, History } from 'lucide-vue-next'
 
 const props = defineProps({
   mode:      { type: String,  default: 'add' },
@@ -433,29 +415,32 @@ const props = defineProps({
   date:      { type: String,  default: null },
   milestone: { type: Object,  default: null },
   initialType: { type: String, default: '' }, // preselect a type (Explorer "+ New")
+  initialTab: { type: String, default: 'details' }, // open straight on a tab (e.g. "history")
+  proposeMode: { type: Boolean, default: false }, // open straight in "propose a new item" mode
 })
 
 const emit = defineEmits(['close'])
 const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, itemGroupIds, setItemGroups } = useAppStore()
 
-const tab = ref('details') // details | scm | deps | groups
+const TABS = ['details', 'deps', 'groups', 'history']
+const tab = ref(props.mode === 'edit' && TABS.includes(props.initialTab) ? props.initialTab : 'details')
 
-// Items synced from an external source (GitHub, a subscription) are read-only —
-// the modal opens as a viewer so the full info is visible, but nothing can be saved.
-const readOnly = computed(() => !!props.milestone?.sourceSystem)
+// The form is read-only when you can't edit content here: a source-synced item,
+// a baseline (historical) view, or you're a viewer/non-member.
+const readOnly = computed(() => !!props.milestone?.sourceSystem || !!baselines.activeId || !canEditWorkspace())
+
+// Members who can't edit directly (or want to go through review) can PROPOSE a
+// change to an existing item; the owner approves it. Not for synced/baseline items.
+const proposing = ref(!!props.proposeMode)
+const proposeNote = ref('')
+const canPropose = computed(() =>
+  (props.mode === 'edit' || props.mode === 'add') && session.authenticated && !!workspace.role &&
+  !baselines.activeId && !props.milestone?.sourceSystem)
+// Effective lock for the form fields: read-only unless we're actively proposing.
+const formLocked = computed(() => readOnly.value && !proposing.value)
 
 // Marker shapes offered in the picker = the active legend markers (+ the item's
 // own marker if it was removed from the active set, so it stays selectable).
-const markerOptions = computed(() => {
-  const opts = settings.markers.map(m => ({ shape: m.shape, fill: !!m.fill }))
-  const cur = props.milestone?.marker
-  if (cur && cur !== 'bar' && !opts.some(o => o.shape === cur)) opts.push({ shape: cur, fill: false })
-  return opts
-})
-
-// Events have an optional marker (off by default); milestones always have one.
-const markerOn = ref(!!(props.milestone?.marker && props.milestone.marker !== 'bar'))
-
 const defaultDate = props.date || `${props.year}-${String(props.month).padStart(2,'0')}-01`
 
 function addDays(dateStr, n) {
@@ -475,12 +460,13 @@ const displayMonth = computed(() => {
 })
 
 const form = reactive({
+  swimlaneId: props.milestone?.swimlaneId ?? (props.swimlane?.id || ''),
+  subLaneId: props.milestone?.subLaneId ?? (props.subLane?.id || ''),
   title:  props.milestone?.title ?? '',
   kind:   props.milestone?.kind ?? 'milestone',
   typeKey: props.milestone?.typeKey ?? (props.initialType || props.milestone?.kind || 'milestone'),
   data:   { ...(props.milestone?.data || {}) },
   assigneeId: props.milestone?.assigneeId ?? null,
-  marker: props.milestone?.marker && props.milestone.marker !== 'bar' ? props.milestone.marker : (settings.markers[0]?.shape || 'l:Flag'),
   what:   props.milestone?.sourceSystem ? stripMarkdown(props.milestone?.what || '') : (props.milestone?.what ?? ''),
   why:    props.milestone?.why   ?? '',
   how:    props.milestone?.how   ?? '',
@@ -494,8 +480,19 @@ const form = reactive({
   scmUrl: props.milestone?.scmUrl ?? '',
 })
 
+// Lanes you can place a new item / proposal in (mirrored Git lanes excluded).
+const timelineLanes = computed(() => store.swimlanes.filter(s => !s.sourceSystem))
+const chosenLaneSubs = computed(() => store.swimlanes.find(s => s.id === form.swimlaneId)?.subLanes || [])
+// Changing the Area clears the sub-area selection (it belonged to the old lane).
+watch(() => form.swimlaneId, () => { form.subLaneId = '' })
+
 // Type-specific field schema for the selected type.
 const currentType = computed(() => itemTypeByKey(form.typeKey))
+// timeline-family types sit on a lane/date; work-item & container types don't.
+const isTimelineType = computed(() => {
+  const f = currentType.value?.family
+  return !f || f === 'timeline-point' || f === 'timeline-range'
+})
 const currentTypeFields = computed(() => currentType.value?.fields || [])
 const currentTypeLabel = computed(() => currentType.value?.label || 'Type')
 
@@ -509,9 +506,10 @@ function applyType(key) {
     form.kind = key === 'event' ? 'event' : key === 'point' ? 'point' : 'milestone'
   } else {
     form.kind = t.family === 'timeline-range' ? 'event' : 'milestone'
-    if (t.icon) { form.marker = t.icon; markerOn.value = true }
     if (t.color) form.color = t.color
   }
+  // Off-timeline types (backlog / folder) never carry a lane.
+  if (t.family === 'work-item' || t.family === 'container') { form.swimlaneId = ''; form.subLaneId = '' }
   for (const f of (t.fields || [])) {
     if (!(f.key in form.data)) form.data[f.key] = ''
   }
@@ -627,7 +625,7 @@ function syncLinks(msId) {
 }
 
 function submit() {
-  if (readOnly.value) return // synced item — view only
+  if (formLocked.value) return // view-only and not proposing
   if (dateError.value) { tab.value = 'details'; return } // surface the date error
   if (!form.title.trim()) return
 
@@ -643,8 +641,8 @@ function submit() {
   }
 
   const payload = {
-    swimlaneId: props.swimlane?.id || '', // "" = off-timeline artifact (no lane)
-    subLaneId:  props.subLane?.id ?? null,
+    swimlaneId: form.swimlaneId || '', // "" = off-timeline artifact (no lane)
+    subLaneId:  form.subLaneId || null,
     year,
     month,
     title:      form.title.trim(),
@@ -656,7 +654,7 @@ function submit() {
     typeKey:    form.typeKey,
     data:       form.data,
     assigneeId: form.assigneeId || null,
-    marker:     (form.kind === 'event' && !markerOn.value) ? null : form.marker,
+    marker:     null, // the icon now comes from the item's type, not a per-item marker
     when:       isEvent ? (form.startDate || null) : (form.when || null),
     startDate:  isEvent ? (form.startDate || null) : null,
     endDate:    isEvent ? (form.endDate || null) : null,
@@ -664,6 +662,15 @@ function submit() {
     maturity:   form.maturity || null,
     progress:   form.progress,
     scmUrl:     form.scmUrl.trim() || null,
+  }
+  // Proposing → submit a change request instead of touching the live plan.
+  if (proposing.value) {
+    const done = props.mode === 'add'
+      ? proposeCreate({ ...payload, id: crypto.randomUUID() }, proposeNote.value.trim())
+      : proposeChange(props.milestone.id, payload, proposeNote.value.trim())
+    done.catch(e => alert(e?.message || 'Could not submit the proposal'))
+    emit('close')
+    return
   }
   if (props.mode === 'edit') {
     updateMilestone(props.milestone.id, payload)
@@ -738,6 +745,8 @@ function remove() {
 
 .panel-sub { font-size: 12px; color: var(--clr-text-2); font-weight: 500; }
 .panel-month { font-size: 12px; color: var(--clr-text-3); }
+.panel-ver { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 3px 10px; cursor: pointer; transition: background 0.12s, color 0.12s; }
+.panel-ver:hover, .panel-ver.on { background: rgba(0,113,227,0.12); color: var(--clr-accent); }
 
 .panel-actions-top {
   position: absolute;
@@ -755,6 +764,13 @@ function remove() {
 .icon-act:hover { background: var(--clr-border-light); color: var(--clr-text); }
 .icon-act.primary { background: var(--clr-accent); color: #fff; }
 .icon-act.primary:hover { background: var(--clr-accent-hover); }
+.propose-act { font-size: 12px; font-weight: 600; color: var(--clr-accent); background: rgba(0,113,227,0.08); border-radius: 100px; padding: 6px 13px; }
+.propose-act:hover { background: rgba(0,113,227,0.16); }
+
+.propose-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 14px; margin: 0 0 4px; background: rgba(255,159,10,0.12); border: 1px solid rgba(255,159,10,0.3); border-radius: var(--r-md); }
+.pb-text { font-size: 12px; font-weight: 600; color: #b7791f; }
+.pb-note { flex: 1; min-width: 160px; border: 1px solid var(--clr-border); border-radius: var(--r-sm); padding: 6px 9px; font-size: 13px; color: var(--clr-text); background: var(--clr-bg); }
+.pb-note:focus { outline: none; border-color: var(--clr-accent); }
 .icon-act.danger { background: rgba(255,59,48,0.1); color: var(--clr-danger); }
 .icon-act.danger:hover { background: rgba(255,59,48,0.18); }
 
@@ -860,6 +876,10 @@ function remove() {
 .seg-btn + .seg-btn { border-left: 1.5px solid var(--clr-border); }
 .seg-btn.on { background: var(--clr-accent); color: #fff; }
 
+.type-row { display: flex; align-items: center; gap: 9px; }
+.type-ico { flex-shrink: 0; display: inline-flex; }
+.type-row .field-input { flex: 1; }
+.type-hint { font-size: 11px; color: var(--clr-text-3); margin-top: 5px; }
 .marker-row { display: flex; gap: 6px; }
 .marker-btn {
   width: 34px; height: 34px;

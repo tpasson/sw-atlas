@@ -110,9 +110,24 @@ const gcv = (v) => v || null
 const BUILTIN_ITEM_TYPES = [
   { key: 'milestone', label: 'Milestone', family: 'timeline-point', icon: 'l:Diamond', color: '', fields: [], builtin: true },
   { key: 'event', label: 'Event', family: 'timeline-range', icon: 'l:Flag', color: '', fields: [], builtin: true },
-  { key: 'point', label: 'Point', family: 'timeline-point', icon: 'l:Circle', color: '', fields: [], builtin: true },
 ]
-const itemTypeCatalog = () => [...BUILTIN_ITEM_TYPES, ...((db.itemTypes || []).map(t => ({ ...t, builtin: false, fields: t.fields || [] })))]
+const BUILTIN_TYPE_KEYS = new Set(['milestone', 'event'])
+const itemTypeCatalog = () => {
+  const stored = db.itemTypes || []
+  const overrides = {}
+  const custom = []
+  for (const t of stored) {
+    if (!t.key) continue
+    if (BUILTIN_TYPE_KEYS.has(t.key)) overrides[t.key] = t
+    else custom.push({ ...t, builtin: false, fields: t.fields || [] })
+  }
+  const builtins = BUILTIN_ITEM_TYPES.map(d => {
+    const ov = overrides[d.key]
+    if (!ov) return d
+    return { ...d, label: ov.label || d.label, icon: ov.icon || d.icon, color: ov.color || '', fill: ov.fill, fields: ov.fields || d.fields, builtin: true }
+  })
+  return [...builtins, ...custom]
+}
 
 async function ghReleases(cfg) {
   const rels = await ghFetch(cfg, '/releases?per_page=100')
@@ -291,8 +306,8 @@ export const demoApi = {
   removeMember: () => ok(),
   itemTypes: () => ok(itemTypeCatalog()),
   setItemTypes: (types) => {
-    const builtin = new Set(['milestone', 'event', 'point'])
-    db.itemTypes = (types || []).filter(t => t.key && !builtin.has(t.key)).map(t => ({ ...t, builtin: false, fields: t.fields || [] }))
+    // Store both built-in restyles and custom types; the catalog reconciles them.
+    db.itemTypes = (types || []).filter(t => t.key).map(t => ({ ...t, fields: t.fields || [] }))
     save()
     return ok(itemTypeCatalog())
   },
@@ -390,6 +405,47 @@ export const demoApi = {
     return ok({ id: b.id, name: b.name, note: b.note, createdAt: b.createdAt, itemCount: b.items.length })
   },
   deleteBaseline: (id) => { db.baselines = db.baselines.filter(b => b.id !== id); save(); return ok() },
+
+  // Demo has no server-side history; synthesize the current state as v1.
+  listRevisions: (id) => {
+    const m = db.milestones.find(x => x.id === id)
+    if (!m) return ok([])
+    return ok([{ version: m.version || 1, editedBy: null, editedAt: m.updatedAt || new Date().toISOString() }])
+  },
+  getRevision: (id, version) => {
+    const m = db.milestones.find(x => x.id === id)
+    if (!m) return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
+    return ok({ version: version || m.version || 1, editedBy: null, editedAt: m.updatedAt || new Date().toISOString(), snapshot: { ...m } })
+  },
+
+  // Change requests (demo: you act as both proposer and owner).
+  listChangeRequests: () => ok((db.changeRequests || []).map(c => ({ ...c }))),
+  createChangeRequest: (data) => {
+    const cr = {
+      id: uid(), kind: data.kind === 'create' ? 'create' : 'edit', targetItemId: data.targetItemId || null,
+      payload: data.payload || {}, note: data.note || '', status: 'pending',
+      authorId: 'you', authorName: 'You', decidedBy: null, deciderName: '', decidedAt: null, decisionNote: '',
+      createdAt: new Date().toISOString(),
+      targetTitle: (db.milestones.find(m => m.id === data.targetItemId) || {}).title || '',
+    }
+    db.changeRequests = db.changeRequests || []
+    db.changeRequests.push(cr); save()
+    return ok(cr)
+  },
+  approveChangeRequest: (id, note = '') => {
+    const cr = (db.changeRequests || []).find(c => c.id === id)
+    if (!cr || cr.status !== 'pending') return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
+    if (cr.kind === 'create') db.milestones.push({ ...cr.payload })
+    else { const m = db.milestones.find(x => x.id === cr.targetItemId); if (m) Object.assign(m, cr.payload) }
+    Object.assign(cr, { status: 'approved', decidedBy: 'you', deciderName: 'You', decidedAt: new Date().toISOString(), decisionNote: note })
+    save(); return ok(cr)
+  },
+  rejectChangeRequest: (id, note = '') => {
+    const cr = (db.changeRequests || []).find(c => c.id === id)
+    if (!cr || cr.status !== 'pending') return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
+    Object.assign(cr, { status: 'rejected', decidedBy: 'you', deciderName: 'You', decidedAt: new Date().toISOString(), decisionNote: note })
+    save(); return ok(cr)
+  },
 
   // GitHub sources (public repos; token used for the initial fetch but not persisted)
   listGitHubSources: () => ok({ sources: (db.githubSources || []).map(s => ({ ...s })) }),

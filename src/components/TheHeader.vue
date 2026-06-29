@@ -22,10 +22,6 @@
           <span class="today-cw">CW {{ todayWeek }}</span>
         </div>
 
-        <div class="view-toggle">
-          <button class="vt-btn" :class="{ on: store.view === 'timeline' }" @click="setView('timeline')">Timeline</button>
-          <button class="vt-btn" :class="{ on: store.view === 'explorer' }" @click="setView('explorer')">Explorer</button>
-        </div>
 
         <div v-if="store.view === 'timeline'" class="year-nav">
           <button class="year-btn" :title="store.granularity === 'month' ? 'Previous month' : 'Previous year'" @click="store.granularity === 'month' ? prevMonth() : $emit('prev-year')">
@@ -74,7 +70,7 @@
             </svg>
           </button>
           <div class="bl-dd" ref="blRef">
-            <button class="bl-select" :class="{ open: blOpen }" title="Compare against a baseline" @click="blOpen = !blOpen">
+            <button class="bl-select" :class="{ open: blOpen }" title="View a saved snapshot (the plan as it was then)" @click="blOpen = !blOpen">
               <span class="bl-cur">{{ currentLabel }}</span>
               <svg class="bl-chevron" width="11" height="11" viewBox="0 0 12 12" fill="none">
                 <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -105,15 +101,6 @@
       </div>
 
       <div class="header-right">
-        <button
-          class="hdr-icon-btn"
-          :title="settings.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
-          @click="toggleTheme"
-        >
-          <Sun v-if="settings.theme === 'dark'" :size="16" />
-          <Moon v-else :size="16" />
-        </button>
-
         <span
           v-if="riskWarnings.length"
           class="risk-hdr"
@@ -132,20 +119,6 @@
           </div>
         </span>
 
-        <span v-if="diff.active" class="bl-diff" @mouseleave="hoverDiff = null">
-          <span v-if="diff.counts.added" class="bd bd-add" @mouseenter="hoverDiff = 'added'">+{{ diff.counts.added }}</span>
-          <span v-if="diff.counts.moved" class="bd bd-move" @mouseenter="hoverDiff = 'moved'">~{{ diff.counts.moved }}</span>
-          <span v-if="diff.counts.removed" class="bd bd-rem" @mouseenter="hoverDiff = 'removed'">−{{ diff.counts.removed }}</span>
-
-          <div v-if="hoverDiff && diffLists[hoverDiff].length" class="diff-pop">
-            <div class="diff-pop-title">{{ hoverDiff }} ({{ diffLists[hoverDiff].length }})</div>
-            <div v-for="it in diffLists[hoverDiff]" :key="it.id" class="diff-pop-row">
-              <span class="diff-pop-name">{{ it.title }}</span>
-              <span v-if="it.from" class="diff-pop-meta">{{ it.from }} → {{ it.to }}</span>
-            </div>
-          </div>
-        </span>
-
         <span v-if="baselines.activeId" class="view-pill" title="Viewing a saved baseline — editing is disabled">
           <span class="view-dot"></span>
           Viewing baseline
@@ -158,46 +131,63 @@
               <span class="bl-cur">{{ currentProjectName }}</span>
               <svg class="bl-chevron" width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <div v-if="projOpen" class="bl-menu">
+            <div v-if="projOpen" class="bl-menu proj-menu">
+              <!-- Your personal space (your /{username} home plan). -->
+              <div class="proj-sec">Your area</div>
               <button
-                v-for="p in workspace.myWorkspaces"
-                :key="p.slug || 'home'"
+                v-if="homeWs"
+                class="bl-opt"
+                :class="{ active: homeWs.slug === workspace.slug }"
+                @click="goProject(homeWs.slug)"
+              >
+                <span class="proj-glyph proj-glyph-home"><User :size="13" /></span>
+                <span class="bl-opt-name">{{ homeWs.name }}</span>
+                <span class="bl-opt-sub">just you</span>
+              </button>
+
+              <!-- Collaborative projects — invite others to work together. -->
+              <div class="proj-sec">Projects<span class="proj-sec-hint">invite people to collaborate</span></div>
+              <button
+                v-for="p in projects"
+                :key="p.slug"
                 class="bl-opt"
                 :class="{ active: p.slug === workspace.slug }"
                 @click="goProject(p.slug)"
               >
+                <span class="proj-glyph proj-glyph-team"><Users :size="13" /></span>
                 <span class="bl-opt-name">{{ p.name }}</span>
                 <span class="bl-opt-sub">{{ p.role }}</span>
               </button>
-              <button class="bl-opt proj-new" @click="newProject">+ New project</button>
-              <button v-if="workspace.role && workspace.role !== 'owner'" class="bl-opt proj-leave" @click="leaveCurrent">Leave this project</button>
+              <p v-if="!projects.length" class="proj-empty">No projects yet — create one to invite collaborators.</p>
+              <button class="bl-opt proj-new" @click="newProject"><Plus :size="14" /> New project</button>
+
+              <!-- Manage the project you're currently in. -->
+              <template v-if="currentIsProject">
+                <div class="proj-divider"></div>
+                <div class="proj-sec">Manage “{{ currentProjectName }}”</div>
+                <template v-if="workspace.role === 'owner'">
+                  <button class="bl-opt proj-action" @click="inviteToProject"><UserPlus :size="14" /> Invite people…</button>
+                  <button class="bl-opt proj-action" @click="renameCurrent"><Pencil :size="14" /> Rename…</button>
+                  <button class="bl-opt proj-del" @click="deleteCurrent"><Trash2 :size="14" /> Delete project</button>
+                </template>
+                <button v-else class="bl-opt proj-leave" @click="leaveCurrent"><LogOut :size="14" /> Leave project</button>
+              </template>
             </div>
           </div>
 
-          <!-- Editable workspace (owner/editor): status + save baseline + settings. -->
+          <!-- Editable workspace (owner/editor): status + save baseline. Settings,
+               theme, account live in the left activity rail now. -->
           <template v-if="canEdit">
             <span v-if="!baselines.activeId" class="edit-pill"><span class="edit-dot"></span>Editing</span>
             <button v-if="!baselines.activeId" class="hdr-icon-btn" title="Save current plan as a baseline" @click="onSaveBaseline"><Bookmark :size="16" /></button>
-            <button class="hdr-icon-btn" title="Settings" @click="$emit('manage')"><Settings :size="16" /></button>
           </template>
           <span v-else class="view-pill" title="You are viewing this plan read-only"><span class="view-dot"></span>Viewing</span>
-
-          <!-- Account menu (username + log out). -->
-          <div class="bl-dd user-dd" ref="userRef">
-            <button class="user-av" :title="session.username" @click="userOpen = !userOpen">{{ initials }}</button>
-            <div v-if="userOpen" class="bl-menu user-menu">
-              <div class="user-menu-name">{{ session.username }}</div>
-              <button class="bl-opt" @click="userOpen = false; $emit('about')">About ATLAS</button>
-              <button class="bl-opt" @click="userOpen = false; $emit('logout')">Log out</button>
-            </div>
-          </div>
         </template>
 
         <template v-else>
           <span v-if="workspace.slug && workspace.slug !== 'default'" class="view-pill" title="Public plan">
             {{ workspace.slug }}’s plan
           </span>
-          <button class="btn-manage" @click="$emit('login')">Log in</button>
         </template>
       </div>
     </div>
@@ -207,8 +197,8 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { Sun, Moon, AlertTriangle, Settings, Bookmark } from 'lucide-vue-next'
-import { useAppStore, baselines, baselineDiff, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace, canEditWorkspace, createProject } from '../stores/useAppStore.js'
+import { Sun, Moon, AlertTriangle, Settings, Bookmark, User, Users, UserPlus, Plus, Pencil, Trash2, LogOut } from 'lucide-vue-next'
+import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace, canEditWorkspace, createProject, loadMyWorkspaces } from '../stores/useAppStore.js'
 import { api } from '../api.js'
 import { APP_VERSION } from '../version.js'
 
@@ -217,7 +207,7 @@ defineProps({
   zoom: { type: Number, default: 1 },
   authenticated: { type: Boolean, default: false },
 })
-defineEmits(['prev-year', 'next-year', 'manage', 'zoom-in', 'zoom-out', 'login', 'logout', 'about'])
+const emit = defineEmits(['prev-year', 'next-year', 'manage', 'zoom-in', 'zoom-out', 'login', 'logout', 'about'])
 
 const version = APP_VERSION
 
@@ -230,6 +220,12 @@ const currentProjectName = computed(() => {
   const cur = workspace.myWorkspaces.find(p => p.slug === workspace.slug)
   return cur?.name || workspace.slug || 'Plan'
 })
+// Split the switcher into your personal home plan vs. collaborative projects.
+const homeWs = computed(() => workspace.myWorkspaces.find(p => p.slug === workspace.ownSlug))
+const projects = computed(() => workspace.myWorkspaces.filter(p => p.slug !== workspace.ownSlug))
+const currentIsProject = computed(() =>
+  !!workspace.slug && workspace.slug !== workspace.ownSlug && projects.value.some(p => p.slug === workspace.slug))
+
 function goProject(slug) {
   projOpen.value = false
   window.location.assign('/' + encodeURIComponent(slug))
@@ -239,6 +235,20 @@ async function newProject() {
   const name = prompt('New project name:')
   if (!name || !name.trim()) return
   try { await createProject(name.trim()) } catch (e) { alert(e?.message || 'Could not create the project') }
+}
+function inviteToProject() {
+  projOpen.value = false
+  emit('manage', 'members') // open Settings straight on the Members tab
+}
+async function renameCurrent() {
+  const name = prompt('Rename project:', currentProjectName.value)
+  if (!name || !name.trim()) return
+  try { await api.renameProject(workspace.slug, name.trim()); await loadMyWorkspaces() } catch (e) { alert(e?.message || 'Rename failed') }
+}
+async function deleteCurrent() {
+  projOpen.value = false
+  if (!confirm(`Delete “${currentProjectName.value}” and all of its data? This can’t be undone.`)) return
+  try { await api.deleteProject(workspace.slug); window.location.assign('/') } catch (e) { alert(e?.message || 'Could not delete the project') }
 }
 async function leaveCurrent() {
   projOpen.value = false
@@ -252,7 +262,6 @@ const userRef = ref(null)
 const initials = computed(() => (session.username || '?').trim().charAt(0).toUpperCase() || '?')
 
 const { selectBaseline, createBaseline, setGranularity, prevMonth, nextMonth, setView } = useAppStore()
-const diff = baselineDiff
 
 // Arrow order left→right: oldest … newest … Live (rightmost = most current).
 const blSeq = computed(() => {
@@ -275,35 +284,8 @@ function jumpBaseline(dir) {
   selectBaseline(blSeq.value[dir < 0 ? 0 : blSeq.value.length - 1])
 }
 
-// Hover lists for the diff badges (which items were added / moved / removed).
-const hoverDiff = ref(null)
 const hoverRisk = ref(false)
 function focusRisk(id) { ui.focusItemId = id; hoverRisk.value = false }
-function fmtItemDate(it) {
-  const ds = it.when || it.startDate
-  if (ds) {
-    const [y, m, d] = ds.split('-').map(Number)
-    return new Date(y, m - 1, d).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
-  }
-  return `${MONTHS[(it.month || 1) - 1]} ${it.year || ''}`.trim()
-}
-const diffLists = computed(() => {
-  const d = baselineDiff.value
-  if (!d.active) return { added: [], moved: [], removed: [] }
-  const baseById = {}
-  for (const b of baselines.activeItems) baseById[b.id] = b
-  const added = [], moved = []
-  for (const m of store.milestones) {
-    const s = d.status[m.id]
-    if (s === 'added') added.push({ id: m.id, title: m.title })
-    else if (s === 'moved') {
-      const b = baseById[m.id]
-      moved.push({ id: m.id, title: m.title, from: b ? fmtItemDate(b) : '', to: fmtItemDate(m) })
-    }
-  }
-  const removed = d.ghosts.filter(g => g.ghostType === 'removed').map(g => ({ id: g.id, title: g.title }))
-  return { added, moved, removed }
-})
 
 // Today's date + ISO calendar week, shown next to the brand.
 function isoWeek(dt) {
@@ -713,6 +695,31 @@ async function onSaveBaseline() {
 .bl-opt-name { font-size: 13px; font-weight: 500; color: var(--clr-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bl-opt.active .bl-opt-name { color: var(--clr-accent); font-weight: 600; }
 .bl-opt-sub { font-size: 11px; color: var(--clr-text-3); white-space: nowrap; flex-shrink: 0; }
+
+/* Project switcher: separate the personal home plan from collaborative projects. */
+.proj-menu { min-width: 264px; }
+.proj-menu .bl-opt { align-items: center; justify-content: flex-start; }
+.proj-menu .bl-opt .bl-opt-sub { margin-left: auto; text-transform: capitalize; }
+.proj-sec {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 9px 10px 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--clr-text-3);
+}
+.proj-sec-hint { font-size: 9px; font-weight: 600; letter-spacing: 0.2px; text-transform: none; color: var(--clr-text-3); opacity: 0.75; }
+.proj-glyph {
+  width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.proj-glyph-home { background: rgba(0,113,227,0.12); color: var(--clr-accent); }
+.proj-glyph-team { background: var(--clr-surface-2); color: var(--clr-text-2); }
+.proj-empty { padding: 2px 10px 6px; font-size: 12px; color: var(--clr-text-3); line-height: 1.45; }
+.proj-divider { height: 1px; background: var(--clr-border-light); margin: 6px 4px; }
+.proj-new, .proj-action, .proj-leave, .proj-del { gap: 8px; font-size: 13px; color: var(--clr-text-2); }
+.proj-new { color: var(--clr-accent); font-weight: 600; }
+.proj-del { color: #F85149; }
+.proj-del:hover { background: rgba(248,81,73,0.10); }
+
 .bl-diff { display: inline-flex; gap: 4px; position: relative; }
 .bd { cursor: default; }
 

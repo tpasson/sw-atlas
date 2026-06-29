@@ -47,32 +47,37 @@ type Swimlane struct {
 // Item is a milestone or event. JSON keys mirror the existing frontend store so
 // the API is a drop-in replacement for the old localStorage shape.
 type Item struct {
-	ID           string  `json:"id"`
-	SwimlaneID   string  `json:"swimlaneId"`
-	SubLaneID    *string `json:"subLaneId"`
-	Year         int     `json:"year"`
-	Month        int     `json:"month"`
-	Title        string  `json:"title"`
-	What         string  `json:"what"`
-	Why          string  `json:"why"`
-	How          string  `json:"how"`
-	Who          string  `json:"who"`
-	When         *string `json:"when"`
-	Kind         string  `json:"kind"`
-	TypeKey      string  `json:"typeKey"` // item-type registry key (built-ins mirror kind)
-	Marker       string  `json:"marker"`
-	StartDate    *string `json:"startDate"`
-	EndDate      *string `json:"endDate"`
-	Color        *string `json:"color"`
-	SourceSystem *string `json:"sourceSystem"`
-	ExternalID   *string `json:"externalId"`
-	ExternalURL  *string `json:"externalUrl"`
-	LastSyncedAt *string `json:"lastSyncedAt"`
-	Maturity     *int    `json:"maturity"` // 1..4 (Concept·Design·Production·Series) or null
-	Progress     *int    `json:"progress"` // 0..100 (% complete) or null
-	ScmURL       *string `json:"scmUrl"`   // link to a source-control resource (release/PR/branch/commit) or null
-	Data         json.RawMessage `json:"data"` // type-specific field values; shape declared by the item's type
-	AssigneeID   *string `json:"assigneeId"` // the user this artifact is assigned to (a project member) or null
+	ID           string          `json:"id"`
+	SwimlaneID   string          `json:"swimlaneId"`
+	SubLaneID    *string         `json:"subLaneId"`
+	Year         int             `json:"year"`
+	Month        int             `json:"month"`
+	Title        string          `json:"title"`
+	What         string          `json:"what"`
+	Why          string          `json:"why"`
+	How          string          `json:"how"`
+	Who          string          `json:"who"`
+	When         *string         `json:"when"`
+	Kind         string          `json:"kind"`
+	TypeKey      string          `json:"typeKey"` // item-type registry key (built-ins mirror kind)
+	Marker       string          `json:"marker"`
+	StartDate    *string         `json:"startDate"`
+	EndDate      *string         `json:"endDate"`
+	Color        *string         `json:"color"`
+	SourceSystem *string         `json:"sourceSystem"`
+	ExternalID   *string         `json:"externalId"`
+	ExternalURL  *string         `json:"externalUrl"`
+	LastSyncedAt *string         `json:"lastSyncedAt"`
+	Maturity     *int            `json:"maturity"`   // 1..4 (Concept·Design·Production·Series) or null
+	Progress     *int            `json:"progress"`   // 0..100 (% complete) or null
+	ScmURL       *string         `json:"scmUrl"`     // link to a source-control resource (release/PR/branch/commit) or null
+	Data         json.RawMessage `json:"data"`       // type-specific field values; shape declared by the item's type
+	AssigneeID   *string         `json:"assigneeId"` // the user this artifact is assigned to (a project member) or null
+	Version      int             `json:"version"`    // monotonic; bumps on every edit
+	CreatedBy    *string         `json:"createdBy"`  // user id who created the item (null for mirrored/legacy)
+	UpdatedBy    *string         `json:"updatedBy"`  // user id who last edited it
+	CreatedAt    *string         `json:"createdAt"`
+	UpdatedAt    *string         `json:"updatedAt"`
 }
 
 // itemData returns the item's JSONB field bag, defaulting to an empty object.
@@ -115,6 +120,10 @@ type Plan struct {
 const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why, how, who,
 	when_date, kind, marker, start_date, end_date, color,
 	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url, type_key, data, assignee_id`
+
+// itemReadColumns adds the audit/version columns (DB-managed, not part of the
+// editable write set) for SELECTs that hydrate full items via scanItem.
+const itemReadColumns = itemColumns + `, version, created_by, updated_by, created_at, updated_at`
 
 // ── Plan (read) ─────────────────────────────────────────────────────────────
 
@@ -161,7 +170,7 @@ func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 		return p, err
 	}
 
-	itRows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM item WHERE workspace_id = $1 ORDER BY year, month, title`, ws)
+	itRows, err := s.pool.Query(ctx, `SELECT `+itemReadColumns+` FROM item WHERE workspace_id = $1 ORDER BY year, month, title`, ws)
 	if err != nil {
 		return p, err
 	}
@@ -196,15 +205,16 @@ func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 
 func scanItem(row pgx.Row) (Item, error) {
 	var it Item
-	var swl, sub, color, src, extID, extURL, scm, assignee *string
+	var swl, sub, color, src, extID, extURL, scm, assignee, createdBy, updatedBy *string
 	var maturity, progress *int
-	var when, start, end, last sql.NullTime
+	var when, start, end, last, createdAt, updatedAt sql.NullTime
 	var dataRaw []byte
 	if err := row.Scan(
 		&it.ID, &swl, &sub, &it.Year, &it.Month,
 		&it.Title, &it.What, &it.Why, &it.How, &it.Who,
 		&when, &it.Kind, &it.Marker, &start, &end, &color,
 		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey, &dataRaw, &assignee,
+		&it.Version, &createdBy, &updatedBy, &createdAt, &updatedAt,
 	); err != nil {
 		return it, err
 	}
@@ -213,11 +223,14 @@ func scanItem(row pgx.Row) (Item, error) {
 	}
 	it.SubLaneID, it.Color, it.SourceSystem, it.ExternalID, it.ExternalURL = sub, color, src, extID, extURL
 	it.Maturity, it.Progress, it.ScmURL, it.AssigneeID = maturity, progress, scm, assignee
+	it.CreatedBy, it.UpdatedBy = createdBy, updatedBy
 	it.Data = json.RawMessage(dataRaw)
 	it.When = dateStr(when)
 	it.StartDate = dateStr(start)
 	it.EndDate = dateStr(end)
 	it.LastSyncedAt = tsStr(last)
+	it.CreatedAt = tsStr(createdAt)
+	it.UpdatedAt = tsStr(updatedAt)
 	return it, nil
 }
 
@@ -528,7 +541,14 @@ func (s *Store) ReorderSubLanes(ctx context.Context, ws string, ids []string) er
 
 // ── Items ───────────────────────────────────────────────────────────────────
 
+// CreateItem creates an item with no recorded author (seed / import / tests).
 func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error) {
+	return s.CreateItemAs(ctx, ws, "", it)
+}
+
+// CreateItemAs creates an item, records `actor` as its author, and writes the
+// first (v1) revision — all in one transaction.
+func (s *Store) CreateItemAs(ctx context.Context, ws, actor string, it Item) (Item, error) {
 	// A mirrored (read-only) swimlane only gets its items from its source.
 	// Off-timeline artifacts carry no lane, so the check is skipped for them.
 	if it.SwimlaneID != "" {
@@ -541,22 +561,41 @@ func (s *Store) CreateItem(ctx context.Context, ws string, it Item) (Item, error
 	if err != nil {
 		return it, err
 	}
-	_, err = s.pool.Exec(ctx,
-		`INSERT INTO item (`+itemColumns+`, workspace_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
+	it.Version = 1
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return it, err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx,
+		`INSERT INTO item (`+itemColumns+`, workspace_id, created_by, updated_by)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
 		it.ID, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 		whenV, it.Kind, it.Marker, startV, endV, it.Color,
-		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws)
+		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws,
+		nullIfEmpty(actor), nullIfEmpty(actor))
 	if err != nil {
+		return it, err
+	}
+	if err := insertRevisionTx(ctx, tx, ws, it, 1, actor); err != nil {
+		return it, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return it, err
 	}
 	return it, nil
 }
 
-// UpdateItem updates the editable fields of a native item. Items with a
-// source_system are rejected with ErrLocked (the source is master). Provenance
-// columns are never changed here.
+// UpdateItem updates the editable fields of a native item with no recorded
+// editor (seed / import / tests).
 func (s *Store) UpdateItem(ctx context.Context, ws, id string, it Item) error {
+	return s.UpdateItemAs(ctx, ws, id, "", it)
+}
+
+// UpdateItemAs updates a native item, bumps its version, records `actor` as the
+// last editor, and writes a revision snapshot. Items with a source_system are
+// rejected with ErrLocked (the source is master); provenance is never changed.
+func (s *Store) UpdateItemAs(ctx context.Context, ws, id, actor string, it Item) error {
 	if err := s.ensureUnlocked(ctx, ws, id); err != nil {
 		return err
 	}
@@ -565,15 +604,49 @@ func (s *Store) UpdateItem(ctx context.Context, ws, id string, it Item) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var newVersion int
+	err = tx.QueryRow(ctx,
 		`UPDATE item SET
 		   swimlane_id=$2, sub_lane_id=$3, year=$4, month=$5, title=$6,
 		   what=$7, why=$8, how=$9, who=$10, when_date=$11,
-		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21, assignee_id=$22
-		 WHERE id=$1 AND workspace_id=$23`,
+		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21, assignee_id=$22,
+		   updated_by=$24, updated_at=now(), version=version+1
+		 WHERE id=$1 AND workspace_id=$23
+		 RETURNING version`,
 		id, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title,
 		it.What, it.Why, it.How, it.Who, whenV,
-		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws)
+		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws,
+		nullIfEmpty(actor)).Scan(&newVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	it.ID = id
+	if err := insertRevisionTx(ctx, tx, ws, it, newVersion, actor); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// insertRevisionTx records an immutable snapshot of the item at `version`.
+func insertRevisionTx(ctx context.Context, tx pgx.Tx, ws string, it Item, version int, actor string) error {
+	it.Version = version
+	snap, err := json.Marshal(it)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx,
+		`INSERT INTO item_revision (workspace_id, item_id, version, snapshot, edited_by)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (workspace_id, item_id, version) DO NOTHING`,
+		ws, it.ID, version, snap, nullIfEmpty(actor))
 	return err
 }
 

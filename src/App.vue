@@ -2,14 +2,21 @@
   <div class="app">
     <LandingPage v-if="workspace.mode === 'landing'" @login="loginOpen = true" @logout="onLogout" @about="aboutOpen = true" />
 
-    <template v-else>
+    <div v-else class="app-shell">
+    <ActivityRail
+      @manage="openManage"
+      @about="aboutOpen = true"
+      @login="loginOpen = true"
+      @logout="onLogout"
+    />
+    <div class="app-main">
     <TheHeader
       :year="store.year"
       :zoom="zoom"
       :authenticated="session.authenticated"
       @prev-year="prevYear"
       @next-year="nextYear"
-      @manage="manageOpen = true"
+      @manage="openManage"
       @about="aboutOpen = true"
       @login="loginOpen = true"
       @logout="onLogout"
@@ -52,18 +59,28 @@
         @edit="openEdit"
         @add="openAddType"
       />
+      <SourceControlView
+        v-else-if="store.view === 'scm'"
+        :read-only="readOnly"
+      />
+      <ChangeRequestsView
+        v-else-if="store.view === 'cr'"
+        @propose-new="openProposeNew"
+      />
       <MilestoneTable
         v-else
         :zoom="zoom"
         :read-only="readOnly"
         @add-milestone="openAdd"
         @edit-milestone="openEdit"
+        @show-history="openEdit($event, 'history')"
       />
     </template>
 
     <FacetFilter v-if="session.ready && !session.error && store.view === 'timeline'" />
     <GroupLegend v-if="session.ready && !session.error && store.view === 'timeline'" :read-only="readOnly" />
-    </template>
+    </div>
+    </div>
 
     <Transition name="modal">
       <MilestoneModal
@@ -76,12 +93,14 @@
         :date="modal.date"
         :milestone="modal.milestone"
         :initial-type="modal.initialType"
+        :initial-tab="modal.initialTab"
+        :propose-mode="modal.proposeMode"
         @close="modal.show = false"
       />
     </Transition>
 
     <Transition name="modal">
-      <ManageModal v-if="manageOpen" @close="manageOpen = false" />
+      <ManageModal v-if="manageOpen" :initial-tab="manageTab" @close="manageOpen = false" />
     </Transition>
 
     <Transition name="modal">
@@ -98,8 +117,11 @@
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useAppStore, store, session, workspace, baselines, initApp, canEditWorkspace } from './stores/useAppStore.js'
 import TheHeader from './components/TheHeader.vue'
+import ActivityRail from './components/ActivityRail.vue'
 import MilestoneTable from './components/MilestoneTable.vue'
 import ExplorerView from './components/ExplorerView.vue'
+import SourceControlView from './components/SourceControlView.vue'
+import ChangeRequestsView from './components/ChangeRequestsView.vue'
 import MilestoneModal from './components/MilestoneModal.vue'
 import ManageModal from './components/ManageModal.vue'
 import LoginModal from './components/LoginModal.vue'
@@ -111,6 +133,13 @@ import LandingPage from './components/LandingPage.vue'
 const { prevYear, nextYear, logout } = useAppStore()
 
 const manageOpen = ref(false)
+const manageTab = ref('areas')
+// Settings can be opened straight onto a specific tab (e.g. "Members" from the
+// project switcher's "Invite people…").
+function openManage(tab) {
+  manageTab.value = typeof tab === 'string' ? tab : 'areas'
+  manageOpen.value = true
+}
 const loginOpen = ref(false)
 const aboutOpen = ref(false)
 const zoom = ref(1)
@@ -141,11 +170,13 @@ const modal = reactive({
   date: null,
   milestone: null,
   initialType: '',
+  initialTab: 'details',
+  proposeMode: false,
 })
 
 function openAdd({ swimlane, subLane, month, date }) {
   Object.assign(modal, {
-    show: true, mode: 'add', swimlane, subLane, month, year: store.year, date: date || null, milestone: null, initialType: '',
+    show: true, mode: 'add', swimlane, subLane, month, year: store.year, date: date || null, milestone: null, initialType: '', initialTab: 'details', proposeMode: false,
   })
 }
 
@@ -153,16 +184,27 @@ function openAdd({ swimlane, subLane, month, date }) {
 function openAddType(type) {
   Object.assign(modal, {
     show: true, mode: 'add', swimlane: null, subLane: null,
-    month: new Date().getMonth() + 1, year: store.year, date: null, milestone: null, initialType: type.key,
+    month: new Date().getMonth() + 1, year: store.year, date: null, milestone: null, initialType: type.key, initialTab: 'details', proposeMode: false,
   })
 }
 
-function openEdit(milestone) {
+// Propose a brand-new item (a create change request) — opens the add dialog
+// already in propose mode; the proposer picks the target Area.
+function openProposeNew() {
+  Object.assign(modal, {
+    show: true, mode: 'add', swimlane: null, subLane: null,
+    month: new Date().getMonth() + 1, year: store.year, date: null, milestone: null, initialType: '', initialTab: 'details', proposeMode: true,
+  })
+}
+
+// Open the item dialog. `tab` lets us land straight on a tab (e.g. "history"
+// from the timeline's version chip) so history is shown IN the item's window.
+function openEdit(milestone, tab = 'details') {
   const swimlane = store.swimlanes.find(s => s.id === milestone.swimlaneId)
   const subLane = swimlane?.subLanes.find(s => s.id === milestone.subLaneId) ?? null
   Object.assign(modal, {
     show: true, mode: 'edit', swimlane, subLane,
-    month: milestone.month, year: milestone.year, date: null, milestone, initialType: '',
+    month: milestone.month, year: milestone.year, date: null, milestone, initialType: '', initialTab: tab, proposeMode: false,
   })
 }
 </script>
@@ -173,6 +215,8 @@ function openEdit(milestone) {
   flex-direction: column;
   min-height: 100vh;
 }
+.app-shell { display: flex; min-height: 100vh; }
+.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .app-state {
   flex: 1;
   display: flex;
