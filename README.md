@@ -2,7 +2,7 @@
 
 # 🛰️ ATLAS
 
-**Collaborative milestone & roadmap planning — date-anchored timelines, events, baselines and groups.**
+**Collaborative, configurable planning — date-anchored timelines, custom artifact types, versioned history and change-request review.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
@@ -24,35 +24,41 @@
 
 **ATLAS** is a visual planning tool that gives any team a single, shared picture of *what* happens *when* — across customers, events, products, platforms, features and releases.
 
-Work is organized into **swimlanes** and **sub-lanes** on a month/year timeline. On that grid you place **milestones** (point-in-time markers) and **events** (bars that span a period), connect them with **dependency links**, and drill into the *What / Why / Where / Who / When* behind each entry.
+Work is organized into **swimlanes** and **sub-lanes** on a month/year timeline. On that grid you place **milestones** (point-in-time markers) and **events** (bars that span a period), connect them with **typed relationships**, and drill into the *What / Why / Where / Who* behind each entry. Beyond the timeline you can define your **own item types** — Bug, Task, Release, anything — each with its own fields and behavior, browsed in an **Explorer** of folders by type.
 
-ATLAS is **general-purpose** and not tied to any one domain: use the same timeline for product roadmaps, delivery plans, go-to-market calendars, release trains or any program of work that benefits from a shared, date-anchored view.
+ATLAS is **general-purpose** and not tied to any one domain: use the same workspace for product roadmaps, delivery plans, go-to-market calendars, release trains, backlogs or any program of work that benefits from a shared, configurable view.
 
-> **Project status:** ATLAS is a collaborative, **multi-user** client–server application — a Vue SPA backed by a Go API and PostgreSQL, with admin-managed accounts and roles, per-user workspaces (each at its own `/{username}` URL), per-workspace public/private visibility, plan sharing & publishing between users, repository (GitHub/Gitea) import, and a self-hostable Docker deployment. See the [Releases](https://github.com/tpasson/sw-atlas/releases) page for the current version and changelog, and the [open issues](https://github.com/tpasson/sw-atlas/issues) for what's planned.
+> **Project status:** ATLAS is a collaborative, **multi-user** client–server application — a Vue SPA backed by a Go API and PostgreSQL. It supports **multi-member projects** (owner / editor / viewer roles), **configurable item types** with per-type fields, **item versioning & history**, **change requests** (propose a change, the owner approves it onto the plan), per-workspace public/private visibility, plan sharing & publishing between users, GitHub/Gitea source mirroring, and a self-hostable Docker deployment. See the [Releases](https://github.com/tpasson/sw-atlas/releases) page for the current version and changelog, and the [open issues](https://github.com/tpasson/sw-atlas/issues) for what's planned.
 
 ## ✨ Features
 
 ### Available today
 
-**Planning & visualization**
-- 📊 **Date-anchored timeline** — swimlanes & sub-lanes across fixed months and years, with a sticky header and lane packing
-- 🧭 **Milestones** with rich detail (*What / Why / Where / Who / When*), **maturity** stages and **progress**
-- 🎯 **Events as bars** that span a period, with a configurable marker library
-- 🔗 **Dependency links** between items, highlighted on hover
-- 🏷️ **Groups** — color-coded groupings with a legend
-- 🧬 **Baselines** — save named snapshots and compare any baseline against the live plan (added / moved / removed, with counts)
-- 🔎 **Zoom** and year navigation; per-workspace display settings that follow your plan across devices
+**Plan modeling**
+- 🧩 **Configurable item types** — define your own types (Bug, Task, Release, …) with per-type fields and a behavior family (timeline point / range, backlog item, folder); each type's icon & colour live on the type and flow into the legend automatically
+- 🧭 **Milestones & events** with rich detail (*What / Why / Where*), **maturity** stages and **progress**; events span a period as bars
+- 🔗 **Typed relationships** between items (depends-on, relates-to, child-of, implements, verifies), highlighted on hover, with late-dependency **risk warnings**
+- 👤 **Assignees** — assign any item to a project member, shown as avatars
+
+**Views**
+- 📊 **Date-anchored timeline** — swimlanes & sub-lanes across fixed months and years, with a sticky header, lane packing, zoom and month/year navigation
+- 🗂️ **Explorer** — browse every artifact in a two-pane **type tree + detail** pane, or as a **Table** or **Board** (kanban); add an item of any type inline
+- 🧭 **Activity rail** — one click between Timeline / Explorer / Source Control / Change Requests; a configurable **facet filter** highlights items by type, assignee, maturity or group
+
+**History & governance**
+- 🕓 **Versioning & history** — every item carries a version and who created / last-edited it; each change is an immutable revision you can review and step back through
+- 🧬 **Baselines** — save named snapshots and view the plan exactly as it stood then
+- ✅ **Change requests** — members propose edits or new items; the owner approves them onto the plan (attributed to the proposer) or rejects them
+- 🔐 **Roles** — owner / editor / viewer per project; workspace configuration (types, display, sources, sharing) is owner-only
 
 **Multi-user & collaboration**
-- 👥 **Accounts & roles** — an admin manages users (admin / editor); each user gets their own private workspace
-- 🔗 **Per-user dashboards** — every plan lives at its own `/{username}` URL
-- 🔓 **Per-workspace visibility** — make a plan public or private; viewers see it read-only
+- 👥 **Accounts & projects** — an admin manages users; each user gets a personal workspace and can create **multi-member projects**, inviting others as editors or viewers
+- 🔗 **Per-workspace URLs** — every plan lives at its own `/{username}` (or project) URL, public or private; viewers see it read-only
 - 🧭 **Discovery landing page** — browse all public plans; admins can feature favourites
-- 📡 **Share & publish** — publish a curated slice of your plan and let others on the server (e.g. a shared "team" account) subscribe to it, mirrored read-only and kept in sync — across separate ATLAS instances too (subscribe links)
+- 📡 **Share & publish** — publish a curated slice and let others subscribe to it, mirrored read-only and kept in sync — across separate ATLAS instances too
 
 **Integrations**
-- 🐙 **Repository sources** — pull a GitHub/Gitea repo's releases, tags, issues and pull requests in as a read-only swimlane, placed on the timeline by date; tokens encrypted at rest; per-status colours configurable
-- 🔖 **Source-control badges** on milestones that link back to the commit / PR / release
+- 🐙 **Source Control** — mirror a GitHub/Gitea repo's releases, tags, issues and pull requests as a read-only, browsable area; per-status colours; tokens encrypted at rest
 
 **Hosting**
 - 🗄️ **Backend + PostgreSQL** — a true single source of truth for the whole team
@@ -60,7 +66,7 @@ ATLAS is **general-purpose** and not tied to any one domain: use the same timeli
 
 ### Planned
 
-Planned work is tracked entirely in **[GitHub issues](https://github.com/tpasson/sw-atlas/issues)** — for example export & reporting (PPTX / image), a month view with day columns, generic project-plan import (CSV / Excel / ICS), and live status for synced sources.
+Planned work is tracked entirely in **[GitHub issues](https://github.com/tpasson/sw-atlas/issues)** — for example export & reporting (PPTX / image) and generic project-plan import (CSV / Excel / ICS).
 
 ## 📸 Screenshots
 
@@ -91,18 +97,20 @@ Browser (Vue SPA)
 Reverse Proxy (Caddy/nginx) ── TLS, optional SSO/OIDC   [bring your own]
    ▼
 API (Go · chi)
-   ├─ Auth — accounts & roles, per-user workspaces, per-workspace public/private
-   ├─ Domain API (swimlanes · sub-lanes · items · links · groups · baselines)
+   ├─ Auth — accounts, multi-member projects (owner/editor/viewer), public/private
+   ├─ Domain API (swimlanes · items · item types · typed relationships · baselines)
+   ├─ History & governance (item revisions · change requests → approve/reject)
    ├─ Sharing & federation (publish scopes · subscribe & mirror, local or cross-instance)
-   ├─ Repository sources ── GitHub / Gitea import (releases · tags · issues · PRs)
+   ├─ Repository sources ── GitHub / Gitea mirror (releases · tags · issues · PRs)
    └─ Export service (PPTX / image)                                          [planned]
    ▼
 PostgreSQL  +  file storage (exports)
 ```
 
-The collaborative stack — Vue SPA, Go API, PostgreSQL, multi-user accounts,
-sharing/publishing and repository import — is live; the export service is still
-planned. The TLS-terminating reverse proxy is provided by you in front of the container.
+The collaborative stack — Vue SPA, Go API, PostgreSQL, multi-member projects,
+configurable types, versioning & change requests, sharing/publishing and repository
+mirroring — is live; the export service is still planned. The TLS-terminating reverse
+proxy is provided by you in front of the container.
 
 ## 🚀 Getting Started
 
@@ -212,11 +220,16 @@ sw-atlas/
 │  ├─ api.js                # backend API client (demoApi.js for the Pages demo)
 │  ├─ style.css
 │  ├─ components/
-│  │  ├─ TheHeader.vue      # toolbar: year nav, zoom, baselines, settings
-│  │  ├─ LandingPage.vue    # discovery directory of public plans (the "/" home)
-│  │  ├─ MilestoneTable.vue # the timeline grid
-│  │  ├─ MilestoneModal.vue # add/edit a milestone
-│  │  └─ ManageModal.vue    # areas · display · sources · sharing · users · account
+│  │  ├─ ActivityRail.vue        # left rail: views · theme · account
+│  │  ├─ TheHeader.vue           # toolbar: date nav · zoom · baselines · project switcher
+│  │  ├─ LandingPage.vue         # discovery directory of public plans (the "/" home)
+│  │  ├─ MilestoneTable.vue      # the timeline grid
+│  │  ├─ ExplorerView.vue        # type tree + detail · Table · Board
+│  │  ├─ SourceControlView.vue   # mirrored Git sources & content
+│  │  ├─ ChangeRequestsView.vue  # propose / approve change requests
+│  │  ├─ MilestoneModal.vue      # add/edit an item (+ History tab · propose)
+│  │  ├─ TypesManager.vue        # configurable item types & fields
+│  │  └─ ManageModal.vue         # areas · display · types · baselines · sharing · members · users
 │  └─ stores/
 │     └─ useAppStore.js     # reactive client state, synced with the API
 ├─ server/                  # Go backend (chi, pgx, goose)
