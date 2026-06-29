@@ -66,7 +66,7 @@ onUnmounted(() => { ui.highlightIds = null })
 <style scoped>
 .facet-dock {
   position: fixed;
-  bottom: 14px; left: 18px;
+  bottom: 14px; left: 70px;
   display: flex; align-items: center; gap: 10px;
   max-width: 56vw;
   min-height: 40px; box-sizing: border-box;

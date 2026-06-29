@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -34,11 +35,35 @@ func (s *Store) CreateBaseline(ctx context.Context, ws, id, name, note string) (
 		id, name, note, ws).Scan(&createdAt); err != nil {
 		return Baseline{}, err
 	}
+	// Self-heal: ensure every current item has a revision at its current version
+	// (covers mirrored items and any gap) so the baseline's pointers resolve.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO item_revision (workspace_id, item_id, version, snapshot, edited_by)
+		 SELECT workspace_id, id, version,
+		        jsonb_build_object(
+		          'id', id, 'swimlaneId', swimlane_id, 'subLaneId', sub_lane_id,
+		          'year', year, 'month', month, 'title', title,
+		          'what', what, 'why', why, 'how', how, 'who', who,
+		          'when', to_char(when_date, 'YYYY-MM-DD'),
+		          'kind', kind, 'typeKey', type_key, 'marker', marker,
+		          'startDate', to_char(start_date, 'YYYY-MM-DD'),
+		          'endDate', to_char(end_date, 'YYYY-MM-DD'),
+		          'color', color, 'maturity', maturity, 'progress', progress,
+		          'scmUrl', scm_url, 'assigneeId', assignee_id,
+		          'sourceSystem', source_system, 'data', data, 'version', version
+		        ),
+		        updated_by
+		 FROM item i
+		 WHERE workspace_id = $1
+		   AND NOT EXISTS (SELECT 1 FROM item_revision r
+		                    WHERE r.workspace_id = i.workspace_id AND r.item_id = i.id AND r.version = i.version)`,
+		ws); err != nil {
+		return Baseline{}, err
+	}
+	// A baseline references each item at its current version — no data duplication.
 	ct, err := tx.Exec(ctx,
-		`INSERT INTO baseline_item
-		   (baseline_id, item_id, swimlane_id, sub_lane_id, title, year, month, when_date, start_date, end_date, kind, marker)
-		 SELECT $1, id, swimlane_id, sub_lane_id, title, year, month, when_date, start_date, end_date, kind, marker
-		 FROM item WHERE workspace_id = $2`, id, ws)
+		`INSERT INTO baseline_item (baseline_id, item_id, version)
+		 SELECT $1, id, version FROM item WHERE workspace_id = $2`, id, ws)
 	if err != nil {
 		return Baseline{}, err
 	}
@@ -86,24 +111,58 @@ func (s *Store) GetBaseline(ctx context.Context, ws, id string) (Baseline, error
 	b.CreatedAt = ca.Format(time.RFC3339)
 	b.Items = []Item{}
 
+	// Version-pointer rows resolve through item_revision (full snapshot); older
+	// rows fall back to the inline snapshot columns captured at the time.
 	rows, err := s.pool.Query(ctx,
-		`SELECT item_id, swimlane_id, sub_lane_id, year, month, title, when_date, start_date, end_date, kind, marker
-		 FROM baseline_item WHERE baseline_id = $1 ORDER BY year, month, title`, id)
+		`SELECT bi.item_id, bi.version, bi.swimlane_id, bi.sub_lane_id, bi.year, bi.month, bi.title,
+		        bi.when_date, bi.start_date, bi.end_date, bi.kind, bi.marker, r.snapshot
+		 FROM baseline_item bi
+		 LEFT JOIN item_revision r
+		        ON r.workspace_id = $2 AND r.item_id = bi.item_id AND r.version = bi.version
+		 WHERE bi.baseline_id = $1
+		 ORDER BY bi.item_id`, id, ws)
 	if err != nil {
 		return b, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var it Item
-		var sub *string
+		var version, year, month *int
+		var swl, sub, title, kind, marker *string
 		var when, start, end sql.NullTime
-		if err := rows.Scan(&it.ID, &it.SwimlaneID, &sub, &it.Year, &it.Month, &it.Title, &when, &start, &end, &it.Kind, &it.Marker); err != nil {
+		var snap []byte
+		if err := rows.Scan(&it.ID, &version, &swl, &sub, &year, &month, &title,
+			&when, &start, &end, &kind, &marker, &snap); err != nil {
 			return b, err
 		}
-		it.SubLaneID = sub
-		it.When = dateStr(when)
-		it.StartDate = dateStr(start)
-		it.EndDate = dateStr(end)
+		if len(snap) > 0 {
+			if err := json.Unmarshal(snap, &it); err != nil {
+				return b, err
+			}
+		} else {
+			if swl != nil {
+				it.SwimlaneID = *swl
+			}
+			it.SubLaneID = sub
+			if year != nil {
+				it.Year = *year
+			}
+			if month != nil {
+				it.Month = *month
+			}
+			if title != nil {
+				it.Title = *title
+			}
+			if kind != nil {
+				it.Kind = *kind
+			}
+			if marker != nil {
+				it.Marker = *marker
+			}
+			it.When = dateStr(when)
+			it.StartDate = dateStr(start)
+			it.EndDate = dateStr(end)
+		}
 		b.Items = append(b.Items, it)
 	}
 	b.ItemCount = len(b.Items)

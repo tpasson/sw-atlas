@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,8 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/members", s.listWorkspaceMembers)
 			r.Get("/baselines", s.listBaselines)
 			r.Get("/baselines/{id}", s.getBaseline)
+			r.Get("/items/{id}/revisions", s.listItemRevisions)
+			r.Get("/items/{id}/revisions/{version}", s.getItemRevision)
 		})
 
 		// Projects: any authenticated user lists their own + creates new ones,
@@ -80,16 +83,40 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Delete("/projects/{slug}/members/{userId}", s.removeMember)
 		})
 
-		// Write endpoints: editors only.
+		// Workspace CONFIGURATION: the owner only (the "blueprint" — types, look,
+		// sources, sharing). Editors change content, not configuration.
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireEditor)
-			r.Post("/import", s.importPlan)
+			r.Use(s.requireWorkspaceOwner)
 			r.Put("/settings/public-read", s.setPublicRead)
 			r.Put("/settings/palette", s.setPalette)
-			r.Put("/settings/groups", s.setGroups)
 			r.Put("/settings/ui", s.setUISettings)
 			r.Put("/settings/git-colors", s.setGitColors)
 			r.Put("/item-types", s.setItemTypes)
+
+			// GitHub sources (releases/tags/issues/PRs → read-only swimlane)
+			r.Post("/github-sources", s.createGitHubSource)
+			r.Get("/github-sources", s.listGitHubSources)
+			r.Post("/github-sources/{id}/sync", s.syncGitHubSource)
+			r.Post("/github-sources/{id}/token", s.setGitHubSourceToken)
+			r.Delete("/github-sources/{id}", s.deleteGitHubSource)
+
+			// change-request decisions: owner approves/rejects
+			r.Post("/change-requests/{id}/approve", s.approveChangeRequest)
+			r.Post("/change-requests/{id}/reject", s.rejectChangeRequest)
+		})
+
+		// Change requests: any member can propose and list them.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireMember)
+			r.Post("/change-requests", s.createChangeRequest)
+			r.Get("/change-requests", s.listChangeRequests)
+		})
+
+		// Write endpoints: editors only (content, not configuration).
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireEditor)
+			r.Post("/import", s.importPlan)
+			r.Put("/settings/groups", s.setGroups)
 
 			r.Post("/swimlanes", s.createSwimlane)
 			r.Post("/swimlanes/reorder", s.reorderSwimlanes)
@@ -133,13 +160,6 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Post("/subscriptions/{id}/sync", s.syncSubscription)
 			r.Post("/subscriptions/{id}/pause", s.setSubscriptionPaused)
 			r.Post("/swimlanes/{id}/hidden", s.setSwimlaneHidden)
-
-			// GitHub sources (releases/tags/issues/PRs → read-only swimlane)
-			r.Post("/github-sources", s.createGitHubSource)
-			r.Get("/github-sources", s.listGitHubSources)
-			r.Post("/github-sources/{id}/sync", s.syncGitHubSource)
-			r.Post("/github-sources/{id}/token", s.setGitHubSourceToken)
-			r.Delete("/github-sources/{id}", s.deleteGitHubSource)
 
 			// self-service: change your own password
 			r.Put("/account/password", s.changeOwnPassword)
@@ -238,6 +258,69 @@ func (s *Server) requireEditor(next http.Handler) http.Handler {
 		}
 		if role != store.WSRoleOwner && role != store.WSRoleEditor {
 			writeErr(w, http.StatusForbidden, "you don't have edit access to this plan")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
+	})
+}
+
+// requireWorkspaceOwner gates workspace-CONFIGURATION endpoints (types, display,
+// palette, sources, sharing, change-request decisions) to the OWNER of the active
+// workspace. Editors can change content; only owners change the "blueprint".
+func (s *Server) requireWorkspaceOwner(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := s.auth.SessionFromRequest(r)
+		if !ok {
+			writeErr(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		target, err := s.resolveTargetWorkspace(r)
+		if err == store.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if role != store.WSRoleOwner {
+			writeErr(w, http.StatusForbidden, "only the project owner can change this")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
+	})
+}
+
+// requireMember gates an endpoint to any authenticated MEMBER of the active
+// workspace (viewer / editor / owner) — used for proposing change requests.
+func (s *Server) requireMember(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := s.auth.SessionFromRequest(r)
+		if !ok {
+			writeErr(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		target, err := s.resolveTargetWorkspace(r)
+		if err == store.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if role == "" {
+			writeErr(w, http.StatusForbidden, "you are not a member of this project")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
@@ -903,7 +986,8 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 	if it.ID == "" {
 		it.ID = uuid.NewString()
 	}
-	created, err := s.store.CreateItem(r.Context(), s.currentWorkspace(r), it)
+	sess, _ := s.auth.SessionFromRequest(r)
+	created, err := s.store.CreateItemAs(r.Context(), s.currentWorkspace(r), sess.UserID, it)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -916,7 +1000,8 @@ func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &it) {
 		return
 	}
-	if err := s.store.UpdateItem(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), it); err != nil {
+	sess, _ := s.auth.SessionFromRequest(r)
+	if err := s.store.UpdateItemAs(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), sess.UserID, it); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -929,6 +1014,99 @@ func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeNoContent(w)
+}
+
+// createChangeRequest stores a member's proposed change (pending the owner).
+func (s *Server) createChangeRequest(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Kind         string          `json:"kind"`
+		TargetItemID string          `json:"targetItemId"`
+		Payload      json.RawMessage `json:"payload"`
+		Note         string          `json:"note"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Payload) == 0 {
+		writeErr(w, http.StatusBadRequest, "a proposed change is required")
+		return
+	}
+	sess, _ := s.auth.SessionFromRequest(r)
+	cr, err := s.store.CreateChangeRequest(r.Context(), s.currentWorkspace(r), uuid.NewString(), sess.UserID, in.Kind, in.TargetItemID, in.Payload, in.Note)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, cr)
+}
+
+// listChangeRequests returns the workspace's change requests (pending first).
+func (s *Server) listChangeRequests(w http.ResponseWriter, r *http.Request) {
+	list, err := s.store.ListChangeRequests(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// approveChangeRequest applies a proposal to the live plan (owner only).
+func (s *Server) approveChangeRequest(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Note string `json:"note"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	sess, _ := s.auth.SessionFromRequest(r)
+	cr, err := s.store.ApproveChangeRequest(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), sess.UserID, in.Note)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cr)
+}
+
+// rejectChangeRequest declines a proposal (owner only).
+func (s *Server) rejectChangeRequest(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Note string `json:"note"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	sess, _ := s.auth.SessionFromRequest(r)
+	cr, err := s.store.RejectChangeRequest(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), sess.UserID, in.Note)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cr)
+}
+
+// listItemRevisions returns an item's version history (newest first, no snapshots).
+func (s *Server) listItemRevisions(w http.ResponseWriter, r *http.Request) {
+	revs, err := s.store.ListItemRevisions(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, revs)
+}
+
+// getItemRevision returns one version's full snapshot of an item.
+func (s *Server) getItemRevision(w http.ResponseWriter, r *http.Request) {
+	v, err := strconv.Atoi(chi.URLParam(r, "version"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid version")
+		return
+	}
+	rev, err := s.store.GetItemRevision(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), v)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rev)
 }
 
 // scmRefreshItem polls a native item's linked PR/issue/release and reflects its

@@ -17,13 +17,11 @@
             <!-- Tabs -->
             <div class="tabs" role="tablist">
               <button class="tab" :class="{ active: tab === 'areas' }" @click="tab = 'areas'">Areas</button>
-              <button class="tab" :class="{ active: tab === 'display' }" @click="tab = 'display'">Display</button>
-              <button class="tab" :class="{ active: tab === 'legend' }" @click="tab = 'legend'">Icons</button>
-              <button v-if="session.authenticated || isDemo" class="tab" :class="{ active: tab === 'types' }" @click="tab = 'types'">Types</button>
+              <button v-if="canAdmin" class="tab" :class="{ active: tab === 'display' }" @click="tab = 'display'">Display</button>
+              <button v-if="canAdmin" class="tab" :class="{ active: tab === 'types' }" @click="tab = 'types'">Types</button>
               <button class="tab" :class="{ active: tab === 'baselines' }" @click="tab = 'baselines'">Baselines</button>
               <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
-              <button v-if="session.authenticated" class="tab" :class="{ active: tab === 'sources' }" @click="tab = 'sources'">Sources</button>
-              <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
+              <button v-if="!isDemo && canAdmin" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
               <button v-if="!isDemo && workspace.role === 'owner'" class="tab" :class="{ active: tab === 'members' }" @click="tab = 'members'">Members</button>
               <button v-if="!isDemo && session.role === 'admin'" class="tab" :class="{ active: tab === 'users' }" @click="tab = 'users'">Users</button>
               <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'account' }" @click="tab = 'account'">Account</button>
@@ -215,6 +213,20 @@
 
               <!-- ───────────────── DISPLAY ───────────────── -->
               <section v-show="tab === 'display'" class="tab-pane">
+                <div class="card">
+                  <p class="section-label">Item icons</p>
+                  <p class="card-hint">Each item's icon &amp; colour come from its <strong>type</strong> (Settings → Types). These control how big they render.</p>
+                  <div class="opt-row">
+                    <label class="opt">Icon size
+                      <input type="range" min="10" max="22" step="1" v-model.number="settings.items.markerSize" />
+                      <span class="opt-val">{{ settings.items.markerSize }}px</span>
+                    </label>
+                    <label class="opt">Line thickness
+                      <input type="range" min="1" max="3" step="0.25" v-model.number="settings.items.markerStroke" />
+                      <span class="opt-val">{{ settings.items.markerStroke }}</span>
+                    </label>
+                  </div>
+                </div>
                 <div class="card">
                   <p class="section-label">Today indicator</p>
                   <div class="row-between">
@@ -418,50 +430,6 @@
 
               </section>
 
-              <!-- ───────────────── LEGEND ───────────────── -->
-              <section v-show="tab === 'legend'" class="tab-pane">
-                <div class="card">
-                  <p class="section-label">Icons &amp; markers</p>
-                  <p class="card-hint">Up to 8 marker types — shown in the legend and offered when picking an item's marker. Plus the event-bar label.</p>
-                  <div class="opt-row">
-                    <label class="opt">Marker size
-                      <input type="range" min="10" max="22" step="1" v-model.number="settings.items.markerSize" />
-                      <span class="opt-val">{{ settings.items.markerSize }}px</span>
-                    </label>
-                    <label class="opt">Line thickness
-                      <input type="range" min="1" max="3" step="0.25" v-model.number="settings.items.markerStroke" />
-                      <span class="opt-val">{{ settings.items.markerStroke }}</span>
-                    </label>
-                  </div>
-                  <div class="legend-edit">
-                    <div v-for="(m, i) in settings.markers" :key="i" class="leg-row">
-                      <span class="leg-ico"><MarkerIcon :shape="m.shape" :fill="m.fill" color="#8a8a8e" :size="14" /></span>
-                      <input class="field-input sm" v-model="m.label" />
-                      <button class="fill-toggle" :class="{ on: m.fill }" title="Toggle filled icon" @click="m.fill = !m.fill">Fill</button>
-                      <button class="icon-btn danger" :disabled="settings.markers.length <= 1" title="Remove marker" @click="removeMarker(i)">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>
-                        </svg>
-                      </button>
-                    </div>
-                    <label class="leg-row">
-                      <span class="leg-ico"><span class="leg-bar"></span></span>
-                      <input class="field-input sm" v-model="settings.eventLabel" />
-                    </label>
-                  </div>
-
-                  <div v-if="settings.markers.length < 8" class="marker-add">
-                    <input v-model="iconSearch" class="field-input sm" placeholder="Search markers… (save, server, cloud, bug, database …)" />
-                    <div class="marker-grid">
-                      <button v-for="s in availableShapes" :key="s" type="button" class="marker-add-btn" :title="prettyShape(s)" @click="addMarker(s)">
-                        <MarkerIcon :shape="s" color="#8a8a8e" :size="16" />
-                      </button>
-                      <span v-if="!availableShapes.length" class="card-hint">No markers match “{{ iconSearch }}”.</span>
-                    </div>
-                  </div>
-                  <p v-else class="card-hint">Maximum of 8 markers reached.</p>
-                </div>
-              </section>
 
               <!-- ───────────────── ITEM TYPES ───────────────── -->
               <section v-if="tab === 'types'" class="tab-pane">
@@ -509,10 +477,6 @@
                 </div>
               </section>
 
-              <section v-if="tab === 'sources'" class="tab-pane">
-                <GitHubSourceManager />
-              </section>
-
               <section v-if="tab === 'members' && workspace.role === 'owner'" class="tab-pane">
                 <MembersManager :slug="workspace.slug" />
               </section>
@@ -557,17 +521,18 @@
 
 <script setup>
 import { reactive, ref, computed } from 'vue'
-import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, session, settings, resetSettings, MARKER_LIBRARY, exportPlanToFile, importPlanFromFile, workspace } from '../stores/useAppStore.js'
+import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, session, settings, resetSettings, MARKER_LIBRARY, exportPlanToFile, importPlanFromFile, workspace, canAdminWorkspace } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import ShareManager from './ShareManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
-import GitHubSourceManager from './GitHubSourceManager.vue'
 import UsersManager from './UsersManager.vue'
 import MembersManager from './MembersManager.vue'
 import AccountManager from './AccountManager.vue'
 import TypesManager from './TypesManager.vue'
 
 const isDemo = import.meta.env.VITE_DEMO
+// Configuration tabs (Display / Types / Sharing) are owner-only; demo acts as owner.
+const canAdmin = computed(() => isDemo || canAdminWorkspace())
 
 const SHAPE_NAMES = { diamond: 'Diamond', circle: 'Circle', cone: 'Cone', flag: 'Flag', square: 'Square', triangleDown: 'Triangle', star: 'Star', hexagon: 'Hexagon', pentagon: 'Pentagon' }
 function prettyShape(s) {
@@ -595,11 +560,14 @@ function removeMarker(i) {
   if (settings.markers.length > 1) settings.markers.splice(i, 1)
 }
 
+const props = defineProps({ initialTab: { type: String, default: 'areas' } })
 defineEmits(['close'])
 
 const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 
-const tab = ref('areas')
+// Open on a requested tab when it's available to this user; fall back to Areas.
+const ALLOWED_INITIAL = ['areas', 'display', 'legend', 'types', 'baselines', 'data', 'sharing', 'members', 'users', 'account']
+const tab = ref(ALLOWED_INITIAL.includes(props.initialTab) ? props.initialTab : 'areas')
 
 // Label a mirrored lane by what it's synced from (GitHub/Gitea/… or a subscription).
 const SOURCE_LABELS = { github: 'GitHub', gitea: 'Gitea', gitlab: 'GitLab', bitbucket: 'Bitbucket', subscription: 'Subscribed' }

@@ -117,7 +117,7 @@
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
-                  @dblclick.stop="!props.readOnly && onEdit(it.m)"
+                  @dblclick.stop="onEdit(it.m)"
                 ></div>
 
                 <!-- Milestone: marker is the anchor at its day, label flows right -->
@@ -125,14 +125,14 @@
                   v-else-if="it.type === 'point'"
                   class="mk-item"
                   :data-item-id="it.m.id"
-                  :class="[chipState(it.m), baselineClass(it.m)]"
+                  :class="chipState(it.m)"
                   :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: it.m.color || g.row.swimlane.color }"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
-                  @dblclick.stop="!props.readOnly && onEdit(it.m)"
+                  @dblclick.stop="onEdit(it.m)"
                 >
-                  <MarkerIcon :shape="markerOf(it.m)" :color="it.m.color || g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFill(markerOf(it.m))" class="mk-icon" />
+                  <MarkerIcon :shape="markerOf(it.m)" :color="it.m.color || g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
                   <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="settings.items.maturitySize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
 
@@ -150,20 +150,19 @@
                   v-else-if="it.type === 'bar'"
                   class="event-bar"
                   :data-item-id="it.m.id"
-                  :class="[chipState(it.m), baselineClass(it.m), { draggable: !props.readOnly && !it.m.sourceSystem }]"
+                  :class="[chipState(it.m), { draggable: !props.readOnly && !it.m.sourceSystem }]"
                   :style="barStyleFull(it, it.m.color || g.row.swimlane.color, g.laneH, g.vOffset)"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @pointerdown="startDrag($event, it, 'move')"
                   @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
-                  @dblclick.stop="!props.readOnly && onEdit(it.m)"
+                  @dblclick.stop="onEdit(it.m)"
                 >
                   <span v-if="it.continuesLeft" class="bar-arrow">◀</span>
                   <span class="bar-title" :class="{ 'bar-title-out': it.labelOutside }">
                     <MarkerIcon
-                      v-if="it.m.marker && it.m.marker !== 'bar'"
-                      :shape="it.m.marker"
-                      :fill="markerFill(it.m.marker)"
+                      :shape="markerOf(it.m)"
+                      :fill="markerFillFor(it.m)"
                       :color="it.m.color || g.row.swimlane.color"
                       :size="settings.items.markerSize"
                       :stroke-width="settings.items.markerStroke"
@@ -176,17 +175,6 @@
                     <span v-if="!it.continuesLeft" class="bar-handle bar-handle-l" @pointerdown.stop="startDrag($event, it, 'resize-l')" @click.stop @dblclick.stop></span>
                     <span v-if="!it.continuesRight" class="bar-handle bar-handle-r" @pointerdown.stop="startDrag($event, it, 'resize-r')" @click.stop @dblclick.stop></span>
                   </template>
-                </div>
-
-                <!-- Baseline ghost (old/removed position) -->
-                <div
-                  v-else
-                  class="mk-item ghost"
-                  :class="[it.ghostType === 'removed' ? 'ghost-removed' : 'ghost-moved']"
-                  :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px' }"
-                  :title="it.ghostType === 'removed' ? 'Removed since baseline' : 'Baseline position (moved)'"
-                >
-                  <span class="mk-label">{{ it.gh.title }}</span>
                 </div>
               </template>
 
@@ -225,6 +213,10 @@
           <span class="tooltip-title">{{ tooltip.ms.title }}</span>
         </div>
         <div class="tooltip-fields">
+          <div v-if="tooltip.ms.assigneeId && memberName(tooltip.ms.assigneeId)" class="tooltip-field">
+            <span class="tf-label">Who</span>
+            <span class="tf-val">{{ memberName(tooltip.ms.assigneeId) }}</span>
+          </div>
           <div v-if="tooltip.ms.what" class="tooltip-field">
             <span class="tf-label">What</span>
             <span class="tf-val tf-clamp">{{ tooltip.ms.sourceSystem ? stripMarkdown(tooltip.ms.what) : tooltip.ms.what }}</span>
@@ -237,10 +229,6 @@
             <span class="tf-label">Where</span>
             <span class="tf-val">{{ tooltip.ms.how }}</span>
           </div>
-          <div v-if="tooltip.ms.who" class="tooltip-field">
-            <span class="tf-label">Who</span>
-            <span class="tf-val">{{ tooltip.ms.who }}</span>
-          </div>
           <div v-if="tooltip.ms.when" class="tooltip-field">
             <span class="tf-label">When</span>
             <span class="tf-val">{{ formatDate(tooltip.ms.when) }}</span>
@@ -248,16 +236,6 @@
           <div v-if="tooltip.ms.endDate" class="tooltip-field">
             <span class="tf-label">End</span>
             <span class="tf-val">{{ formatDate(tooltip.ms.endDate) }}</span>
-          </div>
-        </div>
-        <div v-if="tooltip.ms.scmUrl || tooltip.ms.sourceSystem" class="tooltip-scm">
-          <div v-if="tooltip.ms.scmUrl" class="scm-row">
-            <span class="scm-label">Git</span>
-            <ScmBadge :url="tooltip.ms.scmUrl" />
-          </div>
-          <div v-if="tooltip.ms.sourceSystem" class="scm-row">
-            <span class="scm-label">Source</span>
-            <span class="scm-synced"><Lock :size="12" :stroke-width="2.5" /> Synced — read-only</span>
           </div>
         </div>
         <div v-if="tooltip.ms.progress != null" class="tooltip-progress">
@@ -302,6 +280,14 @@
             </div>
           </div>
         </div>
+        <div v-if="!tooltip.ms.sourceSystem" class="tooltip-meta">
+          <div v-if="tooltip.ms.createdBy" class="tm-row"><User :size="11" :stroke-width="2.2" /><span>Added by {{ whoName(tooltip.ms.createdBy) }}<span v-if="tooltip.ms.createdAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.createdAt) }}</span></span></div>
+          <div v-if="tooltip.ms.updatedBy && (tooltip.ms.version || 1) > 1" class="tm-row"><Pencil :size="11" :stroke-width="2.2" /><span>Edited by {{ whoName(tooltip.ms.updatedBy) }}<span v-if="tooltip.ms.updatedAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.updatedAt) }}</span></span></div>
+          <button type="button" class="tm-row tm-ver-row tm-ver-btn" title="View version history" @click.stop="openHistory(tooltip.ms)">
+            <span class="tm-ver-label">Version</span>
+            <span class="tm-ver">v{{ tooltip.ms.version || 1 }} <History :size="11" /></span>
+          </button>
+        </div>
       </div>
     </Transition>
   </Teleport>
@@ -337,11 +323,10 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, baselineDiff, settings, groups, ui, riskIds, riskByItem, stripMarkdown } from '../stores/useAppStore.js'
-import { AlertTriangle, Lock } from 'lucide-vue-next'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, stripMarkdown, memberName, itemTypeByKey } from '../stores/useAppStore.js'
+import { AlertTriangle, Lock, User, Pencil, History } from 'lucide-vue-next'
 import MarkerIcon from './MarkerIcon.vue'
 import MaturityGlyph from './MaturityGlyph.vue'
-import ScmBadge from './ScmBadge.vue'
 
 function maturityTitle(level) {
   return level ? `Maturity: ${MATURITY_STAGES[level - 1]} (${level}/4)` : ''
@@ -378,7 +363,7 @@ const props = defineProps({
   zoom: { type: Number, default: 1 },
   readOnly: { type: Boolean, default: false },
 })
-const emit = defineEmits(['add-milestone', 'edit-milestone'])
+const emit = defineEmits(['add-milestone', 'edit-milestone', 'show-history'])
 const { getLinkedIds, dependsOnIds, dependentIds, updateMilestone } = useAppStore()
 
 // Months fill the available width at 100% zoom; the zoom control then widens the
@@ -422,6 +407,7 @@ const tableRows = computed(() => {
   const rows = []
   for (const sw of store.swimlanes) {
     if (sw.hidden) continue // consumer-hidden (e.g. a subscribed lane)
+    if (sw.sourceSystem) continue // mirrored Git repos live in Source Control, not on the timeline
     if (sw.subLanes.length === 0) {
       rows.push({ swimlane: sw, subLane: null, showLaneCell: true, rowspan: 1 })
     } else {
@@ -518,22 +504,22 @@ function estTextW(t) {
   }
   return Math.ceil(t.length * settings.items.fontSize * 0.58) // fallback (no DOM)
 }
+// The icon & its fill now come from the item's TYPE (single source of truth);
+// the Diamond is just a safety net for an item whose type can't be resolved.
 function markerOf(m) {
-  if (m.marker && m.marker !== 'bar') return m.marker
-  return m.kind === 'event' ? 'l:Flag' : 'l:Diamond'
+  const t = itemTypeByKey(m.typeKey || m.kind || 'milestone')
+  return (t && t.icon) || 'l:Diamond'
 }
-// Whether a marker shape should be rendered filled (from its legend definition).
-// Compare normalised so legacy names ("flag") match Lucide ids ("l:Flag").
-const SHAPE_ALIAS = { diamond: 'Diamond', circle: 'Circle', cone: 'Triangle', triangleDown: 'Triangle', flag: 'Flag', square: 'Square', star: 'Star', hexagon: 'Hexagon', pentagon: 'Pentagon' }
-function normShape(s) {
-  if (!s) return ''
-  return s.startsWith('l:') ? s.slice(2) : (SHAPE_ALIAS[s] || s)
+function markerFillFor(m) {
+  const t = itemTypeByKey(m.typeKey || m.kind || 'milestone')
+  return !(t && t.fill === false)
 }
-function markerFill(shape) {
-  const n = normShape(shape)
-  const m = settings.markers.find(x => normShape(x.shape) === n)
-  // Markers not present in the legend default to filled (e.g. seed 'diamond').
-  return m ? !!m.fill : true
+// Only timeline-family types belong on the timeline. Work-item / container types
+// (e.g. a "Task" backlog item) live in the Explorer and must never render here,
+// even if they somehow carry a lane + date.
+function isTimelineItem(m) {
+  const fam = itemTypeByKey(m.typeKey || m.kind || 'milestone')?.family
+  return !fam || fam === 'timeline-point' || fam === 'timeline-range'
 }
 function isBar(m) {
   return m.kind === 'event' && m.startDate && m.endDate && m.endDate > m.startDate
@@ -564,16 +550,28 @@ function barInfo(m) {
 }
 
 // ── Per-row layout: gather items, estimate extents, pack into lanes ───────────
-function rowItems(swId, subId) {
+function rowItems(row) {
+  const swId = row.swimlane.id
+  const subId = row.subLane?.id ?? null
+  const subIds = (row.swimlane.subLanes || []).map(s => s.id)
+  // The first sub-lane row also "catches" items whose sub-lane is null/unknown,
+  // so a freshly-created (e.g. approved-CR) item never silently disappears.
+  const isFirstSub = !!row.subLane && row.showLaneCell
   const items = []
-  for (const m of store.milestones) {
-    if (m.swimlaneId !== swId || (m.subLaneId ?? null) !== subId) continue
+  for (const m of viewItems.value) {
+    if (!isTimelineItem(m)) continue // off-timeline types (backlog/folder) never show here
+    if (m.swimlaneId !== swId) continue
+    const mSub = m.subLaneId ?? null
+    const here = subId === null
+      ? true
+      : (mSub === subId || (isFirstSub && (mSub === null || !subIds.includes(mSub))))
+    if (!here) continue
     if (isBar(m)) {
       const info = barInfo(m)
       if (!info) continue
       const width = Math.max(info.endX - info.startX, 16)
       const labelW = estTextW(m.title)
-      const hasMarker = !!(m.marker && m.marker !== 'bar')
+      const hasMarker = true // the type's icon always renders at the bar start now
       // Account for the icon AND the bar padding it needs around it.
       const iconW = hasMarker ? (settings.items.markerSize + settings.items.iconGap + settings.items.padding + 8) : 0
       // Badges that trail the title and also need room: the maturity glyph (a 2×2
@@ -605,20 +603,6 @@ function rowItems(swId, subId) {
         x0: x - 6 - pad,
         x1: x + 16 + labelW + trailW + pad,
       })
-    }
-  }
-
-  const d = baselineDiff.value
-  if (d.active) {
-    for (const gh of d.ghosts) {
-      const ghSw = gh.swimlaneId, ghSub = gh.subLaneId ?? null
-      if (ghSw !== swId || ghSub !== subId) continue
-      const ad = gh.when || `${gh.year}-${String(gh.month).padStart(2, '0')}-01`
-      { const w = ymOf(ad); if (!inWindow(w.y, w.mo)) continue }
-      const x = dateX(ad)
-      const labelW = estTextW(gh.title)
-      const pad = settings.items.padding
-      items.push({ key: 'g-' + gh.id, gh, type: 'ghost', ghostType: gh.ghostType, x, x0: x - 6 - pad, x1: x + 16 + labelW + pad })
     }
   }
 
@@ -688,7 +672,7 @@ function packLanes(items, mode, maxLanes) {
 
 const grid = computed(() =>
   tableRows.value.map(row => {
-    const { items, laneCount } = rowItems(row.swimlane.id, row.subLane?.id ?? null)
+    const { items, laneCount } = rowItems(row)
     // Tight rows: only as tall as needed; event rows a touch taller than milestone-only rows.
     const isEvent = items.some(i => i.type === 'bar')
     const laneH = isEvent ? eventLaneH.value : msLaneH.value
@@ -708,11 +692,6 @@ const maxLabelRight = computed(() => {
   }
   return m
 })
-
-function baselineClass(m) {
-  const s = baselineDiff.value.status[m.id]
-  return s === 'added' ? 'bl-added' : s === 'moved' ? 'bl-moved' : ''
-}
 
 // Index (0-based) of the column representing "now": the current month in
 // year-granularity, or the current day in month-granularity. -1 when off-screen.
@@ -984,6 +963,13 @@ function formatDate(dateStr) {
   const [y, m, day] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, day).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
 }
+// Attribution helpers: resolve a member id to a name and format an ISO timestamp.
+function whoName(id) { return id ? (memberName(id) || 'someone') : '' }
+function fmtStamp(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d) ? '' : d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+}
 function formatShort(dateStr) {
   if (!dateStr) return ''
   const [y, m, day] = dateStr.split('-').map(Number)
@@ -1007,6 +993,10 @@ function chipState(m) {
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
 const tooltip = reactive({ visible: false, ms: null, x: 0, chipTop: 0, chipBottom: 0, color: '' })
+
+// Version history opened from the tooltip's version row → handled at the app
+// level (a top-level overlay), so it reliably covers the whole screen.
+function openHistory(m) { emit('show-history', m); tooltip.visible = false }
 const tooltipStyle = computed(() => {
   const margin = 12
   const tipW = 360
@@ -1355,11 +1345,6 @@ thead th {
 .event-bar.chip-related { box-shadow: none; filter: brightness(0.98); }
 
 /* --- Baseline diff overlay (P2) --- */
-.bl-added { box-shadow: 0 0 0 2px #30D158; border-radius: 6px; }
-.bl-moved { box-shadow: 0 0 0 2px #FF9F0A; border-radius: 6px; }
-.ghost { opacity: 0.6; }
-.ghost .mk-label { color: var(--clr-text-3); border-bottom: 1px dashed var(--clr-border); }
-.ghost-removed .mk-label { text-decoration: line-through; color: #c0392b; }
 
 /* --- Dependency states --- */
 .chip-active {
@@ -1410,6 +1395,16 @@ thead th {
 .tp-bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(127,127,127,0.22); overflow: hidden; }
 .tp-fill { display: block; height: 100%; border-radius: 3px; transition: width 0.2s; }
 .tp-pct { font-size: 12px; font-weight: 600; color: var(--clr-text); font-variant-numeric: tabular-nums; flex-shrink: 0; min-width: 34px; text-align: right; }
+.tooltip-meta { padding: 8px 14px 10px; border-top: 1px solid var(--clr-border-light); display: flex; flex-direction: column; gap: 4px; }
+.tm-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--clr-text-3); }
+.tm-row svg { flex-shrink: 0; }
+.tm-when { color: var(--clr-text-3); }
+.tm-ver-row { justify-content: space-between; }
+.tm-ver-btn { width: 100%; background: none; border: none; cursor: pointer; padding: 1px 0; border-radius: 6px; transition: color 0.12s; }
+.tm-ver-btn:hover { color: var(--clr-text); }
+.tm-ver-btn:hover .tm-ver { background: rgba(0,113,227,0.12); color: var(--clr-accent); }
+.tm-ver-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.tm-ver { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 2px 8px; transition: background 0.12s, color 0.12s; }
 .tooltip-header {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 14px 10px;
@@ -1418,7 +1413,7 @@ thead th {
 .tooltip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .tooltip-title { font-size: 13px; font-weight: 600; color: var(--clr-text); letter-spacing: -0.1px; }
 .tooltip-fields { padding: 10px 14px 8px; display: flex; flex-direction: column; gap: 7px; }
-.tooltip-field { display: grid; grid-template-columns: 38px 1fr; gap: 8px; align-items: baseline; }
+.tooltip-field { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: baseline; }
 .tf-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); }
 .tf-val { font-size: 12.5px; color: var(--clr-text); line-height: 1.45; }
 .tf-clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }

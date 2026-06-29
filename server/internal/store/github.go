@@ -30,10 +30,10 @@ type GitHubSource struct {
 	IncludeTags     bool    `json:"includeTags"`
 	IncludeIssues   bool    `json:"includeIssues"`
 	IncludePRs      bool    `json:"includePrs"`
-	StableOnly      bool    `json:"stableOnly"`   // releases: skip pre-releases
-	StateFilter     string  `json:"stateFilter"`  // issues/PRs: all | open | closed
-	SinceDate       string  `json:"sinceDate"`    // only items dated on/after (YYYY-MM-DD)
-	MaxPerType      int     `json:"maxPerType"`   // keep the N most recent per type (0 = all)
+	StableOnly      bool    `json:"stableOnly"`  // releases: skip pre-releases
+	StateFilter     string  `json:"stateFilter"` // issues/PRs: all | open | closed
+	SinceDate       string  `json:"sinceDate"`   // only items dated on/after (YYYY-MM-DD)
+	MaxPerType      int     `json:"maxPerType"`  // keep the N most recent per type (0 = all)
 	LastSyncedAt    *string `json:"lastSyncedAt"`
 	LastStatus      string  `json:"lastStatus"`
 	CreatedAt       string  `json:"createdAt"`
@@ -461,14 +461,14 @@ type ghTagItem struct {
 }
 
 type ghIssue struct {
-	Number      int    `json:"number"`
-	Title       string `json:"title"`
-	State       string `json:"state"`
-	CreatedAt   string `json:"created_at"`
-	ClosedAt    string `json:"closed_at"`
-	HTMLURL     string `json:"html_url"`
-	Body        string `json:"body"`
-	User        struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
+	ClosedAt  string `json:"closed_at"`
+	HTMLURL   string `json:"html_url"`
+	Body      string `json:"body"`
+	User      struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	PullRequest *struct{} `json:"pull_request"` // present ⇒ it's a PR, not an issue
@@ -574,9 +574,15 @@ func ghReleases(ctx context.Context, cfg ghConfig) ([]Item, map[string]bool, err
 		if !ok {
 			continue
 		}
-		title := r.Name
-		if title == "" {
-			title = r.TagName
+		// Lead with the tag for a consistent "v1.2.0 — name" label; if the release
+		// name already contains the tag, use it as-is (avoids "v1.0.0 — v1.0.0 …").
+		title := r.TagName
+		if r.Name != "" {
+			if strings.Contains(r.Name, r.TagName) {
+				title = r.Name
+			} else {
+				title = r.TagName + " — " + r.Name
+			}
 		}
 		color := gitColorPtr(cfg.colors.ReleaseStable)
 		if r.Prerelease {

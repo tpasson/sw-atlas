@@ -23,7 +23,6 @@ func TestDefaultItemTypes(t *testing.T) {
 	want := map[string]string{
 		"milestone": FamilyTimelinePoint,
 		"event":     FamilyTimelineRange,
-		"point":     FamilyTimelinePoint,
 	}
 	for key, fam := range want {
 		it, ok := byKey[key]
@@ -60,27 +59,32 @@ func TestItemTypesRoundTrip(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	if list, err := s.ListItemTypes(ctx, DefaultWorkspaceID); err != nil || len(list) != 3 {
-		t.Fatalf("want 3 built-ins, got %d err=%v", len(list), err)
+	if list, err := s.ListItemTypes(ctx, DefaultWorkspaceID); err != nil || len(list) != 2 {
+		t.Fatalf("want 2 built-ins, got %d err=%v", len(list), err)
 	}
 
 	in := []ItemType{
 		{Key: "bug", Label: "Bug", Family: FamilyTimelinePoint, Icon: "l:Bug", Color: "#FF3B30",
 			Fields: []ItemField{{Key: "severity", Label: "Severity", Type: "select", Options: []string{"low", "high"}}}},
-		{Key: "milestone", Label: "Hijack"}, // built-in key → dropped
-		{Key: "", Label: "no key"},           // empty key → dropped
+		// built-in override: rename + restyle + add a field (key/family stay fixed)
+		{Key: "milestone", Label: "Gate", Family: FamilyTimelineRange, Icon: "l:Star",
+			Fields: []ItemField{{Key: "owner", Label: "Owner", Type: "text"}}},
+		{Key: "", Label: "no key"}, // empty key → dropped
 	}
 	if err := s.SetItemTypes(ctx, DefaultWorkspaceID, in); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	list, _ := s.ListItemTypes(ctx, DefaultWorkspaceID)
-	if len(list) != 4 {
-		t.Fatalf("want 3 built-ins + 1 custom, got %d", len(list))
+	if len(list) != 3 {
+		t.Fatalf("want 2 built-ins + 1 custom, got %d", len(list))
 	}
-	var bug *ItemType
+	var bug, ms *ItemType
 	for i := range list {
-		if list[i].Key == "bug" {
+		switch list[i].Key {
+		case "bug":
 			bug = &list[i]
+		case "milestone":
+			ms = &list[i]
 		}
 	}
 	if bug == nil || bug.Builtin {
@@ -88,5 +92,18 @@ func TestItemTypesRoundTrip(t *testing.T) {
 	}
 	if len(bug.Fields) != 1 || bug.Fields[0].Key != "severity" || len(bug.Fields[0].Options) != 2 {
 		t.Errorf("bug fields wrong: %+v", bug.Fields)
+	}
+	// Built-in override applies label/icon/fields, but key & family stay authoritative.
+	if ms == nil || !ms.Builtin {
+		t.Fatalf("built-in milestone missing: %+v", ms)
+	}
+	if ms.Label != "Gate" || ms.Icon != "l:Star" {
+		t.Errorf("milestone override not applied: %+v", ms)
+	}
+	if ms.Family != FamilyTimelinePoint {
+		t.Errorf("milestone family must stay timeline-point, got %q", ms.Family)
+	}
+	if len(ms.Fields) != 1 || ms.Fields[0].Key != "owner" {
+		t.Errorf("milestone fields not applied: %+v", ms.Fields)
 	}
 }

@@ -23,9 +23,10 @@ type ItemField struct {
 type ItemType struct {
 	Key     string      `json:"key"`
 	Label   string      `json:"label"`
-	Family  string      `json:"family"` // see the Family* constants
-	Icon    string      `json:"icon"`   // lucide marker id (e.g. "l:Diamond")
-	Color   string      `json:"color"`  // "" = inherit the lane colour
+	Family  string      `json:"family"`         // see the Family* constants
+	Icon    string      `json:"icon"`           // lucide marker id (e.g. "l:Diamond")
+	Color   string      `json:"color"`          // "" = inherit the lane colour
+	Fill    *bool       `json:"fill,omitempty"` // nil/true = filled icon, false = outline
 	Fields  []ItemField `json:"fields"`
 	Builtin bool        `json:"builtin"`
 }
@@ -54,7 +55,6 @@ func DefaultItemTypes() []ItemType {
 	return []ItemType{
 		{Key: "milestone", Label: "Milestone", Family: FamilyTimelinePoint, Icon: "l:Diamond", Fields: []ItemField{}, Builtin: true},
 		{Key: "event", Label: "Event", Family: FamilyTimelineRange, Icon: "l:Flag", Fields: []ItemField{}, Builtin: true},
-		{Key: "point", Label: "Point", Family: FamilyTimelinePoint, Icon: "l:Circle", Fields: []ItemField{}, Builtin: true},
 	}
 }
 
@@ -83,29 +83,79 @@ func (s *Store) customItemTypes(ctx context.Context, ws string) ([]ItemType, err
 	return types, nil
 }
 
-// ListItemTypes returns the workspace's item-type catalog: built-ins first, then
-// the user-defined custom types.
+// ListItemTypes returns the workspace's item-type catalog: built-ins first (with
+// any icon/colour/label/fill overrides applied), then the user-defined types.
 func (s *Store) ListItemTypes(ctx context.Context, ws string) ([]ItemType, error) {
-	out := DefaultItemTypes()
-	custom, err := s.customItemTypes(ctx, ws)
+	stored, err := s.customItemTypes(ctx, ws)
 	if err != nil {
-		return out, err
+		return DefaultItemTypes(), err
 	}
-	for _, t := range custom {
-		t.Builtin = false
-		out = append(out, t)
+	builtin := builtinTypeKeys()
+	overrides := map[string]ItemType{}
+	custom := []ItemType{}
+	for _, t := range stored {
+		if t.Key == "" {
+			continue
+		}
+		if builtin[t.Key] {
+			overrides[t.Key] = t
+		} else {
+			t.Builtin = false
+			custom = append(custom, t)
+		}
 	}
+	out := []ItemType{}
+	for _, d := range DefaultItemTypes() {
+		if ov, ok := overrides[d.Key]; ok {
+			if ov.Label != "" {
+				d.Label = ov.Label
+			}
+			if ov.Icon != "" {
+				d.Icon = ov.Icon
+			}
+			d.Color = ov.Color
+			d.Fill = ov.Fill
+			if ov.Fields != nil {
+				d.Fields = ov.Fields
+			}
+		}
+		out = append(out, d)
+	}
+	out = append(out, custom...)
 	return out, nil
 }
 
-// SetItemTypes persists the custom (non-built-in) types for a workspace. Built-in
-// keys and entries with an empty key or unknown family are dropped.
+// SetItemTypes persists the type catalog for a workspace. Custom types are stored
+// in full; for built-ins only icon/colour/label/fill are overridable (their key,
+// family and field set stay authoritative from DefaultItemTypes).
 func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) error {
 	builtin := builtinTypeKeys()
+	defaults := map[string]ItemType{}
+	for _, d := range DefaultItemTypes() {
+		defaults[d.Key] = d
+	}
 	clean := []ItemType{}
 	seen := map[string]bool{}
 	for _, t := range types {
-		if t.Key == "" || builtin[t.Key] || seen[t.Key] {
+		if t.Key == "" || seen[t.Key] {
+			continue
+		}
+		seen[t.Key] = true
+		if builtin[t.Key] {
+			d := defaults[t.Key]
+			label := t.Label
+			if label == "" {
+				label = d.Label
+			}
+			icon := t.Icon
+			if icon == "" {
+				icon = d.Icon
+			}
+			fields := t.Fields
+			if fields == nil {
+				fields = []ItemField{}
+			}
+			clean = append(clean, ItemType{Key: d.Key, Label: label, Family: d.Family, Icon: icon, Color: t.Color, Fill: t.Fill, Fields: fields, Builtin: true})
 			continue
 		}
 		if !validFamily(t.Family) {
@@ -115,7 +165,6 @@ func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) e
 		if t.Fields == nil {
 			t.Fields = []ItemField{}
 		}
-		seen[t.Key] = true
 		clean = append(clean, t)
 	}
 	b, _ := json.Marshal(clean)

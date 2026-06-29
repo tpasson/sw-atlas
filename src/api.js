@@ -131,6 +131,16 @@ const realApi = {
   getBaseline: (id) => req('GET', `/baselines/${id}`),
   createBaseline: (name, note = '') => req('POST', '/baselines', { name, note }),
   deleteBaseline: (id) => req('DELETE', `/baselines/${id}`),
+
+  // item version history (attribution + revisions)
+  listRevisions: (id) => req('GET', `/items/${id}/revisions`),
+  getRevision: (id, version) => req('GET', `/items/${id}/revisions/${version}`),
+
+  // change requests (propose → owner approves/rejects → applied to the plan)
+  listChangeRequests: () => req('GET', '/change-requests'),
+  createChangeRequest: (data) => req('POST', '/change-requests', data),
+  approveChangeRequest: (id, note = '') => req('POST', `/change-requests/${id}/approve`, { note }),
+  rejectChangeRequest: (id, note = '') => req('POST', `/change-requests/${id}/reject`, { note }),
 }
 
 // The static GitHub Pages build (VITE_DEMO=1) runs without a backend: swap in

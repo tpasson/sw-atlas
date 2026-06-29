@@ -333,7 +333,7 @@ func (s *Store) ResolveScopePlan(ctx context.Context, ws, scopeID, detailLevel s
 	p := Plan{Swimlanes: []Swimlane{}, Milestones: []Item{}, Links: []Link{}}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+itemColumns+` FROM item
+		`SELECT `+itemReadColumns+` FROM item
 		 WHERE workspace_id = $2
 		 AND (
 		     swimlane_id IN (SELECT swimlane_id FROM share_scope_lane WHERE scope_id = $1)

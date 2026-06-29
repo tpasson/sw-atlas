@@ -47,7 +47,8 @@ const GRAN_KEY = 'atlas-view-gran'
 const MONTH_KEY = 'atlas-view-month'
 const VIEW_KEY = 'atlas-view-mode'
 function initialView() {
-  return localStorage.getItem(VIEW_KEY) === 'explorer' ? 'explorer' : 'timeline'
+  const v = localStorage.getItem(VIEW_KEY)
+  return v === 'explorer' || v === 'scm' || v === 'cr' ? v : 'timeline'
 }
 function initialYear() {
   const v = parseInt(localStorage.getItem(YEAR_KEY) || '', 10)
@@ -66,7 +67,7 @@ export const store = reactive({
   year: initialYear(),
   granularity: initialGranularity(), // 'year' (12 month columns) | 'month' (day columns)
   viewMonth: initialMonth(),         // 1..12, the focused month when granularity === 'month'
-  view: initialView(),               // 'timeline' | 'explorer'
+  view: initialView(),               // 'timeline' | 'explorer' | 'scm'
   swimlanes: [],
   milestones: [],
   links: [],
@@ -105,9 +106,15 @@ export async function loadWorkspaceMembers() {
   try { workspace.members = await api.workspaceMembers() } catch { workspace.members = [] }
 }
 
-// Can the current user edit the viewed workspace (owner or editor member)?
+// Can the current user edit CONTENT in the viewed workspace (owner or editor)?
 export function canEditWorkspace() {
   return session.authenticated && (workspace.role === 'owner' || workspace.role === 'editor')
+}
+
+// Can the current user administer the workspace CONFIGURATION (types, display,
+// sources, sharing, change-request decisions)? Owner only.
+export function canAdminWorkspace() {
+  return session.authenticated && workspace.role === 'owner'
 }
 
 // Appearance settings are stored per-workspace on the server (so a plan looks the
@@ -284,9 +291,9 @@ watch(settings, (v) => {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ }
     return
   }
-  // Appearance is server-backed, but only for your OWN plan — viewing someone
-  // else's plan loads their settings and must not overwrite yours.
-  if (canEditWorkspace()) {
+  // Appearance is server-backed and owner-managed: only the workspace owner
+  // persists it (editors/viewers see the owner's design, never overwrite it).
+  if (canAdminWorkspace()) {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ } // cache for instant first paint
     clearTimeout(uiSaveTimer)
     uiSaveTimer = setTimeout(saveUISettings, 600)
@@ -321,7 +328,7 @@ export async function loadUISettings() {
   let r
   try { r = await api.getUISettings() } catch { return }
   if (r && r.settings) mergeSettings(r.settings)
-  else if (canEditWorkspace()) saveUISettings()
+  else if (canAdminWorkspace()) saveUISettings()
   else resetAppearance()
 }
 
@@ -378,6 +385,32 @@ export const baselines = reactive({
   activeItems: [], // snapshot items of the active baseline
 })
 
+// Change requests: proposed changes pending the owner's decision.
+export const changeRequests = reactive({ list: [] })
+export const pendingCRCount = computed(() => changeRequests.list.filter(c => c.status === 'pending').length)
+
+export async function loadChangeRequests() {
+  if (!session.authenticated) { changeRequests.list = []; return }
+  try { changeRequests.list = (await api.listChangeRequests()) || [] }
+  catch { changeRequests.list = [] } // not a member / no access
+}
+// Propose an edit to an existing item (payload = the item's proposed fields).
+export async function proposeChange(targetItemId, payload, note = '') {
+  await api.createChangeRequest({ kind: 'edit', targetItemId, payload, note })
+  await loadChangeRequests()
+}
+// Propose creating a brand-new item (payload includes a generated id).
+export async function proposeCreate(payload, note = '') {
+  await api.createChangeRequest({ kind: 'create', payload, note })
+  await loadChangeRequests()
+}
+export async function decideChangeRequest(id, approve, note = '') {
+  if (approve) await api.approveChangeRequest(id, note)
+  else await api.rejectChangeRequest(id, note)
+  await loadChangeRequests()
+  if (approve) await loadPlan() // an approved change is now live
+}
+
 const _bnorm = v => v ?? ''
 
 export const baselineDiff = computed(() => {
@@ -403,21 +436,32 @@ export const baselineDiff = computed(() => {
   return out
 })
 
+// The items the timeline actually renders: the live plan normally, or — when a
+// baseline is selected — that baseline's full snapshot, so you see the plan as it
+// stood then (read-only) instead of the live plan with diff overlays.
+export const viewItems = computed(() => baselines.activeId ? baselines.activeItems : store.milestones)
+
 // ── Dependency risk ("order violated") ───────────────────────────────────────
 // A link {a, b} means "a depends on b" (b is a prerequisite / sub-milestone of a).
-// An item is at risk when one of its prerequisites is scheduled strictly AFTER it.
-const itemDate = (m) => m.when || m.startDate || `${m.year}-${String(m.month).padStart(2, '0')}-01`
+// An item is at risk when a prerequisite FINISHES after the item is anchored.
+// Date logic is purely field-based (independent of type/icon): a point uses its
+// single date; a range uses its start as its anchor and its end as completion.
+const fallbackDate = (m) => `${m.year}-${String(m.month).padStart(2, '0')}-01`
+// When the item needs its prerequisites ready (its anchor / start).
+const dueDate = (m) => m.when || m.startDate || fallbackDate(m)
+// When the item itself is complete (a range only counts as done at its end).
+const doneDate = (m) => m.when || m.endDate || m.startDate || fallbackDate(m)
 export const riskWarnings = computed(() => {
   const byId = {}
   for (const m of store.milestones) byId[m.id] = m
   const out = []
   for (const m of store.milestones) {
-    const md = itemDate(m)
+    const md = dueDate(m)
     const late = []
     for (const l of store.links) {
       if (l.a !== m.id || (l.rel || 'depends-on') !== 'depends-on') continue
       const p = byId[l.b]
-      if (p && itemDate(p) > md) late.push(p)
+      if (p && doneDate(p) > md) late.push(p)
     }
     if (late.length) out.push({ item: m, lateDeps: late })
   }
@@ -570,6 +614,7 @@ export async function initApp() {
     await loadItemTypes()
     await loadWorkspaceMembers()
     await loadUISettings()
+    await loadChangeRequests()
   }
   session.ready = true
   if (IS_DEMO && !session.error) syncSeededDemoSources()
@@ -641,7 +686,7 @@ export function useAppStore() {
   function nextYear() { store.year++; persistYear() }
   function setGranularity(g) { store.granularity = g === 'month' ? 'month' : 'year'; persistYear() }
   function setView(v) {
-    store.view = v === 'explorer' ? 'explorer' : 'timeline'
+    store.view = v === 'explorer' || v === 'scm' || v === 'cr' ? v : 'timeline'
     try { localStorage.setItem(VIEW_KEY, store.view) } catch { /* ignore */ }
   }
   function prevMonth() {
@@ -743,12 +788,21 @@ export function useAppStore() {
   function addMilestone(data) {
     const m = { id: uid(), kind: 'milestone', marker: 'l:Flag', ...data }
     store.milestones.push(m)
-    api.createItem(m).catch(onWriteError)
+    // Merge the server's canonical row (version, createdBy, timestamps).
+    api.createItem(m).then(created => { if (created && created.id) Object.assign(m, created) }).catch(onWriteError)
     return m
   }
   function updateMilestone(id, data) {
     const m = store.milestones.find(m => m.id === id)
-    if (m) Object.assign(m, data)
+    if (m) {
+      Object.assign(m, data)
+      // Optimistic attribution: the server bumps the version and records us as
+      // the editor — mirror that locally so it shows without a reload.
+      m.version = (m.version || 1) + 1
+      const me = workspace.members.find(w => w.username === session.username)
+      if (me) m.updatedBy = me.userId
+      m.updatedAt = new Date().toISOString()
+    }
     api.updateItem(id, m || data).catch(onWriteError)
   }
   function deleteMilestone(id) {
