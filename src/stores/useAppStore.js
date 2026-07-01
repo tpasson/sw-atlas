@@ -300,18 +300,16 @@ let uiSaveTimer = null
 function saveUISettings() {
   const v = JSON.parse(JSON.stringify(settings))
   delete v.theme // theme stays local
-  api.setUISettings(v).catch(() => { /* best-effort */ })
+  api.setInstanceUISettings(v).catch(() => { /* best-effort */ })
 }
 watch(settings, (v) => {
   try { localStorage.setItem(THEME_KEY, v.theme) } catch { /* ignore */ }
-  if (IS_DEMO) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ }
-    return
-  }
-  // Appearance is server-backed and owner-managed: only the workspace owner
-  // persists it (editors/viewers see the owner's design, never overwrite it).
-  if (canAdminWorkspace()) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ } // cache for instant first paint
+  // Cache the appearance locally for instant first paint (everyone).
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(v)) } catch { /* ignore */ }
+  if (IS_DEMO) return
+  // Display is now GLOBAL (instance-wide): only a SITE ADMIN persists it, and only
+  // from the Admin panel. Everyone else just renders with the admin's config.
+  if (session.role === 'admin') {
     clearTimeout(uiSaveTimer)
     uiSaveTimer = setTimeout(saveUISettings, 600)
   }
@@ -337,15 +335,15 @@ function resetAppearance() {
   for (const k of Object.keys(d)) { if (k !== 'theme') settings[k] = d[k] }
 }
 
-// loadUISettings loads the VIEWED workspace's appearance from the server. With
-// none set: your own (localStorage/defaults) appearance migrates up; another
-// user's plan with no custom settings falls back to defaults.
+// loadUISettings loads the GLOBAL (instance-wide) Display config from the server;
+// every dashboard renders with it. If none is set yet, a site admin seeds it from
+// the current defaults; everyone else falls back to defaults.
 export async function loadUISettings() {
   if (IS_DEMO) return
   let r
-  try { r = await api.getUISettings() } catch { return }
+  try { r = await api.getInstanceUISettings() } catch { return }
   if (r && r.settings) mergeSettings(r.settings)
-  else if (canAdminWorkspace()) saveUISettings()
+  else if (session.role === 'admin') saveUISettings()
   else resetAppearance()
 }
 
@@ -628,6 +626,9 @@ export async function initApp() {
   session.firstName = me.firstName || ''
   session.lastName = me.lastName || ''
   workspace.ownSlug = me.workspace || ''
+
+  // Global Display config is instance-wide — load it once, regardless of view.
+  loadUISettings()
 
   // The bare root (outside the demo) is the discovery landing page, not a plan.
   if (!IS_DEMO && !workspaceSlugFromUrl()) {

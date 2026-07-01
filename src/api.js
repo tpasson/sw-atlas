@@ -78,6 +78,11 @@ const realApi = {
   setGroups: (groups) => req('PUT', '/settings/groups', { groups }),
   getUISettings: () => req('GET', '/settings/ui'),
   setUISettings: (settings) => req('PUT', '/settings/ui', { settings }),
+  // Global (instance-wide) Display config — read by all, written by site admins.
+  getInstanceUISettings: () => req('GET', '/instance/ui-settings'),
+  setInstanceUISettings: (settings) => req('PUT', '/instance/ui-settings', { settings }),
+  getServerInfo: () => req('GET', '/instance/server'),
+  setServerSettings: (settings) => req('PUT', '/instance/server', { settings }),
   getGitColors: () => req('GET', '/settings/git-colors'),
   setGitColors: (colors) => req('PUT', '/settings/git-colors', colors),
 

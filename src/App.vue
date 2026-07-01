@@ -1,15 +1,17 @@
 <template>
   <div class="app">
-    <LandingPage v-if="workspace.mode === 'landing'" @login="loginOpen = true" @logout="onLogout" @about="aboutOpen = true" />
-
-    <div v-else class="app-shell">
+    <div class="app-shell">
     <ActivityRail
       @manage="openManage"
+      @settings="generalOpen = true"
+      @admin="adminOpen = true"
       @about="aboutOpen = true"
       @login="loginOpen = true"
       @logout="onLogout"
     />
     <div class="app-main">
+    <LandingPage v-if="workspace.mode === 'landing'" @about="aboutOpen = true" />
+    <template v-else>
     <TheHeader
       :year="store.year"
       :zoom="zoom"
@@ -79,6 +81,7 @@
 
     <FacetFilter v-if="session.ready && !session.error && store.view === 'timeline'" />
     <GroupLegend v-if="session.ready && !session.error && store.view === 'timeline'" :read-only="readOnly" />
+    </template>
     </div>
     </div>
 
@@ -104,6 +107,14 @@
     </Transition>
 
     <Transition name="modal">
+      <GeneralSettingsModal v-if="generalOpen" @close="generalOpen = false" />
+    </Transition>
+
+    <Transition name="modal">
+      <AdminModal v-if="adminOpen" @close="adminOpen = false" />
+    </Transition>
+
+    <Transition name="modal">
       <LoginModal v-if="loginOpen" @close="loginOpen = false" />
     </Transition>
 
@@ -126,6 +137,8 @@ import SourceControlView from './components/SourceControlView.vue'
 import ChangeRequestsView from './components/ChangeRequestsView.vue'
 import MilestoneModal from './components/MilestoneModal.vue'
 import ManageModal from './components/ManageModal.vue'
+import GeneralSettingsModal from './components/GeneralSettingsModal.vue'
+import AdminModal from './components/AdminModal.vue'
 import LoginModal from './components/LoginModal.vue'
 import GroupLegend from './components/GroupLegend.vue'
 import FacetFilter from './components/FacetFilter.vue'
@@ -137,6 +150,8 @@ const { prevYear, nextYear, logout } = useAppStore()
 
 const manageOpen = ref(false)
 const manageTab = ref('areas')
+const generalOpen = ref(false)
+const adminOpen = ref(false)
 // Settings can be opened straight onto a specific tab (e.g. "Members" from the
 // project switcher's "Invite people…").
 function openManage(tab) {

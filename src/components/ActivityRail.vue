@@ -1,11 +1,12 @@
 <template>
   <!-- VS-Code-style activity rail: views on top, account/settings/theme bottom. -->
   <nav class="rail">
-    <div class="rail-group">
-      <button class="rail-btn" title="All plans" @click="goHome">
+    <div class="rail-top">
+      <button class="rail-btn" :class="{ on: !inPlan }" title="All plans" @click="goHome">
         <Home :size="20" />
       </button>
-      <div class="rail-divider"></div>
+    </div>
+    <div v-if="inPlan" class="rail-group rail-views">
       <button class="rail-btn" :class="{ on: store.view === 'timeline' }" title="Timeline" @click="setView('timeline')">
         <CalendarDays :size="20" />
       </button>
@@ -19,6 +20,9 @@
         <ClipboardCheck :size="20" />
         <span v-if="pendingCRCount" class="rail-badge">{{ pendingCRCount > 9 ? '9+' : pendingCRCount }}</span>
       </button>
+      <button v-if="canEdit" class="rail-btn" title="Project settings" @click="$emit('manage')">
+        <SlidersHorizontal :size="20" />
+      </button>
     </div>
 
     <div class="rail-group rail-bottom">
@@ -27,8 +31,12 @@
         <Moon v-else :size="19" />
       </button>
 
-      <button v-if="canEdit" class="rail-btn" title="Settings" @click="$emit('manage')">
+      <button v-if="session.authenticated" class="rail-btn" title="Settings" @click="$emit('settings')">
         <Settings :size="19" />
+      </button>
+
+      <button v-if="session.role === 'admin'" class="rail-btn" title="Admin" @click="$emit('admin')">
+        <ServerCog :size="19" />
       </button>
 
       <div v-if="session.authenticated" class="rail-user" ref="userRef">
@@ -48,15 +56,16 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Home, CalendarDays, LayoutGrid, GitPullRequest, ClipboardCheck, Sun, Moon, Settings, KeyRound } from 'lucide-vue-next'
-import { store, session, settings, toggleTheme, useAppStore, canEditWorkspace, pendingCRCount } from '../stores/useAppStore.js'
+import { Home, CalendarDays, LayoutGrid, GitPullRequest, ClipboardCheck, Sun, Moon, Settings, SlidersHorizontal, ServerCog, KeyRound } from 'lucide-vue-next'
+import { store, session, settings, workspace, toggleTheme, useAppStore, canEditWorkspace, pendingCRCount } from '../stores/useAppStore.js'
 
-defineEmits(['manage', 'login', 'logout', 'about'])
+defineEmits(['manage', 'settings', 'admin', 'login', 'logout', 'about'])
 
 const { setView } = useAppStore()
 // The discovery directory (all plans) lives at the bare root.
 function goHome() { window.location.assign('/') }
 const canEdit = computed(() => canEditWorkspace())
+const inPlan = computed(() => workspace.mode === 'plan')
 const initials = computed(() => (session.username || '?').trim().charAt(0).toUpperCase() || '?')
 
 const userOpen = ref(false)
@@ -72,14 +81,21 @@ onUnmounted(() => { document.removeEventListener('click', onDocClick); document.
   width: 52px; flex-shrink: 0;
   background: var(--clr-header);
   display: flex; flex-direction: column; align-items: center;
-  padding: 10px 0; gap: 6px;
+  padding: 0; gap: 0;
   position: sticky; top: 0; height: 100vh;
   box-shadow: 1px 0 0 rgba(255,255,255,0.06);
   z-index: 101;
 }
+/* Home sits in a zone the height of the header (so it lines up vertically with the
+   brand), but the rail stays a clean icon column — no horizontal divider that
+   would clash with the content's header/table lines. */
+.rail-top {
+  height: 64px; flex-shrink: 0; width: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
 .rail-group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.rail-bottom { margin-top: auto; }
-.rail-divider { width: 24px; height: 1px; background: rgba(255,255,255,0.12); margin: 1px 0; }
+.rail-views { padding-top: 4px; }
+.rail-bottom { margin-top: auto; padding-bottom: 10px; }
 
 .rail-btn {
   width: 40px; height: 40px; border-radius: 10px;

@@ -29,6 +29,7 @@ type Server struct {
 	store     *store.Store
 	auth      *auth.Auth
 	staticDir string
+	startedAt time.Time
 }
 
 // rateLimiter is a tiny in-memory sliding-window limiter (per client IP), used to
@@ -93,7 +94,7 @@ func maxBodyBytes(n int64) func(http.Handler) http.Handler {
 }
 
 func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
-	s := &Server{store: st, auth: au, staticDir: staticDir}
+	s := &Server{store: st, auth: au, staticDir: staticDir, startedAt: time.Now()}
 
 	// Minimal container images (alpine) ship no /etc/mime.types, so Go can't map
 	// .svg → image/svg+xml and the favicon is served as text/xml (browsers then
@@ -109,6 +110,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		r.With(loginRL.limit).Post("/login", s.login)
 		r.Post("/logout", s.logout)
 		r.Get("/me", s.me)
+		r.Get("/instance/ui-settings", s.getInstanceUISettings) // global Display config (public read)
 
 		// Public discovery directory for the landing page (no auth).
 		r.Get("/explore", s.explore)
@@ -239,6 +241,10 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		// User administration: admins only.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
+			// Instance/admin config: global Display + server settings/stats.
+			r.Put("/instance/ui-settings", s.setInstanceUISettings)
+			r.Get("/instance/server", s.getServerInfo)
+			r.Put("/instance/server", s.setServerSettings)
 			r.Get("/users", s.listUsers)
 			r.Post("/users", s.createUser)
 			r.Put("/users/{id}/role", s.setUserRole)

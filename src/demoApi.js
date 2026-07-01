@@ -230,6 +230,10 @@ export const demoApi = {
   changeOwnPassword: () => ok(),
   renameOwnUsername: () => Promise.reject(new Error('Renaming is unavailable in the demo')),
   updateOwnProfile: () => ok(),
+  getInstanceUISettings: () => ok({ settings: null }),
+  setInstanceUISettings: () => ok(),
+  getServerInfo: () => ok({ settings: {}, stats: { version: 'demo', uptimeSeconds: 0, users: 0, workspaces: 0, items: 0 } }),
+  setServerSettings: () => ok(),
 
   // users — not available in the backend-less demo (admin UI stays hidden)
   listUsers: () => ok({ users: [] }),

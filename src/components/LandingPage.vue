@@ -22,15 +22,7 @@
         </div>
 
         <div class="header-right">
-          <button class="hdr-icon-btn" :title="theme === 'dark' ? 'Light mode' : 'Dark mode'" @click="toggleTheme">
-            <Sun v-if="theme === 'dark'" :size="16" />
-            <Moon v-else :size="16" />
-          </button>
-          <template v-if="session.authenticated">
-            <button v-if="workspace.ownSlug" class="btn-manage" @click="goTo(workspace.ownSlug)">My plan</button>
-            <button class="btn-manage" @click="$emit('logout')">Log out</button>
-          </template>
-          <button v-else class="btn-manage" @click="$emit('login')">Log in</button>
+          <button v-if="session.authenticated && workspace.ownSlug" class="btn-manage" @click="goTo(workspace.ownSlug)">My plan</button>
         </div>
       </div>
     </header>
@@ -60,19 +52,18 @@
 
 <script setup>
 import { ref, computed, onMounted, h } from 'vue'
-import { Sun, Moon, User } from 'lucide-vue-next'
+import { User } from 'lucide-vue-next'
 import { api } from '../api.js'
-import { session, workspace, settings, toggleTheme, openProfile, personName } from '../stores/useAppStore.js'
+import { session, workspace, openProfile, personName } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 
-defineEmits(['login', 'logout', 'about'])
+defineEmits(['about'])
 
 const version = APP_VERSION
 
 const plans = ref([])
 const ready = ref(false)
 const error = ref(null)
-const theme = computed(() => settings.theme)
 const isAdmin = computed(() => session.role === 'admin')
 
 const featured = computed(() => plans.value.filter(w => w.featured))
@@ -146,7 +137,7 @@ const PlanCard = {
 </script>
 
 <style scoped>
-.lp { min-height: 100vh; display: flex; flex-direction: column; background: var(--clr-bg); }
+.lp { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--clr-bg); overflow-y: auto; }
 
 /* Header — identical to TheHeader.vue so the landing matches the app. */
 .header { background: var(--clr-header); position: sticky; top: 0; z-index: 100;
