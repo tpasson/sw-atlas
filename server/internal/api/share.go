@@ -123,7 +123,7 @@ func (s *Server) createShareToken(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := randomToken()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 	tok, err := s.store.CreateShareToken(r.Context(), s.currentWorkspace(r), uuid.NewString(), chi.URLParam(r, "id"), hashToken(raw), in.Label, exp)
@@ -180,7 +180,7 @@ func (s *Server) sharedFeed(w http.ResponseWriter, r *http.Request) {
 	env := newEnvelope("share", plan)
 	body, err := json.Marshal(env)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 	sum := sha256.Sum256(body)

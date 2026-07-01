@@ -78,7 +78,10 @@ export const store = reactive({
 export const session = reactive({
   authenticated: false,
   username: null,
-  role: null, // 'admin' | 'editor' | null
+  role: null, // 'admin' | 'user' | null
+  email: '',
+  firstName: '',
+  lastName: '',
   publicReadEnabled: true,
   ready: false,
   error: null, // 'auth-required' | 'private' | 'not-found' | message string | null
@@ -98,10 +101,24 @@ export const workspace = reactive({
   members: [],         // roster of the viewed workspace: [{userId, username, role}]
 })
 
+// A person's display name: "First Last" if set, else the username.
+export function personName(p) {
+  if (!p) return ''
+  const n = `${p.firstName || ''} ${p.lastName || ''}`.trim()
+  return n || p.username || ''
+}
+// Initials from the real name if present, else the username.
+export function personInitials(p) {
+  if (!p) return ''
+  const f = (p.firstName || '').trim(), l = (p.lastName || '').trim()
+  if (f || l) return ((f[0] || '') + (l[0] || '')).toUpperCase()
+  return ((p.username || '').trim()[0] || '?').toUpperCase()
+}
+
 // Resolve an assignee id to its member / initials / name (for X1 avatars).
 export function memberById(id) { return id ? workspace.members.find(m => m.userId === id) || null : null }
-export function memberInitials(id) { const m = memberById(id); return m ? (m.username.trim()[0] || '?').toUpperCase() : '' }
-export function memberName(id) { return memberById(id)?.username || '' }
+export function memberInitials(id) { return personInitials(memberById(id)) }
+export function memberName(id) { return personName(memberById(id)) }
 export async function loadWorkspaceMembers() {
   try { workspace.members = await api.workspaceMembers() } catch { workspace.members = [] }
 }
@@ -129,7 +146,7 @@ const SETTINGS_DEFAULTS = {
   weekNumbers: { enabled: true },
   monthLines: { enabled: false, color: '#E5E5EA', opacity: 1, width: 1 },
   weekLines: { enabled: true, color: '#8E8E93', opacity: 0.1, width: 1 },
-  items: { fontSize: 14, fontWeight: 700, padding: 4, margin: 6, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 18, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13, maturitySize: 5, density: 'stack', densityRows: 3 },
+  items: { fontSize: 14, fontWeight: 700, padding: 4, margin: 6, radius: 10, border: 2, labelOffset: 0, iconGap: 6, labelBuffer: 20, borderMode: 'hover', markerSize: 14, markerStroke: 2, eventOpacity: 0.13, maturitySize: 5, density: 'stack', densityRows: 3 },
   markers: [
     { shape: 'l:Diamond', label: 'Milestone', fill: true },
     { shape: 'l:Circle', label: 'Circle', fill: true },
@@ -371,6 +388,17 @@ export const swatchColors = computed(() => {
 export const groups = reactive({ list: [] })
 export const ui = reactive({ hoverGroupId: null, focusItemId: null, highlightIds: null })
 
+// Global user-profile popover: any clickable user (owner, member, assignee) calls
+// openProfile(person, event); a single <UserProfilePopover> renders it at the click.
+export const profilePopover = reactive({ person: null, x: 0, y: 0 })
+export function openProfile(person, ev) {
+  if (!person) return
+  profilePopover.person = person
+  profilePopover.x = ev ? ev.clientX : 0
+  profilePopover.y = ev ? ev.clientY : 0
+}
+export function closeProfile() { profilePopover.person = null }
+
 // Item-type registry (built-ins + per-workspace custom types). Drives the type
 // picker + the dynamic field set in the item modal.
 export const itemTypes = reactive({ list: [] })
@@ -456,6 +484,7 @@ export const riskWarnings = computed(() => {
   for (const m of store.milestones) byId[m.id] = m
   const out = []
   for (const m of store.milestones) {
+    if (m.sourceSystem) continue // SCM items are references — never part of risk calc
     const md = dueDate(m)
     const late = []
     for (const l of store.links) {
@@ -468,6 +497,22 @@ export const riskWarnings = computed(() => {
   return out
 })
 export const riskIds = computed(() => new Set(riskWarnings.value.map(w => w.item.id)))
+
+// Calendar-late: a TRACKED item (progress explicitly set) that's past its deadline
+// and not finished. Deadline = end (range) or when (point); coarse year/month-only
+// placements aren't judged. Mirrors the server's public-plan "late" count exactly.
+export const lateItems = computed(() => {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  return store.milestones.filter(m => {
+    if (m.sourceSystem) return false // SCM items are read-only references, never "late"
+    if (m.progress == null || m.progress >= 100) return false
+    const due = m.endDate || m.when
+    if (!due) return false
+    const d = new Date(due)
+    return !isNaN(d) && d < today
+  })
+})
+export const lateIds = computed(() => new Set(lateItems.value.map(m => m.id)))
 export const riskByItem = computed(() => {
   const map = {}
   for (const w of riskWarnings.value) map[w.item.id] = w.lateDeps
@@ -579,6 +624,9 @@ export async function initApp() {
   session.authenticated = !!me.authenticated
   session.username = me.username || null
   session.role = me.role || null
+  session.email = me.email || ''
+  session.firstName = me.firstName || ''
+  session.lastName = me.lastName || ''
   workspace.ownSlug = me.workspace || ''
 
   // The bare root (outside the demo) is the discovery landing page, not a plan.

@@ -243,9 +243,10 @@ func (s *Store) markSync(ctx context.Context, ws, id, etag, status string) {
 	_, _ = s.pool.Exec(ctx, `UPDATE subscription SET last_status = $2, last_synced_at = now() WHERE id = $1 AND workspace_id = $3`, id, status, ws)
 }
 
+// subClient is SSRF-guarded (blocks internal/metadata IPs, incl. across redirects).
+var subClient = safeHTTPClient(15 * time.Second)
+
 // fetchFeed GETs <base>/api/shared with the bearer token and an optional ETag.
-// SSRF note: only http/https is allowed; production deployments behind untrusted
-// networks should additionally block private address ranges.
 func fetchFeed(ctx context.Context, base, token, etag string) (body []byte, newEtag string, changed bool, err error) {
 	u, err := url.Parse(strings.TrimRight(base, "/") + "/api/shared")
 	if err != nil {
@@ -262,7 +263,7 @@ func fetchFeed(ctx context.Context, base, token, etag string) (body []byte, newE
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := subClient.Do(req)
 	if err != nil {
 		return nil, "", false, err
 	}

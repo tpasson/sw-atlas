@@ -288,7 +288,7 @@ type ghConfig struct {
 	colors                      GitColors // per-workspace colour scheme for the items
 }
 
-var ghClient = &http.Client{Timeout: 20 * time.Second}
+var ghClient = safeHTTPClient(20 * time.Second) // SSRF-guarded (blocks internal/metadata IPs)
 
 func ghBase(cfg ghConfig) string {
 	if cfg.apiBase != "" {

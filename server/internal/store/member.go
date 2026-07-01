@@ -17,6 +17,9 @@ type Member struct {
 	Username  string    `json:"username"`
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"createdAt"`
+	FirstName string    `json:"firstName"`
+	LastName  string    `json:"lastName"`
+	Email     string    `json:"email,omitempty"` // omitted (blanked) for anonymous requesters
 }
 
 // Per-workspace roles (distinct from the global app_user.role admin/editor, which
@@ -47,7 +50,7 @@ func (s *Store) RoleInWorkspace(ctx context.Context, userID, wsID string) (strin
 func (s *Store) ListMembers(ctx context.Context, wsID string) ([]Member, error) {
 	out := []Member{}
 	rows, err := s.pool.Query(ctx,
-		`SELECT u.id, u.username, m.role, m.created_at
+		`SELECT u.id, u.username, m.role, m.created_at, u.first_name, u.last_name, u.email
 		   FROM workspace_member m JOIN app_user u ON u.id = m.user_id
 		  WHERE m.workspace_id = $1
 		  ORDER BY (m.role = 'owner') DESC, u.username`, wsID)
@@ -57,7 +60,7 @@ func (s *Store) ListMembers(ctx context.Context, wsID string) ([]Member, error) 
 	defer rows.Close()
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.UserID, &m.Username, &m.Role, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.UserID, &m.Username, &m.Role, &m.CreatedAt, &m.FirstName, &m.LastName, &m.Email); err != nil {
 			return out, err
 		}
 		out = append(out, m)

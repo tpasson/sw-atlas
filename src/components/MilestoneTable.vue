@@ -133,7 +133,7 @@
                   @dblclick.stop="onEdit(it.m)"
                 >
                   <MarkerIcon :shape="markerOf(it.m)" :color="it.m.color || g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
-                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="settings.items.maturitySize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
 
                 <!-- Cluster: collapsed overflow markers; click to expand the list -->
@@ -168,7 +168,7 @@
                       :stroke-width="settings.items.markerStroke"
                       class="bar-marker"
                     />
-                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="settings.items.maturitySize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                   </span>
                   <span v-if="it.continuesRight" class="bar-arrow">▶</span>
                   <template v-if="!props.readOnly && !it.m.sourceSystem">
@@ -215,7 +215,7 @@
         <div class="tooltip-fields">
           <div v-if="tooltip.ms.assigneeId && memberName(tooltip.ms.assigneeId)" class="tooltip-field">
             <span class="tf-label">Who</span>
-            <span class="tf-val">{{ memberName(tooltip.ms.assigneeId) }}</span>
+            <button type="button" class="tf-val tf-who" title="View profile" @click.stop="openProfile(memberById(tooltip.ms.assigneeId), $event)">{{ memberName(tooltip.ms.assigneeId) }}</button>
           </div>
           <div v-if="tooltip.ms.what" class="tooltip-field">
             <span class="tf-label">What</span>
@@ -242,6 +242,10 @@
           <span class="tp-label">Progress</span>
           <span class="tp-bar"><span class="tp-fill" :style="{ width: tooltip.ms.progress + '%', background: tooltip.color }"></span></span>
           <span class="tp-pct">{{ tooltip.ms.progress }}%</span>
+        </div>
+        <div v-if="lateIds.has(tooltip.ms.id)" class="tooltip-late">
+          <Clock :size="12" :stroke-width="2.2" />
+          <span>Overdue — not finished past its date</span>
         </div>
         <div v-if="linkedMilestones.length > 0" class="tooltip-links">
           <span class="tl-label">Blocked by</span>
@@ -271,7 +275,7 @@
           </div>
         </div>
         <div v-if="riskByItem[tooltip.ms.id] && riskByItem[tooltip.ms.id].length" class="tooltip-risk">
-          <span class="tr-label">⚠ Late blockers</span>
+          <div class="tr-label"><AlertTriangle :size="12" :stroke-width="2.2" /><span>Late blockers</span></div>
           <div class="tr-items">
             <div v-for="p in riskByItem[tooltip.ms.id]" :key="p.id" class="tl-item" @click.stop="selectFromTooltip(p, $event)">
               <span class="tl-dot" :style="{ background: swimlaneColor(p.swimlaneId) }"></span>
@@ -281,8 +285,8 @@
           </div>
         </div>
         <div v-if="!tooltip.ms.sourceSystem" class="tooltip-meta">
-          <div v-if="tooltip.ms.createdBy" class="tm-row"><User :size="11" :stroke-width="2.2" /><span>Added by {{ whoName(tooltip.ms.createdBy) }}<span v-if="tooltip.ms.createdAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.createdAt) }}</span></span></div>
-          <div v-if="tooltip.ms.updatedBy && (tooltip.ms.version || 1) > 1" class="tm-row"><Pencil :size="11" :stroke-width="2.2" /><span>Edited by {{ whoName(tooltip.ms.updatedBy) }}<span v-if="tooltip.ms.updatedAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.updatedAt) }}</span></span></div>
+          <div v-if="tooltip.ms.createdBy" class="tm-row"><User :size="12" :stroke-width="2.2" /><span>Added by {{ whoName(tooltip.ms.createdBy) }}<span v-if="tooltip.ms.createdAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.createdAt) }}</span></span></div>
+          <div v-if="tooltip.ms.updatedBy && (tooltip.ms.version || 1) > 1" class="tm-row"><Pencil :size="12" :stroke-width="2.2" /><span>Edited by {{ whoName(tooltip.ms.updatedBy) }}<span v-if="tooltip.ms.updatedAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.updatedAt) }}</span></span></div>
           <button type="button" class="tm-row tm-ver-row tm-ver-btn" title="View version history" @click.stop="openHistory(tooltip.ms)">
             <span class="tm-ver-label">Version</span>
             <span class="tm-ver">v{{ tooltip.ms.version || 1 }} <History :size="11" /></span>
@@ -323,14 +327,19 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, stripMarkdown, memberName, itemTypeByKey } from '../stores/useAppStore.js'
-import { AlertTriangle, Lock, User, Pencil, History } from 'lucide-vue-next'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey } from '../stores/useAppStore.js'
+import { AlertTriangle, Clock, Lock, User, Pencil, History } from 'lucide-vue-next'
 import MarkerIcon from './MarkerIcon.vue'
 import MaturityGlyph from './MaturityGlyph.vue'
 
 function maturityTitle(level) {
   return level ? `Maturity: ${MATURITY_STAGES[level - 1]} (${level}/4)` : ''
 }
+
+// Maturity glyph scales with the same size slider as the marker / warning / time
+// icons, so every item icon stays visually consistent. Cell ≈ markerSize / 2.3 →
+// the 2×2 grid matches the marker's height.
+const matSize = computed(() => Math.max(3, Math.round(settings.items.markerSize * 0.42)))
 
 // Fixed geometry — months are a fixed width so date math is exact regardless of
 // label length (labels overflow freely to the right).
@@ -577,8 +586,9 @@ function rowItems(row) {
       // Badges that trail the title and also need room: the maturity glyph (a 2×2
       // grid, ≈2.3× its cell size) and the risk warning triangle. Without these the
       // glyph could overflow a bar the title only just fit into.
-      const trailW = (m.maturity ? Math.ceil(settings.items.maturitySize * 2.3) + settings.items.iconGap : 0)
+      const trailW = (m.maturity ? Math.ceil(matSize.value * 2.3) + settings.items.iconGap + 5 : 0)
         + (riskIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
+        + (lateIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
       // If the icon + title (+ trailing badges) don't fit, the whole unit moves to
       // the right of the bar (tight together); otherwise it sits inside the bar.
       const labelOutside = iconW + labelW + trailW + settings.items.labelBuffer > width
@@ -596,8 +606,9 @@ function rowItems(row) {
       const pad = settings.items.padding
       // The maturity glyph / risk badge trail the title here too — count them so
       // lane packing reserves the full extent.
-      const trailW = (m.maturity ? Math.ceil(settings.items.maturitySize * 2.3) + settings.items.iconGap : 0)
+      const trailW = (m.maturity ? Math.ceil(matSize.value * 2.3) + settings.items.iconGap + 5 : 0)
         + (riskIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
+        + (lateIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
       items.push({
         key: m.id, m, type: 'point', x,
         x0: x - 6 - pad,
@@ -1416,6 +1427,8 @@ thead th {
 .tooltip-field { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: baseline; }
 .tf-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); }
 .tf-val { font-size: 12.5px; color: var(--clr-text); line-height: 1.45; }
+.tf-who { background: none; border: none; padding: 0; cursor: pointer; text-align: left; font: inherit; }
+.tf-who:hover { color: var(--clr-accent); text-decoration: underline; }
 .tf-clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
 /* Source-control section (its own divided block, below WHEN) */
 .tooltip-scm { padding: 9px 14px; border-top: 1px solid var(--clr-border-light); display: flex; flex-direction: column; gap: 8px; }
@@ -1466,10 +1479,13 @@ thead th {
 .tl-more { font-size: 11px; color: var(--clr-text-3); padding-left: 12px; }
 
 /* Dependency-risk badge + tooltip section */
-.risk-badge { flex-shrink: 0; margin-left: 3px; }
+.risk-badge, .late-badge { flex-shrink: 0; margin-left: 3px; align-self: center; vertical-align: middle; }
+.tooltip-late { display: flex; align-items: center; gap: 6px; padding: 8px 14px 10px;
+  font-size: 10px; font-weight: 700; color: #FF3B30; text-transform: uppercase; letter-spacing: 0.5px; }
 .mk-mat { margin-left: 5px; }
 .tooltip-risk { padding: 8px 14px 10px; border-top: 1px solid var(--clr-border-light); }
-.tr-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-danger); display: block; margin-bottom: 6px; }
+.tr-label { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-danger); margin-bottom: 6px; }
+.tr-label svg { flex-shrink: 0; }
 .tr-items { display: flex; flex-direction: column; gap: 4px; }
 .tr-item { font-size: 12.5px; color: var(--clr-text); }
 

@@ -110,6 +110,8 @@
     <Transition name="modal">
       <AboutModal v-if="aboutOpen" @close="aboutOpen = false" />
     </Transition>
+
+    <UserProfilePopover />
   </div>
 </template>
 
@@ -129,6 +131,7 @@ import GroupLegend from './components/GroupLegend.vue'
 import FacetFilter from './components/FacetFilter.vue'
 import AboutModal from './components/AboutModal.vue'
 import LandingPage from './components/LandingPage.vue'
+import UserProfilePopover from './components/UserProfilePopover.vue'
 
 const { prevYear, nextYear, logout } = useAppStore()
 

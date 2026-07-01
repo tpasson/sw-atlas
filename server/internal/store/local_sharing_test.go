@@ -36,9 +36,9 @@ func TestLocalSharing(t *testing.T) {
 	}
 
 	must("bootstrap", s.EnsureBootstrapAdmin(ctx, "editor", "h"))
-	alice, err := s.CreateUser(ctx, "alice", "h", RoleEditor)
+	alice, err := s.CreateUser(ctx, "alice", "h", RoleUser)
 	must("alice", err)
-	bob, err := s.CreateUser(ctx, "bob", "h", RoleEditor)
+	bob, err := s.CreateUser(ctx, "bob", "h", RoleUser)
 	must("bob", err)
 
 	// Alice builds a plan and a scope covering her lane.

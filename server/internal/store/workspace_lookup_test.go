@@ -31,7 +31,7 @@ func TestWorkspaceResolution(t *testing.T) {
 	if err := s.EnsureBootstrapAdmin(ctx, "editor", "h"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	alice, err := s.CreateUser(ctx, "Alice", "h", RoleEditor)
+	alice, err := s.CreateUser(ctx, "Alice", "h", RoleUser)
 	if err != nil {
 		t.Fatalf("create alice: %v", err)
 	}

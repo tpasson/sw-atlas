@@ -119,6 +119,24 @@
           </div>
         </span>
 
+        <span
+          v-if="lateItems.length"
+          class="risk-hdr"
+          title="Overdue items (progress set, past their date)"
+          @mouseenter="hoverLate = true"
+          @mouseleave="hoverLate = false"
+        >
+          <Clock :size="14" />
+          {{ lateItems.length }}
+          <div v-if="hoverLate" class="risk-pop">
+            <div class="risk-pop-title">Overdue ({{ lateItems.length }})</div>
+            <div v-for="m in lateItems" :key="m.id" class="risk-pop-row" @click.stop="focusRisk(m.id)">
+              <span class="risk-pop-name">{{ m.title }}</span>
+              <span class="risk-pop-sub">{{ m.progress }}% done</span>
+            </div>
+          </div>
+        </span>
+
         <span v-if="baselines.activeId" class="view-pill" title="Viewing a saved baseline — editing is disabled">
           <span class="view-dot"></span>
           Viewing baseline
@@ -197,8 +215,8 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { Sun, Moon, AlertTriangle, Settings, Bookmark, User, Users, UserPlus, Plus, Pencil, Trash2, LogOut } from 'lucide-vue-next'
-import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace, canEditWorkspace, createProject, loadMyWorkspaces } from '../stores/useAppStore.js'
+import { Sun, Moon, AlertTriangle, Clock, Settings, Bookmark, User, Users, UserPlus, Plus, Pencil, Trash2, LogOut } from 'lucide-vue-next'
+import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, ui, session, workspace, canEditWorkspace, createProject, loadMyWorkspaces } from '../stores/useAppStore.js'
 import { api } from '../api.js'
 import { APP_VERSION } from '../version.js'
 
@@ -285,7 +303,8 @@ function jumpBaseline(dir) {
 }
 
 const hoverRisk = ref(false)
-function focusRisk(id) { ui.focusItemId = id; hoverRisk.value = false }
+const hoverLate = ref(false)
+function focusRisk(id) { ui.focusItemId = id; hoverRisk.value = false; hoverLate.value = false }
 
 // Today's date + ISO calendar week, shown next to the brand.
 function isoWeek(dt) {

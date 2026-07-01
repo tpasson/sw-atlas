@@ -228,11 +228,14 @@ export const demoApi = {
   login: () => ok({ authenticated: true }),
   logout: () => ok({ authenticated: false }),
   changeOwnPassword: () => ok(),
+  renameOwnUsername: () => Promise.reject(new Error('Renaming is unavailable in the demo')),
+  updateOwnProfile: () => ok(),
 
   // users — not available in the backend-less demo (admin UI stays hidden)
   listUsers: () => ok({ users: [] }),
   createUser: () => Promise.reject(new Error('User management is unavailable in the demo')),
   setUserRole: () => ok(),
+  renameUser: () => ok(),
   setUserPassword: () => ok(),
   deleteUser: () => ok(),
 

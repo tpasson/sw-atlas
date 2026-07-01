@@ -14,6 +14,12 @@ func (s *Server) explore(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// Email addresses are only exposed to authenticated requesters.
+	if _, ok := s.authedSession(r); !ok {
+		for i := range plans {
+			plans[i].OwnerEmail = ""
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"workspaces": plans})
 }
 

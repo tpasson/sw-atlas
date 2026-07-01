@@ -40,7 +40,7 @@ func TestGitColors(t *testing.T) {
 	if err := s.EnsureBootstrapAdmin(ctx, "editor", "h"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	alice, err := s.CreateUser(ctx, "alice", "h", RoleEditor)
+	alice, err := s.CreateUser(ctx, "alice", "h", RoleUser)
 	if err != nil {
 		t.Fatalf("alice: %v", err)
 	}

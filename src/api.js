@@ -38,11 +38,14 @@ const realApi = {
   login: (username, password) => req('POST', '/login', { username, password }),
   logout: () => req('POST', '/logout'),
   changeOwnPassword: (password) => req('PUT', '/account/password', { password }),
+  renameOwnUsername: (username) => req('PUT', '/account/username', { username }),
+  updateOwnProfile: (data) => req('PUT', '/account/profile', data),
 
   // users (admin only)
   listUsers: () => req('GET', '/users'),
   createUser: (data) => req('POST', '/users', data),
   setUserRole: (id, role) => req('PUT', `/users/${id}/role`, { role }),
+  renameUser: (id, username) => req('PUT', `/users/${id}/username`, { username }),
   setUserPassword: (id, password) => req('PUT', `/users/${id}/password`, { password }),
   deleteUser: (id) => req('DELETE', `/users/${id}`),
 

@@ -29,11 +29,11 @@ func TestRoleInWorkspace(t *testing.T) {
 	s := &Store{pool: pool}
 	ctx := context.Background()
 
-	alice, err := s.CreateUser(ctx, "p1alice", "h", RoleEditor)
+	alice, err := s.CreateUser(ctx, "p1alice", "h", RoleUser)
 	if err != nil {
 		t.Fatalf("create p1alice: %v", err)
 	}
-	bob, err := s.CreateUser(ctx, "p1bob", "h", RoleEditor)
+	bob, err := s.CreateUser(ctx, "p1bob", "h", RoleUser)
 	if err != nil {
 		t.Fatalf("create p1bob: %v", err)
 	}
@@ -67,11 +67,11 @@ func TestMemberManagement(t *testing.T) {
 	s := &Store{pool: pool}
 	ctx := context.Background()
 
-	owner, err := s.CreateUser(ctx, "p3owner", "h", RoleEditor)
+	owner, err := s.CreateUser(ctx, "p3owner", "h", RoleUser)
 	if err != nil {
 		t.Fatalf("owner: %v", err)
 	}
-	guest, err := s.CreateUser(ctx, "p3guest", "h", RoleEditor)
+	guest, err := s.CreateUser(ctx, "p3guest", "h", RoleUser)
 	if err != nil {
 		t.Fatalf("guest: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestProjectAdmin(t *testing.T) {
 	s := &Store{pool: pool}
 	ctx := context.Background()
 
-	owner, err := s.CreateUser(ctx, "p4owner", "h", RoleEditor)
+	owner, err := s.CreateUser(ctx, "p4owner", "h", RoleUser)
 	if err != nil {
 		t.Fatalf("owner: %v", err)
 	}

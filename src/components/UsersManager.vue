@@ -5,13 +5,13 @@
       <p class="section-label">Add user</p>
       <p class="card-hint">
         Each user gets their own private workspace and lands on it when they log in.
-        Editors manage their own plan; admins additionally manage accounts here.
+        Users manage their own plan; admins additionally manage accounts here.
       </p>
       <div class="user-new">
         <input v-model="form.username" class="field-input" placeholder="Username" autocomplete="off" @keyup.enter="onCreate" />
         <input v-model="form.password" class="field-input" type="password" placeholder="Password" autocomplete="new-password" @keyup.enter="onCreate" />
         <select v-model="form.role" class="field-select">
-          <option value="editor">Editor</option>
+          <option value="user">User</option>
           <option value="admin">Admin</option>
         </select>
         <button class="btn-add" :disabled="busy || !form.username.trim() || !form.password" @click="onCreate">Add</button>
@@ -22,6 +22,10 @@
     <!-- List -->
     <div class="card">
       <p class="section-label">Accounts</p>
+      <p class="card-hint">
+        <strong>Rename</strong> changes the login name <em>and</em> the personal plan URL
+        (<code>/name</code>) — old links to that plan stop working.
+      </p>
       <div v-if="users.length" class="user-list">
         <div v-for="u in users" :key="u.id" class="user-row">
           <div class="user-meta">
@@ -38,9 +42,10 @@
               :disabled="busy"
               @change="onRole(u, $event.target.value)"
             >
-              <option value="editor">Editor</option>
+              <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
+            <button class="link-btn" :disabled="busy" @click="onRename(u)">Rename</button>
             <button class="link-btn" :disabled="busy" @click="onResetPassword(u)">Reset password</button>
             <button
               class="link-btn danger"
@@ -62,7 +67,7 @@ import { api } from '../api.js'
 import { session } from '../stores/useAppStore.js'
 
 const users = ref([])
-const form = reactive({ username: '', password: '', role: 'editor' })
+const form = reactive({ username: '', password: '', role: 'user' })
 const busy = ref(false)
 const msg = ref(null)
 
@@ -82,7 +87,7 @@ async function onCreate() {
   try {
     await api.createUser({ username: form.username.trim(), password: form.password, role: form.role })
     msg.value = { type: 'ok', text: `User "${form.username.trim().toLowerCase()}" created.` }
-    form.username = ''; form.password = ''; form.role = 'editor'
+    form.username = ''; form.password = ''; form.role = 'user'
     await load()
   } catch (e) { msg.value = { type: 'err', text: e.message || 'Create failed' } }
   busy.value = false
@@ -93,6 +98,28 @@ async function onRole(u, role) {
   msg.value = null; busy.value = true
   try { await api.setUserRole(u.id, role); await load() }
   catch (e) { msg.value = { type: 'err', text: e.message || 'Could not change role' }; await load() }
+  busy.value = false
+}
+
+async function onRename(u) {
+  const name = window.prompt(
+    `New username for "${u.username}"?\n\nThis also changes their plan URL: /${u.username} → /new-name (old links stop working).`,
+    u.username,
+  )
+  if (name == null) return
+  const next = name.trim().toLowerCase()
+  if (!next || next === u.username) return
+  msg.value = null; busy.value = true
+  try {
+    const res = await api.renameUser(u.id, next)
+    if (u.username === session.username) {
+      // Renamed ourselves → our URL changed; reload at the new slug.
+      window.location.assign('/' + (res?.slug || next))
+      return
+    }
+    msg.value = { type: 'ok', text: `Renamed to "${next}".` }
+    await load()
+  } catch (e) { msg.value = { type: 'err', text: e.message || 'Rename failed' } }
   busy.value = false
 }
 

@@ -6,11 +6,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
+	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,15 +31,82 @@ type Server struct {
 	staticDir string
 }
 
+// rateLimiter is a tiny in-memory sliding-window limiter (per client IP), used to
+// throttle the login endpoint against brute-force / password-spraying.
+type rateLimiter struct {
+	mu     sync.Mutex
+	hits   map[string][]time.Time
+	max    int
+	window time.Duration
+}
+
+func newRateLimiter(max int, window time.Duration) *rateLimiter {
+	return &rateLimiter{hits: map[string][]time.Time{}, max: max, window: window}
+}
+
+func (l *rateLimiter) allow(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cut := time.Now().Add(-l.window)
+	fresh := l.hits[key][:0]
+	for _, t := range l.hits[key] {
+		if t.After(cut) {
+			fresh = append(fresh, t)
+		}
+	}
+	if len(fresh) >= l.max {
+		l.hits[key] = fresh
+		return false
+	}
+	l.hits[key] = append(fresh, time.Now())
+	return true
+}
+
+func (l *rateLimiter) limit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			ip = h
+		}
+		if !l.allow(ip) {
+			writeErr(w, http.StatusTooManyRequests, "too many attempts — please wait a moment")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// loginRL: at most 10 login attempts per minute per IP.
+var loginRL = newRateLimiter(10, time.Minute)
+
+// maxBodyBytes caps the request body to bound server memory (DoS defense). 16 MB
+// is generous for JSON plan imports while still rejecting abusive payloads.
+func maxBodyBytes(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, n)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 	s := &Server{store: st, auth: au, staticDir: staticDir}
 
+	// Minimal container images (alpine) ship no /etc/mime.types, so Go can't map
+	// .svg → image/svg+xml and the favicon is served as text/xml (browsers then
+	// ignore it). Register the type explicitly.
+	_ = mime.AddExtensionType(".svg", "image/svg+xml")
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer, maxBodyBytes(16<<20))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.health)
-		r.Post("/login", s.login)
+		r.With(loginRL.limit).Post("/login", s.login)
 		r.Post("/logout", s.logout)
 		r.Get("/me", s.me)
 
@@ -70,6 +141,9 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/projects", s.listProjects)
 			r.Post("/projects", s.createProject)
 			r.Post("/projects/{slug}/leave", s.leaveProject)
+			r.Put("/account/username", s.renameOwnUsername) // self-service rename
+			r.Put("/account/password", s.changeOwnPassword) // self-service password
+			r.Put("/account/profile", s.updateOwnProfile)   // self-service name + email
 		})
 
 		// Member management: only the project owner (by path slug).
@@ -160,9 +234,6 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Post("/subscriptions/{id}/sync", s.syncSubscription)
 			r.Post("/subscriptions/{id}/pause", s.setSubscriptionPaused)
 			r.Post("/swimlanes/{id}/hidden", s.setSwimlaneHidden)
-
-			// self-service: change your own password
-			r.Put("/account/password", s.changeOwnPassword)
 		})
 
 		// User administration: admins only.
@@ -171,6 +242,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/users", s.listUsers)
 			r.Post("/users", s.createUser)
 			r.Put("/users/{id}/role", s.setUserRole)
+			r.Put("/users/{id}/username", s.renameUser)
 			r.Put("/users/{id}/password", s.setUserPassword)
 			r.Delete("/users/{id}", s.deleteUser)
 			// curate the explore page
@@ -233,11 +305,27 @@ func (s *Server) resolveTargetWorkspace(r *http.Request) (string, error) {
 
 // ── middleware ──────────────────────────────────────────────────────────────
 
+// authedSession parses the session cookie AND confirms it hasn't been revoked:
+// the user still exists and the token_version stamped in the JWT matches the
+// current one (bumped on password change, role change, or account deletion). Used
+// at every gate so a stale/forged-role token can't keep access.
+func (s *Server) authedSession(r *http.Request) (auth.Session, bool) {
+	sess, ok := s.auth.SessionFromRequest(r)
+	if !ok {
+		return auth.Session{}, false
+	}
+	cur, err := s.store.UserTokenVersion(r.Context(), sess.UserID)
+	if err != nil || cur != sess.TokenVersion {
+		return auth.Session{}, false
+	}
+	return sess, true
+}
+
 // requireEditor allows writes when the caller is an owner or editor MEMBER of the
 // targeted workspace (membership is the authorization source).
 func (s *Server) requireEditor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := s.auth.SessionFromRequest(r)
+		sess, ok := s.authedSession(r)
 		if !ok {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -248,12 +336,12 @@ func (s *Server) requireEditor(next http.Handler) http.Handler {
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		if role != store.WSRoleOwner && role != store.WSRoleEditor {
@@ -269,7 +357,7 @@ func (s *Server) requireEditor(next http.Handler) http.Handler {
 // workspace. Editors can change content; only owners change the "blueprint".
 func (s *Server) requireWorkspaceOwner(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := s.auth.SessionFromRequest(r)
+		sess, ok := s.authedSession(r)
 		if !ok {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -280,12 +368,12 @@ func (s *Server) requireWorkspaceOwner(next http.Handler) http.Handler {
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		if role != store.WSRoleOwner {
@@ -300,7 +388,7 @@ func (s *Server) requireWorkspaceOwner(next http.Handler) http.Handler {
 // workspace (viewer / editor / owner) — used for proposing change requests.
 func (s *Server) requireMember(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := s.auth.SessionFromRequest(r)
+		sess, ok := s.authedSession(r)
 		if !ok {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -311,12 +399,12 @@ func (s *Server) requireMember(next http.Handler) http.Handler {
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		if role == "" {
@@ -330,7 +418,7 @@ func (s *Server) requireMember(next http.Handler) http.Handler {
 // requireAuth gates an endpoint to any authenticated user (no workspace target).
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.auth.SessionFromRequest(r); !ok {
+		if _, ok := s.authedSession(r); !ok {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
@@ -343,7 +431,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 // from the active workspace). Stores the resolved id in context for the handler.
 func (s *Server) requireWorkspaceOwnerByPath(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := s.auth.SessionFromRequest(r)
+		sess, ok := s.authedSession(r)
 		if !ok {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -354,12 +442,12 @@ func (s *Server) requireWorkspaceOwnerByPath(next http.Handler) http.Handler {
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, ws.ID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		if role != store.WSRoleOwner {
@@ -373,7 +461,7 @@ func (s *Server) requireWorkspaceOwnerByPath(next http.Handler) http.Handler {
 // requireAdmin gates account-management endpoints to admins only.
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := s.auth.SessionFromRequest(r)
+		sess, ok := s.authedSession(r)
 		if !ok {
 			writeErr(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -396,15 +484,15 @@ func (s *Server) requireReadAccess(next http.Handler) http.Handler {
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
-		sess, authed := s.auth.SessionFromRequest(r)
+		sess, authed := s.authedSession(r)
 		allowed := false
 		if authed {
 			role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
 			if err != nil {
-				writeErr(w, http.StatusInternalServerError, err.Error())
+				s.internalError(w, err)
 				return
 			}
 			allowed = role != "" // any member reads, even a private workspace
@@ -412,7 +500,7 @@ func (s *Server) requireReadAccess(next http.Handler) http.Handler {
 		if !allowed {
 			public, err := s.store.GetPublicRead(r.Context(), target)
 			if err != nil {
-				writeErr(w, http.StatusInternalServerError, err.Error())
+				s.internalError(w, err)
 				return
 			}
 			if !public {
@@ -443,7 +531,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, hash, err := s.store.GetUserByUsername(r.Context(), in.Username)
-	if err != nil || !auth.CheckPassword(hash, in.Password) {
+	if err != nil {
+		auth.DummyPasswordCheck(in.Password) // equalize timing for unknown usernames
+		writeErr(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if !auth.CheckPassword(hash, in.Password) {
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -452,9 +545,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if ws, err := s.store.GetWorkspace(r.Context(), u.WorkspaceID); err == nil {
 		slug = ws.Slug
 	}
-	sess := auth.Session{UserID: u.ID, Username: u.Username, Role: u.Role, WorkspaceID: u.WorkspaceID, WorkspaceSlug: slug}
-	if err := s.auth.SetCookie(w, sess); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	sess := auth.Session{UserID: u.ID, Username: u.Username, Role: u.Role, WorkspaceID: u.WorkspaceID, WorkspaceSlug: slug, TokenVersion: u.TokenVersion}
+	if err := s.auth.SetCookie(w, r, sess); err != nil {
+		s.internalError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": u.Username, "role": u.Role, "workspace": slug})
@@ -466,10 +559,16 @@ func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	if sess, ok := s.auth.SessionFromRequest(r); ok {
-		writeJSON(w, http.StatusOK, map[string]any{
+	if sess, ok := s.authedSession(r); ok {
+		out := map[string]any{
 			"authenticated": true, "username": sess.Username, "role": sess.Role, "workspace": sess.WorkspaceSlug,
-		})
+		}
+		if u, err := s.store.GetUserByID(r.Context(), sess.UserID); err == nil {
+			out["email"] = u.Email
+			out["firstName"] = u.FirstName
+			out["lastName"] = u.LastName
+		}
+		writeJSON(w, http.StatusOK, out)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
@@ -714,6 +813,12 @@ func (s *Server) listWorkspaceMembers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	// Email addresses are only exposed to authenticated requesters.
+	if _, ok := s.authedSession(r); !ok {
+		for i := range list {
+			list[i].Email = ""
+		}
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -1154,6 +1259,7 @@ func (s *Server) removeLink(w http.ResponseWriter, r *http.Request) {
 func (s *Server) mountStatic(r chi.Router) {
 	fileServer := http.FileServer(http.Dir(s.staticDir))
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+		setSecurityHeaders(w)
 		p := filepath.Join(s.staticDir, filepath.Clean(req.URL.Path))
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
 			fileServer.ServeHTTP(w, req)
@@ -1163,7 +1269,34 @@ func (s *Server) mountStatic(r chi.Router) {
 	})
 }
 
+// setSecurityHeaders locks the SPA to its own origin: no external scripts,
+// styles, fonts, images or network connections are ever loaded (everything is
+// served by this container). 'unsafe-inline' is granted for styles only, because
+// Vue uses inline :style bindings — styles can't execute code, so it's harmless.
+func setSecurityHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy",
+		"default-src 'self'; "+
+			"script-src 'self'; "+
+			"style-src 'self' 'unsafe-inline'; "+
+			"img-src 'self' data:; "+
+			"font-src 'self'; "+
+			"connect-src 'self'; "+
+			"object-src 'none'; "+
+			"base-uri 'self'; "+
+			"frame-ancestors 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+// internalError logs the real error server-side and returns a generic 500 to the
+// client, so DB messages / internal paths aren't disclosed to callers.
+func (s *Server) internalError(w http.ResponseWriter, err error) {
+	log.Printf("internal error: %v", err)
+	writeErr(w, http.StatusInternalServerError, "internal server error")
+}
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	switch {
@@ -1176,7 +1309,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
 	default:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 	}
 }
 

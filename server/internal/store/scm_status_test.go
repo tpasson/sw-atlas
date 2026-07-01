@@ -36,6 +36,7 @@ func TestParseSCMURL(t *testing.T) {
 }
 
 func TestFetchSCMState(t *testing.T) {
+	t.Setenv("ATLAS_ALLOW_PRIVATE_FETCH", "1") // httptest listens on loopback
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/o/r/pulls/1":

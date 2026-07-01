@@ -182,13 +182,19 @@ func (s *Store) DeleteWorkspace(ctx context.Context, wsID string) error {
 // PublicWorkspace is a discovery-directory entry: a public plan plus a small
 // summary so the landing page can render a card and link to /{slug}.
 type PublicWorkspace struct {
-	Slug      string  `json:"slug"`
-	Name      string  `json:"name"`
-	OwnerName string  `json:"ownerName"`
-	ItemCount int     `json:"itemCount"`
-	NextTitle *string `json:"nextTitle,omitempty"`
-	NextDate  *string `json:"nextDate,omitempty"` // YYYY-MM-DD of the next upcoming milestone
-	Featured  bool    `json:"featured"`
+	Slug           string  `json:"slug"`
+	Name           string  `json:"name"`
+	OwnerName      string  `json:"ownerName"`
+	OwnerFirstName string  `json:"ownerFirstName,omitempty"`
+	OwnerLastName  string  `json:"ownerLastName,omitempty"`
+	OwnerEmail     string  `json:"ownerEmail,omitempty"` // blanked for anonymous requesters
+	Personal       bool    `json:"personal"`             // true = a user's private home workspace; false = a project
+	ItemCount      int     `json:"itemCount"`
+	LateCount      int     `json:"lateCount"` // overdue, incomplete, non-event items
+	NextTitle      *string `json:"nextTitle,omitempty"`
+	NextDate       *string `json:"nextDate,omitempty"`   // YYYY-MM-DD of the next upcoming dated item
+	LastChange     *string `json:"lastChange,omitempty"` // RFC3339 timestamp of the most recent edit
+	Featured       bool    `json:"featured"`
 }
 
 // ListPublicWorkspaces returns every publicly-readable workspace for the explore
@@ -198,14 +204,21 @@ func (s *Store) ListPublicWorkspaces(ctx context.Context) ([]PublicWorkspace, er
 	out := []PublicWorkspace{}
 	rows, err := s.pool.Query(ctx,
 		`SELECT w.slug, w.name, COALESCE(u.username, w.name), w.featured,
-		        (SELECT count(*) FROM item i WHERE i.workspace_id = w.id),
-		        n.title, n.when_date
+		        EXISTS(SELECT 1 FROM app_user au WHERE au.workspace_id = w.id),
+		        (SELECT count(*) FROM item i WHERE i.workspace_id = w.id AND i.source_system IS NULL),
+		        (SELECT count(*) FROM item i WHERE i.workspace_id = w.id
+		             AND i.source_system IS NULL
+		             AND i.progress IS NOT NULL AND i.progress < 100
+		             AND COALESCE(i.end_date, i.when_date) < CURRENT_DATE),
+		        (SELECT max(i.updated_at) FROM item i WHERE i.workspace_id = w.id),
+		        n.title, n.when_date,
+		        COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), COALESCE(u.email, '')
 		 FROM workspace w
 		 LEFT JOIN app_user u ON u.id = w.owner_user_id
 		 LEFT JOIN app_setting s ON s.workspace_id = w.id AND s.key = 'public_read_enabled'
 		 LEFT JOIN LATERAL (
 		     SELECT title, when_date FROM item
-		     WHERE workspace_id = w.id AND when_date >= CURRENT_DATE
+		     WHERE workspace_id = w.id AND source_system IS NULL AND when_date >= CURRENT_DATE
 		     ORDER BY when_date LIMIT 1
 		 ) n ON true
 		 WHERE COALESCE(s.value, 'true') = 'true'
@@ -216,13 +229,17 @@ func (s *Store) ListPublicWorkspaces(ctx context.Context) ([]PublicWorkspace, er
 	defer rows.Close()
 	for rows.Next() {
 		var p PublicWorkspace
-		var nextDate *time.Time
-		if err := rows.Scan(&p.Slug, &p.Name, &p.OwnerName, &p.Featured, &p.ItemCount, &p.NextTitle, &nextDate); err != nil {
+		var nextDate, lastChange *time.Time
+		if err := rows.Scan(&p.Slug, &p.Name, &p.OwnerName, &p.Featured, &p.Personal, &p.ItemCount, &p.LateCount, &lastChange, &p.NextTitle, &nextDate, &p.OwnerFirstName, &p.OwnerLastName, &p.OwnerEmail); err != nil {
 			return out, err
 		}
 		if nextDate != nil {
 			d := nextDate.Format("2006-01-02")
 			p.NextDate = &d
+		}
+		if lastChange != nil {
+			d := lastChange.Format(time.RFC3339)
+			p.LastChange = &d
 		}
 		out = append(out, p)
 	}

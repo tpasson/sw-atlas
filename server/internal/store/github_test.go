@@ -25,6 +25,7 @@ func TestGhNextLink(t *testing.T) {
 
 // ghGetAll must follow rel="next" links and concatenate every page.
 func TestGhGetAllPaginates(t *testing.T) {
+	t.Setenv("ATLAS_ALLOW_PRIVATE_FETCH", "1") // httptest listens on loopback
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("page") {
@@ -53,6 +54,7 @@ func TestGhGetAllPaginates(t *testing.T) {
 
 // ghProbe must send If-None-Match and treat 304 as unchanged, 200 as changed.
 func TestGhProbe(t *testing.T) {
+	t.Setenv("ATLAS_ALLOW_PRIVATE_FETCH", "1") // httptest listens on loopback
 	const etag = `"abc123"`
 	var lastINM string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +87,7 @@ func TestGhProbe(t *testing.T) {
 
 // A server that always advertises a next page must be bounded by ghPageCap.
 func TestGhGetAllPageCap(t *testing.T) {
+	t.Setenv("ATLAS_ALLOW_PRIVATE_FETCH", "1") // httptest listens on loopback
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Link", fmt.Sprintf(`<%s/x?p=next>; rel="next"`, srv.URL))

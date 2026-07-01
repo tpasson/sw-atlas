@@ -40,7 +40,7 @@
         </div>
       </div>
       <button v-else class="rail-btn" title="Log in" @click="$emit('login')">
-        <LogIn :size="19" />
+        <KeyRound :size="19" />
       </button>
     </div>
   </nav>
@@ -48,7 +48,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Home, CalendarDays, LayoutGrid, GitPullRequest, ClipboardCheck, Sun, Moon, Settings, LogIn } from 'lucide-vue-next'
+import { Home, CalendarDays, LayoutGrid, GitPullRequest, ClipboardCheck, Sun, Moon, Settings, KeyRound } from 'lucide-vue-next'
 import { store, session, settings, toggleTheme, useAppStore, canEditWorkspace, pendingCRCount } from '../stores/useAppStore.js'
 
 defineEmits(['manage', 'login', 'logout', 'about'])

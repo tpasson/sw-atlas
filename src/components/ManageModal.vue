@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div class="backdrop" @click.self="$emit('close')">
+      <div class="backdrop">
         <Transition name="modal-panel" appear>
           <div class="panel">
             <!-- Header -->
@@ -403,10 +403,6 @@
                     <label class="opt">Event fill
                       <input type="range" min="0" max="1" step="0.05" v-model.number="settings.items.eventOpacity" />
                       <span class="opt-val">{{ Math.round(settings.items.eventOpacity * 100) }}%</span>
-                    </label>
-                    <label class="opt">Maturity size
-                      <input type="range" min="3" max="12" step="1" v-model.number="settings.items.maturitySize" />
-                      <span class="opt-val">{{ settings.items.maturitySize }}px</span>
                     </label>
                   </div>
                 </div>
