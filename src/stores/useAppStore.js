@@ -350,7 +350,11 @@ export async function loadUISettings() {
 // Apply the light/dark theme to <html> (CSS variables switch via [data-theme]).
 function applyTheme(t) {
   if (typeof document !== 'undefined') {
-    document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light')
+    const el = document.documentElement
+    el.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light')
+    // Keep the html background in sync with the theme (matches theme-init.js, and
+    // avoids a stale colour on overscroll after toggling).
+    try { el.style.backgroundColor = getComputedStyle(el).getPropertyValue('--clr-bg').trim() } catch { /* ignore */ }
   }
 }
 watch(() => settings.theme, applyTheme, { immediate: true })
@@ -609,6 +613,23 @@ async function syncSeededDemoSources() {
     await Promise.all(need.map(s => api.syncGitHubSource(s.id).catch(() => {})))
     await loadPlan()
   } catch { /* non-fatal — the demo area stays empty if GitHub is unreachable */ }
+}
+
+// goHomeView switches to the discovery landing WITHOUT a full page reload, so it
+// doesn't flash white the way window.location.assign('/') does. Browser back/
+// forward is reconciled by the popstate reload registered in initApp.
+export function goHomeView() {
+  if (IS_DEMO) return
+  try { history.pushState({ atlasHome: true }, '', '/') } catch { /* ignore */ }
+  session.error = null
+  workspace.slug = ''
+  workspace.mode = 'landing'
+}
+
+// Client-side Home uses pushState; reload on browser back/forward so the URL and
+// the rendered view always match (the app otherwise routes on full loads).
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', () => window.location.reload())
 }
 
 // initApp resolves auth, picks the workspace to view (from the /{slug} URL),

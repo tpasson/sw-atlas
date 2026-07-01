@@ -195,7 +195,7 @@ function resetWidth() {
 <style scoped>
 .explorer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-.ev-bar { display: flex; justify-content: flex-end; padding: 9px 18px; border-bottom: 1px solid var(--clr-border-light); flex-shrink: 0; }
+.ev-bar { display: flex; align-items: center; justify-content: flex-end; height: 56px; box-sizing: border-box; padding: 0 24px; border-bottom: 1px solid var(--clr-border-light); flex-shrink: 0; }
 .ev-modes { display: inline-flex; gap: 2px; background: var(--clr-surface-2); border-radius: 100px; padding: 2px; }
 .ev-mode { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: transparent; border-radius: 100px; padding: 5px 14px; transition: background 0.12s, color 0.12s; }
 .ev-mode.on { background: var(--clr-surface); color: var(--clr-text); box-shadow: var(--sh-sm); }

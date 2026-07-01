@@ -73,7 +73,7 @@ function toggle(id) {
 
 <style scoped>
 .scm { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.scm-head { display: flex; align-items: center; gap: 9px; padding: 16px 24px 12px; border-bottom: 1px solid var(--clr-border-light); color: var(--clr-text); flex-shrink: 0; }
+.scm-head { display: flex; align-items: center; gap: 9px; height: 56px; box-sizing: border-box; padding: 0 24px; border-bottom: 1px solid var(--clr-border-light); color: var(--clr-text); flex-shrink: 0; }
 .scm-title { font-size: 17px; font-weight: 700; }
 .scm-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px 40px; }
 
