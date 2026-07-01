@@ -14,6 +14,8 @@
   --clr-accent-hover: #0077ED;
   --clr-danger: #FF3B30;
   --clr-danger-hover: #FF453A;
+  --clr-success: #248A3D;
+  --clr-warn: #B25000;
   --clr-glass: rgba(255,255,255,0.82);
 
   --r-xs: 4px;
@@ -51,6 +53,8 @@
   --clr-accent-hover: #3B9BFF;
   --clr-danger: #FF453A;
   --clr-danger-hover: #FF5147;
+  --clr-success: #30D158;
+  --clr-warn: #FF9F0A;
   --clr-glass: rgba(28,28,30,0.85);
   --sh-md: 0 4px 16px rgba(0,0,0,0.45);
   --sh-lg: 0 12px 40px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.35);

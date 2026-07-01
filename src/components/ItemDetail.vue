@@ -11,7 +11,7 @@
 
     <div class="id-chips">
       <span class="id-chip">{{ type?.label || item.typeKey || item.kind }}</span>
-      <span v-if="item.assigneeId" class="id-chip id-assignee"><span class="id-av">{{ initials(item.assigneeId) }}</span>{{ memberName(item.assigneeId) }}</span>
+      <button v-if="item.assigneeId" type="button" class="id-chip id-assignee" title="View profile" @click.stop="openProfile(memberById(item.assigneeId), $event)"><span class="id-av">{{ initials(item.assigneeId) }}</span>{{ memberName(item.assigneeId) }}</button>
     </div>
 
     <div v-if="!item.sourceSystem" class="id-attrib">
@@ -48,7 +48,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { History } from 'lucide-vue-next'
-import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials } from '../stores/useAppStore.js'
+import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
 
@@ -103,7 +103,8 @@ const descriptions = computed(() => [
 
 .id-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
 .id-chip { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 4px 11px; }
-.id-assignee { display: inline-flex; align-items: center; gap: 6px; }
+.id-assignee { display: inline-flex; align-items: center; gap: 6px; border: none; cursor: pointer; transition: filter 0.15s; }
+.id-assignee:hover { filter: brightness(0.95); }
 
 .id-attrib { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 12px 0 2px; font-size: 12px; color: var(--clr-text-3); }
 .id-attrib strong { color: var(--clr-text-2); font-weight: 600; }

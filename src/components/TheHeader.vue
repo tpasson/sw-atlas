@@ -119,6 +119,24 @@
           </div>
         </span>
 
+        <span
+          v-if="lateItems.length"
+          class="risk-hdr"
+          title="Overdue items (progress set, past their date)"
+          @mouseenter="hoverLate = true"
+          @mouseleave="hoverLate = false"
+        >
+          <Clock :size="14" />
+          {{ lateItems.length }}
+          <div v-if="hoverLate" class="risk-pop">
+            <div class="risk-pop-title">Overdue ({{ lateItems.length }})</div>
+            <div v-for="m in lateItems" :key="m.id" class="risk-pop-row" @click.stop="focusRisk(m.id)">
+              <span class="risk-pop-name">{{ m.title }}</span>
+              <span class="risk-pop-sub">{{ m.progress }}% done</span>
+            </div>
+          </div>
+        </span>
+
         <span v-if="baselines.activeId" class="view-pill" title="Viewing a saved baseline — editing is disabled">
           <span class="view-dot"></span>
           Viewing baseline
@@ -127,11 +145,23 @@
         <template v-if="authenticated">
           <!-- Project switcher -->
           <div v-if="workspace.myWorkspaces.length" class="bl-dd proj-dd" ref="projRef">
-            <button class="bl-select" :class="{ open: projOpen }" title="Switch project" @click="projOpen = !projOpen">
+            <button class="bl-select" :class="{ open: projOpen, guest: isForeign }" title="Switch plan" @click="toggleProj">
+              <Eye v-if="isForeign" :size="13" class="bl-guest-ic" />
               <span class="bl-cur">{{ currentProjectName }}</span>
               <svg class="bl-chevron" width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <div v-if="projOpen" class="bl-menu proj-menu">
+              <!-- Foreign plan: you're a guest here (not in your workspaces). -->
+              <template v-if="isForeign">
+                <div class="proj-sec">Viewing<span class="proj-sec-hint">a plan that isn't yours</span></div>
+                <div class="bl-opt active proj-guest">
+                  <span class="proj-glyph proj-glyph-guest"><Eye :size="13" /></span>
+                  <span class="bl-opt-name">{{ currentPublic?.name || currentProjectName }}</span>
+                  <span class="bl-opt-sub">{{ currentPublic?.ownerName || 'guest' }}</span>
+                </div>
+                <div class="proj-divider"></div>
+              </template>
+
               <!-- Your personal space (your /{username} home plan). -->
               <div class="proj-sec">Your area</div>
               <button
@@ -147,31 +177,39 @@
 
               <!-- Collaborative projects — invite others to work together. -->
               <div class="proj-sec">Projects<span class="proj-sec-hint">invite people to collaborate</span></div>
-              <button
+              <div
                 v-for="p in projects"
                 :key="p.slug"
-                class="bl-opt"
+                class="proj-row"
                 :class="{ active: p.slug === workspace.slug }"
-                @click="goProject(p.slug)"
               >
-                <span class="proj-glyph proj-glyph-team"><Users :size="13" /></span>
-                <span class="bl-opt-name">{{ p.name }}</span>
-                <span class="bl-opt-sub">{{ p.role }}</span>
-              </button>
+                <button class="proj-main" @click="goProject(p.slug)">
+                  <span class="proj-glyph proj-glyph-team"><Users :size="13" /></span>
+                  <span class="bl-opt-name">{{ p.name }}</span>
+                </button>
+                <div class="proj-acts">
+                  <template v-if="p.role === 'owner'">
+                    <button class="proj-act-ic" title="Invite people" @click.stop="inviteProj(p)"><UserPlus :size="15" /></button>
+                    <button class="proj-act-ic" title="Rename" @click.stop="renameProj(p)"><Pencil :size="15" /></button>
+                    <button class="proj-act-ic danger" title="Delete project" @click.stop="deleteProj(p)"><Trash2 :size="15" /></button>
+                  </template>
+                  <button v-else class="proj-act-ic" title="Leave project" @click.stop="leaveProj(p)"><LogOut :size="15" /></button>
+                </div>
+              </div>
               <p v-if="!projects.length" class="proj-empty">No projects yet — create one to invite collaborators.</p>
               <button class="bl-opt proj-new" @click="newProject"><Plus :size="14" /> New project</button>
 
-              <!-- Manage the project you're currently in. -->
-              <template v-if="currentIsProject">
+              <!-- Other public plans on this instance — read-only, hop between them. -->
+              <template v-if="otherPublic.length">
                 <div class="proj-divider"></div>
-                <div class="proj-sec">Manage “{{ currentProjectName }}”</div>
-                <template v-if="workspace.role === 'owner'">
-                  <button class="bl-opt proj-action" @click="inviteToProject"><UserPlus :size="14" /> Invite people…</button>
-                  <button class="bl-opt proj-action" @click="renameCurrent"><Pencil :size="14" /> Rename…</button>
-                  <button class="bl-opt proj-del" @click="deleteCurrent"><Trash2 :size="14" /> Delete project</button>
-                </template>
-                <button v-else class="bl-opt proj-leave" @click="leaveCurrent"><LogOut :size="14" /> Leave project</button>
+                <div class="proj-sec">Public plans<span class="proj-sec-hint">read-only</span></div>
+                <button v-for="p in otherPublic" :key="p.slug" class="bl-opt" @click="goProject(p.slug)">
+                  <span class="proj-glyph proj-glyph-public"><Globe :size="13" /></span>
+                  <span class="bl-opt-name">{{ p.name || p.slug }}</span>
+                  <span class="bl-opt-sub">{{ p.ownerName }}</span>
+                </button>
               </template>
+
             </div>
           </div>
 
@@ -181,7 +219,7 @@
             <span v-if="!baselines.activeId" class="edit-pill"><span class="edit-dot"></span>Editing</span>
             <button v-if="!baselines.activeId" class="hdr-icon-btn" title="Save current plan as a baseline" @click="onSaveBaseline"><Bookmark :size="16" /></button>
           </template>
-          <span v-else class="view-pill" title="You are viewing this plan read-only"><span class="view-dot"></span>Viewing</span>
+          <span v-else class="view-pill" title="You are viewing this plan read-only"><span class="view-dot"></span>Read only</span>
         </template>
 
         <template v-else>
@@ -197,8 +235,8 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { Sun, Moon, AlertTriangle, Settings, Bookmark, User, Users, UserPlus, Plus, Pencil, Trash2, LogOut } from 'lucide-vue-next'
-import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, ui, session, workspace, canEditWorkspace, createProject, loadMyWorkspaces } from '../stores/useAppStore.js'
+import { Sun, Moon, AlertTriangle, Clock, Settings, Bookmark, User, Users, UserPlus, Plus, Pencil, Trash2, LogOut, Eye, Globe } from 'lucide-vue-next'
+import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, ui, session, workspace, canEditWorkspace, createProject, loadMyWorkspaces } from '../stores/useAppStore.js'
 import { api } from '../api.js'
 import { APP_VERSION } from '../version.js'
 
@@ -226,6 +264,25 @@ const projects = computed(() => workspace.myWorkspaces.filter(p => p.slug !== wo
 const currentIsProject = computed(() =>
   !!workspace.slug && workspace.slug !== workspace.ownSlug && projects.value.some(p => p.slug === workspace.slug))
 
+// A "foreign" plan is one you're viewing but don't belong to (public/guest).
+const isForeign = computed(() => !!workspace.slug && !workspace.myWorkspaces.some(p => p.slug === workspace.slug))
+
+// Public plans (loaded lazily when the switcher opens) so you can hop between the
+// schedules available to you — and clearly see when you're a guest on one.
+const publicPlans = ref([])
+async function loadPublicPlans() {
+  try { publicPlans.value = (await api.listPublicWorkspaces()).workspaces || [] } catch { /* ignore */ }
+}
+const currentPublic = computed(() => publicPlans.value.find(p => p.slug === workspace.slug) || null)
+const otherPublic = computed(() => {
+  const mine = new Set(workspace.myWorkspaces.map(p => p.slug))
+  return publicPlans.value.filter(p => !mine.has(p.slug) && p.slug !== workspace.slug)
+})
+function toggleProj() {
+  projOpen.value = !projOpen.value
+  if (projOpen.value) loadPublicPlans()
+}
+
 function goProject(slug) {
   projOpen.value = false
   window.location.assign('/' + encodeURIComponent(slug))
@@ -236,24 +293,32 @@ async function newProject() {
   if (!name || !name.trim()) return
   try { await createProject(name.trim()) } catch (e) { alert(e?.message || 'Could not create the project') }
 }
-function inviteToProject() {
+// Per-project actions (each works by slug, so they run inline from the list).
+function inviteProj(p) {
   projOpen.value = false
-  emit('manage', 'members') // open Settings straight on the Members tab
+  if (p.slug === workspace.slug) { emit('manage', 'members'); return } // members panel of the open project
+  goProject(p.slug) // otherwise switch into it to manage members
 }
-async function renameCurrent() {
-  const name = prompt('Rename project:', currentProjectName.value)
+async function renameProj(p) {
+  const name = prompt('Rename project:', p.name)
   if (!name || !name.trim()) return
-  try { await api.renameProject(workspace.slug, name.trim()); await loadMyWorkspaces() } catch (e) { alert(e?.message || 'Rename failed') }
+  try { await api.renameProject(p.slug, name.trim()); await loadMyWorkspaces() } catch (e) { alert(e?.message || 'Rename failed') }
 }
-async function deleteCurrent() {
-  projOpen.value = false
-  if (!confirm(`Delete “${currentProjectName.value}” and all of its data? This can’t be undone.`)) return
-  try { await api.deleteProject(workspace.slug); window.location.assign('/') } catch (e) { alert(e?.message || 'Could not delete the project') }
+async function deleteProj(p) {
+  if (!confirm(`Delete “${p.name}” and all of its data? This can’t be undone.`)) return
+  try {
+    await api.deleteProject(p.slug)
+    if (p.slug === workspace.slug) window.location.assign('/')
+    else await loadMyWorkspaces()
+  } catch (e) { alert(e?.message || 'Could not delete the project') }
 }
-async function leaveCurrent() {
-  projOpen.value = false
+async function leaveProj(p) {
   if (!confirm('Leave this project? You will lose access until an owner re-invites you.')) return
-  try { await api.leaveProject(workspace.slug); window.location.assign('/') } catch (e) { alert(e?.message || 'Could not leave the project') }
+  try {
+    await api.leaveProject(p.slug)
+    if (p.slug === workspace.slug) window.location.assign('/')
+    else await loadMyWorkspaces()
+  } catch (e) { alert(e?.message || 'Could not leave the project') }
 }
 
 // Account menu (username avatar → log out / about).
@@ -285,7 +350,8 @@ function jumpBaseline(dir) {
 }
 
 const hoverRisk = ref(false)
-function focusRisk(id) { ui.focusItemId = id; hoverRisk.value = false }
+const hoverLate = ref(false)
+function focusRisk(id) { ui.focusItemId = id; hoverRisk.value = false; hoverLate.value = false }
 
 // Today's date + ISO calendar week, shown next to the brand.
 function isoWeek(dt) {
@@ -666,6 +732,9 @@ async function onSaveBaseline() {
   transition: background 0.15s, border-color 0.15s;
 }
 .bl-select:hover, .bl-select.open { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.22); }
+.bl-select.guest { border-color: rgba(255,149,0,0.5); background: rgba(255,149,0,0.12); }
+.bl-select.guest:hover, .bl-select.guest.open { background: rgba(255,149,0,0.2); }
+.bl-guest-ic { flex-shrink: 0; color: #FF9F0A; margin-right: -2px; }
 .bl-cur { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .bl-chevron { flex-shrink: 0; opacity: 0.7; transition: transform 0.18s; }
 .bl-select.open .bl-chevron { transform: rotate(180deg); }
@@ -674,8 +743,8 @@ async function onSaveBaseline() {
   position: absolute;
   top: calc(100% + 6px);
   left: 50%; transform: translateX(-50%);
-  min-width: 240px; max-width: 340px;
-  max-height: 340px; overflow-y: auto;
+  min-width: 240px; max-width: 400px;
+  max-height: 360px; overflow-y: auto;
   background: var(--clr-surface);
   border: 1px solid var(--clr-border-light);
   border-radius: var(--r-lg);
@@ -697,9 +766,21 @@ async function onSaveBaseline() {
 .bl-opt-sub { font-size: 11px; color: var(--clr-text-3); white-space: nowrap; flex-shrink: 0; }
 
 /* Project switcher: separate the personal home plan from collaborative projects. */
-.proj-menu { min-width: 264px; }
+.proj-menu { min-width: 320px; }
 .proj-menu .bl-opt { align-items: center; justify-content: flex-start; }
 .proj-menu .bl-opt .bl-opt-sub { margin-left: auto; text-transform: capitalize; }
+
+/* Project rows with inline manage icons (no separate "Manage" section). */
+.proj-row { display: flex; align-items: center; gap: 4px; border-radius: 8px; padding-right: 4px; transition: background 0.12s; }
+.proj-row:hover { background: var(--clr-surface-2); }
+.proj-row.active { background: rgba(0,113,227,0.1); }
+.proj-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; background: none; cursor: pointer; padding: 8px 6px 8px 10px; text-align: left; }
+.proj-row.active .bl-opt-name { color: var(--clr-accent); font-weight: 600; }
+.proj-acts { display: flex; gap: 1px; flex-shrink: 0; }
+.proj-act-ic { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--clr-text-3); background: none; transition: background 0.12s, color 0.12s; }
+.proj-act-ic:hover { background: var(--clr-border-light); color: var(--clr-text); }
+.proj-act-ic.danger:hover { background: rgba(255,59,48,0.1); color: var(--clr-danger); }
 .proj-sec {
   display: flex; align-items: baseline; gap: 6px;
   padding: 9px 10px 4px;
@@ -713,6 +794,9 @@ async function onSaveBaseline() {
 }
 .proj-glyph-home { background: rgba(0,113,227,0.12); color: var(--clr-accent); }
 .proj-glyph-team { background: var(--clr-surface-2); color: var(--clr-text-2); }
+.proj-glyph-guest { background: rgba(255,149,0,0.16); color: #E8890C; }
+.proj-glyph-public { background: var(--clr-surface-2); color: var(--clr-text-3); }
+.proj-guest { cursor: default; }
 .proj-empty { padding: 2px 10px 6px; font-size: 12px; color: var(--clr-text-3); line-height: 1.45; }
 .proj-divider { height: 1px; background: var(--clr-border-light); margin: 6px 4px; }
 .proj-new, .proj-action, .proj-leave, .proj-del { gap: 8px; font-size: 13px; color: var(--clr-text-2); }

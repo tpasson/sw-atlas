@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div class="backdrop" @click.self="$emit('close')">
+      <div class="backdrop">
         <Transition name="modal-panel" appear>
           <div class="panel">
             <!-- Header -->

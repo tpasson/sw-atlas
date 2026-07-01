@@ -54,6 +54,13 @@ func main() {
 }
 
 func runServe(cfg config.Config) {
+	// Fail closed: a weak/default session secret means the JWT signing key (and
+	// the token-encryption fallback key) is publicly known → forgeable sessions.
+	if s := cfg.SessionSecret; s == "" || s == "dev-insecure-change-me" || len(s) < 32 {
+		log.Fatal("refusing to start: ATLAS_SESSION_SECRET is unset, the insecure default, or shorter than 32 chars. " +
+			"Set a strong random value — e.g.  openssl rand -hex 32")
+	}
+
 	must(db.Up(cfg.DatabaseURL)) // auto-migrate on startup
 
 	pool, err := db.Connect(context.Background(), cfg.DatabaseURL)

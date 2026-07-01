@@ -21,7 +21,7 @@ func Load() Config {
 		ListenAddr:     env("ATLAS_LISTEN_ADDR", ":8080"),
 		DatabaseURL:    env("ATLAS_DATABASE_URL", "postgres://atlas:atlas@localhost:5432/atlas?sslmode=disable"),
 		SessionSecret:  env("ATLAS_SESSION_SECRET", "dev-insecure-change-me"),
-		EditorUsername: env("ATLAS_EDITOR_USERNAME", "editor"),
+		EditorUsername: env("ATLAS_ADMIN_USERNAME", env("ATLAS_EDITOR_USERNAME", "atlas-admin")),
 		EditorHash:     editorHash(),
 		StaticDir:      os.Getenv("ATLAS_STATIC_DIR"),
 	}

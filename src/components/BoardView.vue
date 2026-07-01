@@ -28,7 +28,7 @@
           <span class="bv-card-title">{{ m.title }}</span>
           <div class="bv-card-foot">
             <span class="bv-card-meta">{{ typeLabel(m) }}<template v-if="m.when"> · {{ m.when }}</template></span>
-            <span v-if="m.assigneeId" class="bv-av" :title="memberName(m.assigneeId)">{{ memberInitials(m.assigneeId) }}</span>
+            <span v-if="m.assigneeId" class="bv-av" :title="memberName(m.assigneeId)" @click.stop="openProfile(memberById(m.assigneeId), $event)">{{ memberInitials(m.assigneeId) }}</span>
           </div>
         </div>
         <div v-if="!col.items.length" class="bv-col-empty">—</div>
@@ -39,7 +39,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store, itemTypes, MATURITY_STAGES, useAppStore, memberInitials, memberName } from '../stores/useAppStore.js'
+import { store, itemTypes, MATURITY_STAGES, useAppStore, memberInitials, memberName, memberById, openProfile } from '../stores/useAppStore.js'
 
 const props = defineProps({ readOnly: { type: Boolean, default: false } })
 defineEmits(['edit'])
@@ -86,9 +86,10 @@ function onDrop(key) {
 .bv-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .bv-card-meta { font-size: 11px; color: var(--clr-text-3); }
 .bv-av {
-  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; color: #fff; background: var(--clr-accent);
 }
+.bv-av:hover { filter: brightness(1.1); }
 .bv-col-empty { font-size: 12px; color: var(--clr-text-3); text-align: center; padding: 10px 0; }
 </style>

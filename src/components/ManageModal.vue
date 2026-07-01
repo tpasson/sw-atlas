@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div class="backdrop" @click.self="$emit('close')">
+      <div class="backdrop">
         <Transition name="modal-panel" appear>
           <div class="panel">
             <!-- Header -->
@@ -17,14 +17,11 @@
             <!-- Tabs -->
             <div class="tabs" role="tablist">
               <button class="tab" :class="{ active: tab === 'areas' }" @click="tab = 'areas'">Areas</button>
-              <button v-if="canAdmin" class="tab" :class="{ active: tab === 'display' }" @click="tab = 'display'">Display</button>
               <button v-if="canAdmin" class="tab" :class="{ active: tab === 'types' }" @click="tab = 'types'">Types</button>
               <button class="tab" :class="{ active: tab === 'baselines' }" @click="tab = 'baselines'">Baselines</button>
               <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
               <button v-if="!isDemo && canAdmin" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
               <button v-if="!isDemo && workspace.role === 'owner'" class="tab" :class="{ active: tab === 'members' }" @click="tab = 'members'">Members</button>
-              <button v-if="!isDemo && session.role === 'admin'" class="tab" :class="{ active: tab === 'users' }" @click="tab = 'users'">Users</button>
-              <button v-if="!isDemo && session.authenticated" class="tab" :class="{ active: tab === 'account' }" @click="tab = 'account'">Account</button>
             </div>
 
             <div class="panel-body">
@@ -212,223 +209,6 @@
               </section>
 
               <!-- ───────────────── DISPLAY ───────────────── -->
-              <section v-show="tab === 'display'" class="tab-pane">
-                <div class="card">
-                  <p class="section-label">Item icons</p>
-                  <p class="card-hint">Each item's icon &amp; colour come from its <strong>type</strong> (Settings → Types). These control how big they render.</p>
-                  <div class="opt-row">
-                    <label class="opt">Icon size
-                      <input type="range" min="10" max="22" step="1" v-model.number="settings.items.markerSize" />
-                      <span class="opt-val">{{ settings.items.markerSize }}px</span>
-                    </label>
-                    <label class="opt">Line thickness
-                      <input type="range" min="1" max="3" step="0.25" v-model.number="settings.items.markerStroke" />
-                      <span class="opt-val">{{ settings.items.markerStroke }}</span>
-                    </label>
-                  </div>
-                </div>
-                <div class="card">
-                  <p class="section-label">Today indicator</p>
-                  <div class="row-between">
-                    <div class="setting-info">
-                      <span class="setting-name">Month highlight</span>
-                      <span class="setting-desc">Tint the column of the current month</span>
-                    </div>
-                    <button class="toggle" :class="{ active: settings.monthHighlight.enabled }" @click="settings.monthHighlight.enabled = !settings.monthHighlight.enabled">
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                  <div v-if="settings.monthHighlight.enabled" class="opt-row">
-                    <label class="opt">Color <input type="color" v-model="settings.monthHighlight.color" /></label>
-                    <label class="opt">Opacity
-                      <input type="range" min="0" max="0.3" step="0.01" v-model.number="settings.monthHighlight.opacity" />
-                      <span class="opt-val">{{ Math.round(settings.monthHighlight.opacity * 100) }}%</span>
-                    </label>
-                  </div>
-
-                  <div class="row-between">
-                    <div class="setting-info">
-                      <span class="setting-name">Today line</span>
-                      <span class="setting-desc">Vertical line at today's exact date</span>
-                    </div>
-                    <button class="toggle" :class="{ active: settings.dayLine.enabled }" @click="settings.dayLine.enabled = !settings.dayLine.enabled">
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                  <div v-if="settings.dayLine.enabled" class="opt-row">
-                    <label class="opt">Color <input type="color" v-model="settings.dayLine.color" /></label>
-                    <label class="opt">Opacity
-                      <input type="range" min="0" max="1" step="0.05" v-model.number="settings.dayLine.opacity" />
-                      <span class="opt-val">{{ Math.round(settings.dayLine.opacity * 100) }}%</span>
-                    </label>
-                    <label class="opt">Width
-                      <input type="range" min="0.5" max="6" step="0.5" v-model.number="settings.dayLine.width" />
-                      <span class="opt-val">{{ settings.dayLine.width }}px</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div class="card">
-                  <div class="row-between">
-                    <div class="setting-info">
-                      <span class="setting-name">Calendar weeks (CW)</span>
-                      <span class="setting-desc">Show ISO week numbers under the months</span>
-                    </div>
-                    <button class="toggle" :class="{ active: settings.weekNumbers.enabled }" @click="settings.weekNumbers.enabled = !settings.weekNumbers.enabled">
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                </div>
-
-                <div class="card">
-                  <p class="section-label">Gridlines</p>
-
-                  <div class="row-between">
-                    <div class="setting-info">
-                      <span class="setting-name">Month lines</span>
-                      <span class="setting-desc">Vertical separators between months</span>
-                    </div>
-                    <button class="toggle" :class="{ active: settings.monthLines.enabled }" @click="settings.monthLines.enabled = !settings.monthLines.enabled">
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                  <div v-if="settings.monthLines.enabled" class="opt-row">
-                    <label class="opt">Color <input type="color" v-model="settings.monthLines.color" /></label>
-                    <label class="opt">Opacity
-                      <input type="range" min="0" max="1" step="0.02" v-model.number="settings.monthLines.opacity" />
-                      <span class="opt-val">{{ Math.round(settings.monthLines.opacity * 100) }}%</span>
-                    </label>
-                    <label class="opt">Width
-                      <input type="range" min="0.5" max="6" step="0.5" v-model.number="settings.monthLines.width" />
-                      <span class="opt-val">{{ settings.monthLines.width }}px</span>
-                    </label>
-                  </div>
-
-                  <div class="row-between">
-                    <div class="setting-info">
-                      <span class="setting-name">Week lines</span>
-                      <span class="setting-desc">Fine vertical lines at each calendar week</span>
-                    </div>
-                    <button class="toggle" :class="{ active: settings.weekLines.enabled }" @click="settings.weekLines.enabled = !settings.weekLines.enabled">
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                  <div v-if="settings.weekLines.enabled" class="opt-row">
-                    <label class="opt">Color <input type="color" v-model="settings.weekLines.color" /></label>
-                    <label class="opt">Opacity
-                      <input type="range" min="0" max="1" step="0.02" v-model.number="settings.weekLines.opacity" />
-                      <span class="opt-val">{{ Math.round(settings.weekLines.opacity * 100) }}%</span>
-                    </label>
-                    <label class="opt">Width
-                      <input type="range" min="0.5" max="6" step="0.5" v-model.number="settings.weekLines.width" />
-                      <span class="opt-val">{{ settings.weekLines.width }}px</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div class="card">
-                  <p class="section-label">Items (milestones &amp; events)</p>
-                  <p class="card-hint">Appearance of markers and event bars, incl. the spacing of the hover outline.</p>
-                  <div class="row-between">
-                    <span class="setting-name">Item border</span>
-                    <div class="seg-mini">
-                      <button type="button" :class="{ on: settings.items.borderMode === 'always' }" @click="settings.items.borderMode = 'always'">Always</button>
-                      <button type="button" :class="{ on: settings.items.borderMode === 'hover' }" @click="settings.items.borderMode = 'hover'">On hover</button>
-                      <button type="button" :class="{ on: settings.items.borderMode === 'off' }" @click="settings.items.borderMode = 'off'">Off</button>
-                    </div>
-                  </div>
-                  <div class="row-between">
-                    <span class="setting-name">Density
-                      <span class="setting-sub">how many markers stack in one spot</span>
-                    </span>
-                    <div class="seg-mini">
-                      <button type="button" :class="{ on: settings.items.density === 'stack' }" @click="settings.items.density = 'stack'" title="Stack them all (tallest)">Stack</button>
-                      <button type="button" :class="{ on: settings.items.density === 'cluster' }" @click="settings.items.density = 'cluster'" title="Cap the stack, collapse the rest into a +N chip">Cluster</button>
-                      <button type="button" :class="{ on: settings.items.density === 'rail' }" @click="settings.items.density = 'rail'" title="Collapse markers to a single tick row">Rail</button>
-                    </div>
-                  </div>
-                  <div v-if="settings.items.density === 'cluster'" class="opt-row">
-                    <label class="opt">Max rows before “+N”
-                      <input type="range" min="2" max="6" step="1" v-model.number="settings.items.densityRows" />
-                      <span class="opt-val">{{ settings.items.densityRows }}</span>
-                    </label>
-                  </div>
-                  <div class="opt-row">
-                    <label class="opt">Font size
-                      <input type="range" min="9" max="18" step="0.5" v-model.number="settings.items.fontSize" />
-                      <span class="opt-val">{{ settings.items.fontSize }}px</span>
-                    </label>
-                    <label class="opt">Font weight
-                      <input type="range" min="300" max="700" step="100" v-model.number="settings.items.fontWeight" />
-                      <span class="opt-val">{{ ({ 300: 'Light', 400: 'Regular', 500: 'Medium', 600: 'Semibold', 700: 'Bold' })[settings.items.fontWeight] || settings.items.fontWeight }}</span>
-                    </label>
-                    <label class="opt">Padding
-                      <input type="range" min="0" max="12" step="1" v-model.number="settings.items.padding" />
-                      <span class="opt-val">{{ settings.items.padding }}px</span>
-                    </label>
-                    <label class="opt">Row margin
-                      <input type="range" min="0" max="20" step="1" v-model.number="settings.items.margin" />
-                      <span class="opt-val">{{ settings.items.margin }}px</span>
-                    </label>
-                  </div>
-                  <div class="opt-row">
-                    <label class="opt">Corner radius
-                      <input type="range" min="0" max="20" step="1" v-model.number="settings.items.radius" />
-                      <span class="opt-val">{{ settings.items.radius }}px</span>
-                    </label>
-                    <label class="opt">Border width
-                      <input type="range" min="0" max="5" step="0.5" v-model.number="settings.items.border" />
-                      <span class="opt-val">{{ settings.items.border }}px</span>
-                    </label>
-                    <label class="opt">Icon gap
-                      <input type="range" min="0" max="12" step="1" v-model.number="settings.items.iconGap" />
-                      <span class="opt-val">{{ settings.items.iconGap }}px</span>
-                    </label>
-                  </div>
-                  <div class="opt-row">
-                    <label class="opt">Label offset
-                      <input type="range" min="-4" max="4" step="1" v-model.number="settings.items.labelOffset" />
-                      <span class="opt-val">{{ settings.items.labelOffset > 0 ? '+' : '' }}{{ settings.items.labelOffset }}px</span>
-                    </label>
-                    <span class="opt-note">−  higher · +  lower (per-browser text alignment)</span>
-                  </div>
-                  <div class="opt-row">
-                    <label class="opt">Label fit buffer
-                      <input type="range" min="-20" max="40" step="2" v-model.number="settings.items.labelBuffer" />
-                      <span class="opt-val">{{ settings.items.labelBuffer > 0 ? '+' : '' }}{{ settings.items.labelBuffer }}px</span>
-                    </label>
-                    <span class="opt-note">event title inside vs. right of the bar (− = fits tighter)</span>
-                  </div>
-                  <div class="opt-row">
-                    <label class="opt">Event fill
-                      <input type="range" min="0" max="1" step="0.05" v-model.number="settings.items.eventOpacity" />
-                      <span class="opt-val">{{ Math.round(settings.items.eventOpacity * 100) }}%</span>
-                    </label>
-                    <label class="opt">Maturity size
-                      <input type="range" min="3" max="12" step="1" v-model.number="settings.items.maturitySize" />
-                      <span class="opt-val">{{ settings.items.maturitySize }}px</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div class="card">
-                  <p class="section-label">Layout</p>
-                  <p class="card-hint">Width of the frozen Area and Sub-Area columns. Longer names truncate with a hover tooltip.</p>
-                  <div class="opt-row">
-                    <label class="opt">Area width
-                      <input type="range" min="150" max="280" step="2" v-model.number="settings.layout.areaWidth" />
-                      <span class="opt-val">{{ settings.layout.areaWidth }}px</span>
-                    </label>
-                  </div>
-                  <div class="opt-row">
-                    <label class="opt">Sub-area width
-                      <input type="range" min="150" max="280" step="2" v-model.number="settings.layout.subAreaWidth" />
-                      <span class="opt-val">{{ settings.layout.subAreaWidth }}px</span>
-                    </label>
-                  </div>
-                </div>
-
-              </section>
 
 
               <!-- ───────────────── ITEM TYPES ───────────────── -->
@@ -498,18 +278,9 @@
                 <ShareManager />
                 <SubscriptionManager />
               </section>
-
-              <section v-if="tab === 'users' && session.role === 'admin'" class="tab-pane">
-                <UsersManager />
-              </section>
-
-              <section v-if="tab === 'account' && session.authenticated" class="tab-pane">
-                <AccountManager />
-              </section>
             </div>
 
             <div class="panel-footer">
-              <button class="reset-btn" @click="onResetSettings">Reset to defaults</button>
               <button class="btn-primary" @click="$emit('close')">Done</button>
             </div>
           </div>
@@ -525,9 +296,7 @@ import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, se
 import MarkerIcon from './MarkerIcon.vue'
 import ShareManager from './ShareManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
-import UsersManager from './UsersManager.vue'
 import MembersManager from './MembersManager.vue'
-import AccountManager from './AccountManager.vue'
 import TypesManager from './TypesManager.vue'
 
 const isDemo = import.meta.env.VITE_DEMO
@@ -566,7 +335,7 @@ defineEmits(['close'])
 const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 
 // Open on a requested tab when it's available to this user; fall back to Areas.
-const ALLOWED_INITIAL = ['areas', 'display', 'legend', 'types', 'baselines', 'data', 'sharing', 'members', 'users', 'account']
+const ALLOWED_INITIAL = ['areas', 'types', 'baselines', 'data', 'sharing', 'members']
 const tab = ref(ALLOWED_INITIAL.includes(props.initialTab) ? props.initialTab : 'areas')
 
 // Label a mirrored lane by what it's synced from (GitHub/Gitea/… or a subscription).
@@ -654,11 +423,6 @@ async function onDeleteBaseline(b) {
   if (confirm(`Delete baseline "${b.name}"?`)) await deleteBaseline(b.id)
 }
 
-function onResetSettings() {
-  if (confirm('Reset all view settings (today indicator, gridlines, calendar weeks, item style, legend labels) to defaults?')) {
-    resetSettings()
-  }
-}
 
 async function togglePublicRead() {
   try {

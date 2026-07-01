@@ -7,6 +7,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -31,6 +32,7 @@ type Session struct {
 	Role          string
 	WorkspaceID   string
 	WorkspaceSlug string
+	TokenVersion  int // must match the user's current token_version (revocation)
 }
 
 // sessionClaims embeds the registered JWT claims plus ATLAS identity fields.
@@ -40,6 +42,7 @@ type sessionClaims struct {
 	Role          string `json:"rol"`
 	WorkspaceID   string `json:"wsp"`
 	WorkspaceSlug string `json:"wss"`
+	TokenVersion  int    `json:"tv"`
 }
 
 // HashPassword returns a bcrypt hash suitable for storage.
@@ -53,6 +56,16 @@ func CheckPassword(hash, password string) bool {
 	return hash != "" && bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
+// dummyHash is a valid bcrypt hash used only to spend the same CPU time on a
+// login attempt for a non-existent user, so response timing doesn't reveal
+// whether a username exists.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("timing-equalizer"), bcrypt.DefaultCost)
+
+// DummyPasswordCheck runs a throwaway bcrypt comparison (constant-ish time).
+func DummyPasswordCheck(password string) {
+	_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+}
+
 func (a *Auth) issueToken(s Session) (string, error) {
 	claims := sessionClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -64,13 +77,16 @@ func (a *Auth) issueToken(s Session) (string, error) {
 		Role:          s.Role,
 		WorkspaceID:   s.WorkspaceID,
 		WorkspaceSlug: s.WorkspaceSlug,
+		TokenVersion:  s.TokenVersion,
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(a.secret)
 }
 
 // SetCookie issues a session token for the identity and stores it in an
-// http-only cookie.
-func (a *Auth) SetCookie(w http.ResponseWriter, s Session) error {
+// http-only cookie. Secure is set when the request arrived over HTTPS (directly
+// or via a trusted proxy's X-Forwarded-Proto), so the cookie never travels over
+// plain HTTP in a TLS deployment — while local http dev still works.
+func (a *Auth) SetCookie(w http.ResponseWriter, r *http.Request, s Session) error {
 	tok, err := a.issueToken(s)
 	if err != nil {
 		return err
@@ -80,10 +96,16 @@ func (a *Auth) SetCookie(w http.ResponseWriter, s Session) error {
 		Value:    tok,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(sessionTTL),
 	})
 	return nil
+}
+
+// isHTTPS reports whether the request effectively arrived over TLS.
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // ClearCookie removes the session cookie.
@@ -121,6 +143,7 @@ func (a *Auth) SessionFromRequest(r *http.Request) (Session, bool) {
 		Role:          claims.Role,
 		WorkspaceID:   claims.WorkspaceID,
 		WorkspaceSlug: claims.WorkspaceSlug,
+		TokenVersion:  claims.TokenVersion,
 	}, true
 }
 

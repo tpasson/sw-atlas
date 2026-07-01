@@ -30,7 +30,9 @@
       </div>
 
       <div v-for="m in members" :key="m.userId" class="mm-row">
-        <span class="mm-name">{{ m.username }}</span>
+        <button type="button" class="mm-name" title="View profile" @click="openProfile(m, $event)">
+          {{ personName(m) }}<span v-if="personName(m) !== m.username" class="mm-user">@{{ m.username }}</span>
+        </button>
         <select class="mm-in mm-role" :value="m.role" @change="changeRole(m, $event.target.value)">
           <option value="owner">Owner</option>
           <option value="editor">Editor</option>
@@ -49,7 +51,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
-import { workspace } from '../stores/useAppStore.js'
+import { workspace, openProfile, personName } from '../stores/useAppStore.js'
 
 const props = defineProps({ slug: { type: String, required: true } })
 
@@ -113,7 +115,10 @@ async function remove(m) {
 <style scoped>
 .mm-invite { display: flex; gap: 8px; align-items: center; }
 .mm-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--clr-border-light); }
-.mm-name { flex: 1; font-size: 14px; font-weight: 600; color: var(--clr-text); }
+.mm-name { flex: 1; min-width: 0; text-align: left; font-size: 14px; font-weight: 600; color: var(--clr-text);
+  background: none; border: none; cursor: pointer; padding: 2px 4px; margin: -2px -4px; border-radius: 6px; transition: background 0.15s; }
+.mm-name:hover { background: var(--clr-surface-2); }
+.mm-user { margin-left: 6px; font-size: 12px; font-weight: 500; color: var(--clr-text-3); }
 .mm-name-in { flex: 1; }
 .mm-in {
   border: 1px solid var(--clr-border); border-radius: var(--r-sm);

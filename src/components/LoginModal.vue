@@ -1,11 +1,11 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div class="backdrop" @click.self="$emit('close')">
+      <div class="backdrop">
         <Transition name="modal-panel" appear>
           <div class="panel">
             <div class="panel-header">
-              <h2 class="panel-title">Editor login</h2>
+              <h2 class="panel-title">Login</h2>
               <button class="btn-close" @click="$emit('close')">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
@@ -46,7 +46,7 @@ import { useAppStore } from '../stores/useAppStore.js'
 const emit = defineEmits(['close'])
 const { login } = useAppStore()
 
-const username = ref('editor')
+const username = ref('atlas-admin')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)

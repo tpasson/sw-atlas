@@ -55,9 +55,9 @@ func TestUserAccounts(t *testing.T) {
 	_, err = s.CreateSwimlane(ctx, DefaultWorkspaceID, "sw-admin", "Admin lane", "#0A84FF")
 	must("admin swimlane", err)
 
-	bob, err := s.CreateUser(ctx, "Bob", "hash-bob", RoleEditor)
+	bob, err := s.CreateUser(ctx, "Bob", "hash-bob", RoleUser)
 	must("create bob", err)
-	if bob.Role != RoleEditor || bob.WorkspaceID == DefaultWorkspaceID || bob.Username != "bob" {
+	if bob.Role != RoleUser || bob.WorkspaceID == DefaultWorkspaceID || bob.Username != "bob" {
 		t.Fatalf("bob wrong: %+v", bob)
 	}
 	// Bob's fresh workspace is empty (isolated from the admin's default plan).
@@ -72,17 +72,39 @@ func TestUserAccounts(t *testing.T) {
 	}
 
 	// ── duplicate username conflicts ────────────────────────────────────────
-	if _, err := s.CreateUser(ctx, "bob", "x", RoleEditor); err != ErrConflict {
+	if _, err := s.CreateUser(ctx, "bob", "x", RoleUser); err != ErrConflict {
 		t.Fatalf("duplicate username: want ErrConflict, got %v", err)
 	}
 
 	// ── role + last-admin guards ────────────────────────────────────────────
-	if err := s.SetUserRole(ctx, admin.ID, RoleEditor); err != ErrLastAdmin {
+	if err := s.SetUserRole(ctx, admin.ID, RoleUser); err != ErrLastAdmin {
 		t.Fatalf("demoting sole admin: want ErrLastAdmin, got %v", err)
 	}
 	must("promote bob", s.SetUserRole(ctx, bob.ID, RoleAdmin)) // now two admins
-	must("demote admin ok", s.SetUserRole(ctx, admin.ID, RoleEditor))
+	must("demote admin ok", s.SetUserRole(ctx, admin.ID, RoleUser))
 	must("restore admin", s.SetUserRole(ctx, admin.ID, RoleAdmin))
+
+	// ── rename: username + home workspace slug follow; guards on taken/reserved ─
+	carol, err := s.CreateUser(ctx, "carol", "h", RoleUser)
+	must("create carol", err)
+	newSlug, _, err := s.RenameUser(ctx, carol.ID, "Caroline")
+	must("rename carol", err)
+	if newSlug != "caroline" {
+		t.Fatalf("rename slug: want caroline, got %q", newSlug)
+	}
+	if _, _, err := s.GetUserByUsername(ctx, "caroline"); err != nil {
+		t.Fatalf("renamed user not found by new name: %v", err)
+	}
+	if ws, err := s.GetWorkspaceBySlug(ctx, "caroline"); err != nil || ws.ID != carol.WorkspaceID {
+		t.Fatalf("home slug should follow the rename: err=%v ws=%+v", err, ws)
+	}
+	if _, _, err := s.RenameUser(ctx, carol.ID, "editor"); err != ErrConflict {
+		t.Fatalf("rename to a taken name: want ErrConflict, got %v", err)
+	}
+	if _, _, err := s.RenameUser(ctx, carol.ID, "api"); err == nil {
+		t.Fatalf("rename to a reserved slug should fail")
+	}
+	must("cleanup carol", s.DeleteUser(ctx, carol.ID))
 
 	// ── deletion guards: protected bootstrap admin, then cascade ────────────
 	if err := s.DeleteUser(ctx, admin.ID); err != ErrProtected {

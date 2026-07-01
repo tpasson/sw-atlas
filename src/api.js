@@ -38,11 +38,14 @@ const realApi = {
   login: (username, password) => req('POST', '/login', { username, password }),
   logout: () => req('POST', '/logout'),
   changeOwnPassword: (password) => req('PUT', '/account/password', { password }),
+  renameOwnUsername: (username) => req('PUT', '/account/username', { username }),
+  updateOwnProfile: (data) => req('PUT', '/account/profile', data),
 
   // users (admin only)
   listUsers: () => req('GET', '/users'),
   createUser: (data) => req('POST', '/users', data),
   setUserRole: (id, role) => req('PUT', `/users/${id}/role`, { role }),
+  renameUser: (id, username) => req('PUT', `/users/${id}/username`, { username }),
   setUserPassword: (id, password) => req('PUT', `/users/${id}/password`, { password }),
   deleteUser: (id) => req('DELETE', `/users/${id}`),
 
@@ -75,6 +78,11 @@ const realApi = {
   setGroups: (groups) => req('PUT', '/settings/groups', { groups }),
   getUISettings: () => req('GET', '/settings/ui'),
   setUISettings: (settings) => req('PUT', '/settings/ui', { settings }),
+  // Global (instance-wide) Display config — read by all, written by site admins.
+  getInstanceUISettings: () => req('GET', '/instance/ui-settings'),
+  setInstanceUISettings: (settings) => req('PUT', '/instance/ui-settings', { settings }),
+  getServerInfo: () => req('GET', '/instance/server'),
+  setServerSettings: (settings) => req('PUT', '/instance/server', { settings }),
   getGitColors: () => req('GET', '/settings/git-colors'),
   setGitColors: (colors) => req('PUT', '/settings/git-colors', colors),
 

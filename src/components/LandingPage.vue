@@ -22,15 +22,7 @@
         </div>
 
         <div class="header-right">
-          <button class="hdr-icon-btn" :title="theme === 'dark' ? 'Light mode' : 'Dark mode'" @click="toggleTheme">
-            <Sun v-if="theme === 'dark'" :size="16" />
-            <Moon v-else :size="16" />
-          </button>
-          <template v-if="session.authenticated">
-            <button v-if="workspace.ownSlug" class="btn-manage" @click="goTo(workspace.ownSlug)">My plan</button>
-            <button class="btn-manage" @click="$emit('logout')">Log out</button>
-          </template>
-          <button v-else class="btn-manage" @click="$emit('login')">Log in</button>
+          <button v-if="session.authenticated && workspace.ownSlug" class="btn-manage" @click="goTo(workspace.ownSlug)">My plan</button>
         </div>
       </div>
     </header>
@@ -60,19 +52,18 @@
 
 <script setup>
 import { ref, computed, onMounted, h } from 'vue'
-import { Sun, Moon } from 'lucide-vue-next'
+import { User } from 'lucide-vue-next'
 import { api } from '../api.js'
-import { session, workspace, settings, toggleTheme } from '../stores/useAppStore.js'
+import { session, workspace, openProfile, personName } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 
-defineEmits(['login', 'logout', 'about'])
+defineEmits(['about'])
 
 const version = APP_VERSION
 
 const plans = ref([])
 const ready = ref(false)
 const error = ref(null)
-const theme = computed(() => settings.theme)
 const isAdmin = computed(() => session.role === 'admin')
 
 const featured = computed(() => plans.value.filter(w => w.featured))
@@ -100,30 +91,53 @@ const PlanCard = {
   emits: ['open', 'feature'],
   setup(props, { emit }) {
     const fmt = (d) => { try { return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) } catch { return d } }
-    return () => h('div', { class: 'card', onClick: () => emit('open', props.w.slug) }, [
-      h('div', { class: 'card-head' }, [
-        h('span', { class: 'card-name' }, props.w.ownerName || props.w.slug),
-        props.admin
-          ? h('button', {
-              class: ['star', { on: props.w.featured }],
-              title: props.w.featured ? 'Unfeature' : 'Feature on the landing page',
-              onClick: (e) => { e.stopPropagation(); emit('feature', props.w) },
-            }, '★')
-          : null,
-      ]),
-      h('span', { class: 'card-slug' }, '/' + props.w.slug),
-      h('div', { class: 'card-meta' }, [
-        h('span', `${props.w.itemCount} milestone${props.w.itemCount === 1 ? '' : 's'}`),
-        props.w.nextDate ? h('span', { class: 'card-next' }, `next · ${fmt(props.w.nextDate)}`) : null,
-      ]),
-      props.w.nextTitle ? h('span', { class: 'card-title' }, props.w.nextTitle) : null,
-    ])
+    const fmtStamp = (d) => { try { return new Date(d).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) } catch { return d } }
+    return () => {
+      const w = props.w
+      const late = w.lateCount || 0
+      const kids = [
+        h('div', { class: 'card-head' }, [
+          h('div', { class: 'card-headtext' }, [
+            h('span', { class: 'card-name' }, w.name || w.slug),
+            h('span', { class: 'card-kind' }, w.personal ? 'Private schedule' : 'Project schedule'),
+          ]),
+          props.admin
+            ? h('button', {
+                class: ['star', { on: w.featured }],
+                title: w.featured ? 'Unfeature' : 'Feature on the landing page',
+                onClick: (e) => { e.stopPropagation(); emit('feature', w) },
+              }, '★')
+            : null,
+        ]),
+      ]
+      if (w.ownerName) {
+        const owner = { username: w.ownerName, firstName: w.ownerFirstName, lastName: w.ownerLastName, email: w.ownerEmail }
+        kids.push(h('div', {
+          class: 'card-owner',
+          title: 'View profile',
+          onClick: (e) => { e.stopPropagation(); openProfile(owner, e) },
+        }, [h(User, { size: 12 }), h('span', personName(owner))]))
+      }
+      if (w.itemCount > 0) {
+        kids.push(h('div', { class: ['card-status', late ? 'late' : 'ok'] }, [
+          h('span', { class: 'dot' }),
+          late ? `${late} item${late === 1 ? '' : 's'} late` : 'On track',
+        ]))
+      }
+      kids.push(h('div', { class: 'card-meta' }, [
+        h('span', `${w.itemCount} item${w.itemCount === 1 ? '' : 's'}`),
+        w.nextDate ? h('span', { class: 'card-next' }, `next · ${fmt(w.nextDate)}`) : null,
+      ]))
+      if (w.nextTitle) kids.push(h('span', { class: 'card-title' }, w.nextTitle))
+      if (w.lastChange) kids.push(h('span', { class: 'card-updated' }, `Updated ${fmtStamp(w.lastChange)}`))
+      return h('div', { class: 'card', onClick: () => emit('open', w.slug) }, kids)
+    }
   },
 }
 </script>
 
 <style scoped>
-.lp { min-height: 100vh; display: flex; flex-direction: column; background: var(--clr-bg); }
+.lp { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--clr-bg); overflow-y: auto; }
 
 /* Header — identical to TheHeader.vue so the landing matches the app. */
 .header { background: var(--clr-header); position: sticky; top: 0; z-index: 100;
@@ -155,18 +169,38 @@ const PlanCard = {
 .lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .lp-empty { font-size: 13.5px; color: var(--clr-text-3); padding: 12px 0; }
 
-/* card (rendered by the inline PlanCard) — matches the app's card styling */
-:deep(.card) { cursor: pointer; border: 1px solid var(--clr-border-light); border-radius: var(--r-lg);
-  padding: 14px 16px; background: var(--clr-surface); display: flex; flex-direction: column; gap: 5px;
-  box-shadow: var(--sh-sm); transition: border-color 0.15s, box-shadow 0.15s; }
-:deep(.card:hover) { border-color: var(--clr-border); box-shadow: var(--sh-md); }
-:deep(.card-head) { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-:deep(.card-name) { font-size: 15px; font-weight: 700; color: var(--clr-text); }
-:deep(.card-slug) { font-size: 12px; color: var(--clr-text-3); }
-:deep(.card-meta) { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--clr-text-2); margin-top: 4px; }
-:deep(.card-next) { color: var(--clr-accent); font-weight: 600; }
-:deep(.card-title) { font-size: 12.5px; color: var(--clr-text-3); margin-top: 2px;
+/* card (rendered by the inline PlanCard) — soft, elevated, Apple-like */
+:deep(.card) { cursor: pointer; border: 1px solid var(--clr-border-light); border-radius: 18px;
+  padding: 18px 18px 16px; background: var(--clr-surface); display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: transform 0.2s cubic-bezier(0.4,0,0.2,1), box-shadow 0.2s ease, border-color 0.2s ease; }
+:deep(.card:hover) { transform: translateY(-3px); border-color: var(--clr-border);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12); }
+:deep(.card:active) { transform: translateY(-1px); }
+:deep(.card-head) { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+:deep(.card-headtext) { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+:deep(.card-name) { font-size: 16px; font-weight: 650; letter-spacing: -0.25px; color: var(--clr-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:deep(.card-kind) { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); }
+:deep(.card-owner) { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+  font-size: 12.5px; color: var(--clr-text-2); cursor: pointer; border-radius: 6px; padding: 1px 4px; margin: -1px -4px; transition: background 0.15s; }
+:deep(.card-owner:hover) { background: var(--clr-surface-2); color: var(--clr-text); }
+:deep(.card-owner svg) { color: var(--clr-text-3); flex-shrink: 0; }
+
+/* status pill: On track (green) / N late (amber) */
+:deep(.card-status) { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  font-size: 12px; font-weight: 600; padding: 3px 11px 3px 8px; border-radius: 999px; }
+:deep(.card-status .dot) { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+:deep(.card-status.ok) { color: var(--clr-success); background: rgba(52,199,89,0.13); }
+:deep(.card-status.ok .dot) { background: #34C759; }
+:deep(.card-status.late) { color: var(--clr-warn); background: rgba(255,149,0,0.15); }
+:deep(.card-status.late .dot) { background: #FF9500; }
+
+:deep(.card-meta) { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--clr-text-2); }
+:deep(.card-next) { color: var(--clr-accent); font-weight: 600; }
+:deep(.card-title) { font-size: 12.5px; color: var(--clr-text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:deep(.card-updated) { font-size: 11px; color: var(--clr-text-3); letter-spacing: 0.1px; margin-top: 1px; }
 :deep(.star) { background: none; font-size: 15px; line-height: 1; color: var(--clr-border); padding: 2px 4px; border-radius: 4px; }
 :deep(.star.on) { color: #FFCC00; }
 :deep(.star:hover) { color: #FFCC00; }

@@ -11,11 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Roles. Editors may fully edit their own workspace; admins additionally manage
-// user accounts.
+// Account (site) roles. A "user" owns and edits their own workspace(s); an
+// "admin" additionally manages user accounts and the explore page. These are the
+// account roles — distinct from the per-workspace roles owner/editor/viewer.
 const (
-	RoleAdmin  = "admin"
-	RoleEditor = "editor"
+	RoleAdmin = "admin"
+	RoleUser  = "user"
 )
 
 var (
@@ -30,11 +31,15 @@ var (
 // User is an account. PasswordHash is never part of this struct — it is read and
 // written separately so it never leaks into a JSON response.
 type User struct {
-	ID          string    `json:"id"`
-	Username    string    `json:"username"`
-	Role        string    `json:"role"`
-	WorkspaceID string    `json:"workspaceId"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	Role         string    `json:"role"`
+	WorkspaceID  string    `json:"workspaceId"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Email        string    `json:"email"`
+	FirstName    string    `json:"firstName"`
+	LastName     string    `json:"lastName"`
+	TokenVersion int       `json:"-"` // session-revocation counter (never exposed)
 }
 
 func normUsername(u string) string { return strings.ToLower(strings.TrimSpace(u)) }
@@ -43,7 +48,7 @@ func normRole(r string) string {
 	if r == RoleAdmin {
 		return RoleAdmin
 	}
-	return RoleEditor
+	return RoleUser
 }
 
 func isUniqueViolation(err error) bool {
@@ -113,19 +118,58 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, s
 	var u User
 	var hash string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, username, role, workspace_id, created_at, password_hash
+		`SELECT id, username, role, workspace_id, created_at, email, first_name, last_name, token_version, password_hash
 		 FROM app_user WHERE username = $1`, normUsername(username)).
-		Scan(&u.ID, &u.Username, &u.Role, &u.WorkspaceID, &u.CreatedAt, &hash)
+		Scan(&u.ID, &u.Username, &u.Role, &u.WorkspaceID, &u.CreatedAt, &u.Email, &u.FirstName, &u.LastName, &u.TokenVersion, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, "", ErrNotFound
 	}
 	return u, hash, err
 }
 
+// GetUserByID returns a single account's public profile (no password hash).
+func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, username, role, workspace_id, created_at, email, first_name, last_name
+		 FROM app_user WHERE id = $1`, id).
+		Scan(&u.ID, &u.Username, &u.Role, &u.WorkspaceID, &u.CreatedAt, &u.Email, &u.FirstName, &u.LastName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	return u, err
+}
+
+// UpdateUserProfile sets a user's real name and email (all optional).
+func (s *Store) UpdateUserProfile(ctx context.Context, id, firstName, lastName, email string) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE app_user SET first_name = $2, last_name = $3, email = $4 WHERE id = $1`,
+		id, strings.TrimSpace(firstName), strings.TrimSpace(lastName), strings.TrimSpace(email))
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UserTokenVersion returns a user's current session-revocation counter (used to
+// invalidate stale JWTs). ErrNotFound if the account no longer exists.
+func (s *Store) UserTokenVersion(ctx context.Context, id string) (int, error) {
+	var v int
+	err := s.pool.QueryRow(ctx, `SELECT token_version FROM app_user WHERE id = $1`, id).Scan(&v)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return v, err
+}
+
 // ListUsers returns all accounts, oldest first.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, username, role, workspace_id, created_at FROM app_user ORDER BY created_at`)
+		`SELECT id, username, role, workspace_id, created_at, email, first_name, last_name
+		   FROM app_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +177,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	out := []User{}
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.WorkspaceID, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.WorkspaceID, &u.CreatedAt, &u.Email, &u.FirstName, &u.LastName); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -169,25 +213,81 @@ func (s *Store) SetUserRole(ctx context.Context, id, role string) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app_user SET role = $2 WHERE id = $1`, id, role); err != nil {
+	// Bump token_version so the new role takes effect immediately (the user's old
+	// token, which carries the previous role, is invalidated).
+	if _, err := tx.Exec(ctx, `UPDATE app_user SET role = $2, token_version = token_version + 1 WHERE id = $1`, id, role); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// SetUserPassword replaces a user's password hash.
-func (s *Store) SetUserPassword(ctx context.Context, id, passwordHash string) error {
+// SetUserPassword updates the hash and bumps token_version (revoking all existing
+// sessions). Returns the new token_version so the caller can re-issue the current
+// user's own cookie and keep them logged in.
+func (s *Store) SetUserPassword(ctx context.Context, id, passwordHash string) (int, error) {
 	if passwordHash == "" {
-		return errors.New("password is required")
+		return 0, errors.New("password is required")
 	}
-	ct, err := s.pool.Exec(ctx, `UPDATE app_user SET password_hash = $2 WHERE id = $1`, id, passwordHash)
+	var tv int
+	err := s.pool.QueryRow(ctx,
+		`UPDATE app_user SET password_hash = $2, token_version = token_version + 1
+		 WHERE id = $1 RETURNING token_version`, id, passwordHash).Scan(&tv)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return tv, err
+}
+
+// RenameUser changes an account's login username AND its personal workspace slug
+// (so the /{slug} URL follows the name). Bumps token_version. Returns the new slug
+// (= normalized username) and token_version. ErrConflict if the name/slug is taken;
+// rejects reserved slugs. Only the user's HOME workspace changes — projects are
+// untouched.
+func (s *Store) RenameUser(ctx context.Context, id, username string) (string, int, error) {
+	username = normUsername(username)
+	if username == "" {
+		return "", 0, errors.New("username is required")
+	}
+	if isReservedSlug(username) {
+		return "", 0, errors.New("that name is reserved")
+	}
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return "", 0, err
 	}
-	if ct.RowsAffected() == 0 {
-		return ErrNotFound
+	defer tx.Rollback(ctx)
+
+	var oldName, homeWs string
+	if err := tx.QueryRow(ctx, `SELECT username, workspace_id FROM app_user WHERE id = $1`, id).
+		Scan(&oldName, &homeWs); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", 0, ErrNotFound
+		}
+		return "", 0, err
 	}
-	return nil
+	// Home workspace: always move the slug; move the display name too only if it
+	// still equals the old username (i.e. was never customized).
+	if _, err := tx.Exec(ctx,
+		`UPDATE workspace SET slug = $2, name = CASE WHEN name = $3 THEN $2 ELSE name END
+		 WHERE id = $1`, homeWs, username, oldName); err != nil {
+		if isUniqueViolation(err) {
+			return "", 0, ErrConflict
+		}
+		return "", 0, err
+	}
+	var tv int
+	if err := tx.QueryRow(ctx,
+		`UPDATE app_user SET username = $2, token_version = token_version + 1
+		 WHERE id = $1 RETURNING token_version`, id, username).Scan(&tv); err != nil {
+		if isUniqueViolation(err) {
+			return "", 0, ErrConflict
+		}
+		return "", 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", 0, err
+	}
+	return username, tv, nil
 }
 
 // DeleteUser removes a user and their personal workspace, cascading all of that
