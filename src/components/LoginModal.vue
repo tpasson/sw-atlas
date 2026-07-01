@@ -103,7 +103,7 @@ async function submit() {
   outline: none; width: 100%; transition: border-color 0.15s, box-shadow 0.15s;
 }
 .field-input:focus {
-  border-color: var(--clr-accent); box-shadow: 0 0 0 3px rgba(0,113,227,0.12); background: #fff;
+  border-color: var(--clr-accent); box-shadow: 0 0 0 3px rgba(0,113,227,0.12); background: var(--clr-surface);
 }
 .form-error { font-size: 13px; color: var(--clr-danger); margin: -4px 0 0; }
 .panel-actions {
