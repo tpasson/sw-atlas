@@ -177,17 +177,25 @@
 
               <!-- Collaborative projects — invite others to work together. -->
               <div class="proj-sec">Projects<span class="proj-sec-hint">invite people to collaborate</span></div>
-              <button
+              <div
                 v-for="p in projects"
                 :key="p.slug"
-                class="bl-opt"
+                class="proj-row"
                 :class="{ active: p.slug === workspace.slug }"
-                @click="goProject(p.slug)"
               >
-                <span class="proj-glyph proj-glyph-team"><Users :size="13" /></span>
-                <span class="bl-opt-name">{{ p.name }}</span>
-                <span class="bl-opt-sub">{{ p.role }}</span>
-              </button>
+                <button class="proj-main" @click="goProject(p.slug)">
+                  <span class="proj-glyph proj-glyph-team"><Users :size="13" /></span>
+                  <span class="bl-opt-name">{{ p.name }}</span>
+                </button>
+                <div class="proj-acts">
+                  <template v-if="p.role === 'owner'">
+                    <button class="proj-act-ic" title="Invite people" @click.stop="inviteProj(p)"><UserPlus :size="15" /></button>
+                    <button class="proj-act-ic" title="Rename" @click.stop="renameProj(p)"><Pencil :size="15" /></button>
+                    <button class="proj-act-ic danger" title="Delete project" @click.stop="deleteProj(p)"><Trash2 :size="15" /></button>
+                  </template>
+                  <button v-else class="proj-act-ic" title="Leave project" @click.stop="leaveProj(p)"><LogOut :size="15" /></button>
+                </div>
+              </div>
               <p v-if="!projects.length" class="proj-empty">No projects yet — create one to invite collaborators.</p>
               <button class="bl-opt proj-new" @click="newProject"><Plus :size="14" /> New project</button>
 
@@ -202,17 +210,6 @@
                 </button>
               </template>
 
-              <!-- Manage the project you're currently in. -->
-              <template v-if="currentIsProject">
-                <div class="proj-divider"></div>
-                <div class="proj-sec">Manage “{{ currentProjectName }}”</div>
-                <template v-if="workspace.role === 'owner'">
-                  <button class="bl-opt proj-action" @click="inviteToProject"><UserPlus :size="14" /> Invite people…</button>
-                  <button class="bl-opt proj-action" @click="renameCurrent"><Pencil :size="14" /> Rename…</button>
-                  <button class="bl-opt proj-del" @click="deleteCurrent"><Trash2 :size="14" /> Delete project</button>
-                </template>
-                <button v-else class="bl-opt proj-leave" @click="leaveCurrent"><LogOut :size="14" /> Leave project</button>
-              </template>
             </div>
           </div>
 
@@ -296,24 +293,32 @@ async function newProject() {
   if (!name || !name.trim()) return
   try { await createProject(name.trim()) } catch (e) { alert(e?.message || 'Could not create the project') }
 }
-function inviteToProject() {
+// Per-project actions (each works by slug, so they run inline from the list).
+function inviteProj(p) {
   projOpen.value = false
-  emit('manage', 'members') // open Settings straight on the Members tab
+  if (p.slug === workspace.slug) { emit('manage', 'members'); return } // members panel of the open project
+  goProject(p.slug) // otherwise switch into it to manage members
 }
-async function renameCurrent() {
-  const name = prompt('Rename project:', currentProjectName.value)
+async function renameProj(p) {
+  const name = prompt('Rename project:', p.name)
   if (!name || !name.trim()) return
-  try { await api.renameProject(workspace.slug, name.trim()); await loadMyWorkspaces() } catch (e) { alert(e?.message || 'Rename failed') }
+  try { await api.renameProject(p.slug, name.trim()); await loadMyWorkspaces() } catch (e) { alert(e?.message || 'Rename failed') }
 }
-async function deleteCurrent() {
-  projOpen.value = false
-  if (!confirm(`Delete “${currentProjectName.value}” and all of its data? This can’t be undone.`)) return
-  try { await api.deleteProject(workspace.slug); window.location.assign('/') } catch (e) { alert(e?.message || 'Could not delete the project') }
+async function deleteProj(p) {
+  if (!confirm(`Delete “${p.name}” and all of its data? This can’t be undone.`)) return
+  try {
+    await api.deleteProject(p.slug)
+    if (p.slug === workspace.slug) window.location.assign('/')
+    else await loadMyWorkspaces()
+  } catch (e) { alert(e?.message || 'Could not delete the project') }
 }
-async function leaveCurrent() {
-  projOpen.value = false
+async function leaveProj(p) {
   if (!confirm('Leave this project? You will lose access until an owner re-invites you.')) return
-  try { await api.leaveProject(workspace.slug); window.location.assign('/') } catch (e) { alert(e?.message || 'Could not leave the project') }
+  try {
+    await api.leaveProject(p.slug)
+    if (p.slug === workspace.slug) window.location.assign('/')
+    else await loadMyWorkspaces()
+  } catch (e) { alert(e?.message || 'Could not leave the project') }
 }
 
 // Account menu (username avatar → log out / about).
@@ -738,8 +743,8 @@ async function onSaveBaseline() {
   position: absolute;
   top: calc(100% + 6px);
   left: 50%; transform: translateX(-50%);
-  min-width: 240px; max-width: 340px;
-  max-height: 340px; overflow-y: auto;
+  min-width: 240px; max-width: 400px;
+  max-height: 360px; overflow-y: auto;
   background: var(--clr-surface);
   border: 1px solid var(--clr-border-light);
   border-radius: var(--r-lg);
@@ -761,9 +766,21 @@ async function onSaveBaseline() {
 .bl-opt-sub { font-size: 11px; color: var(--clr-text-3); white-space: nowrap; flex-shrink: 0; }
 
 /* Project switcher: separate the personal home plan from collaborative projects. */
-.proj-menu { min-width: 264px; }
+.proj-menu { min-width: 320px; }
 .proj-menu .bl-opt { align-items: center; justify-content: flex-start; }
 .proj-menu .bl-opt .bl-opt-sub { margin-left: auto; text-transform: capitalize; }
+
+/* Project rows with inline manage icons (no separate "Manage" section). */
+.proj-row { display: flex; align-items: center; gap: 4px; border-radius: 8px; padding-right: 4px; transition: background 0.12s; }
+.proj-row:hover { background: var(--clr-surface-2); }
+.proj-row.active { background: rgba(0,113,227,0.1); }
+.proj-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; background: none; cursor: pointer; padding: 8px 6px 8px 10px; text-align: left; }
+.proj-row.active .bl-opt-name { color: var(--clr-accent); font-weight: 600; }
+.proj-acts { display: flex; gap: 1px; flex-shrink: 0; }
+.proj-act-ic { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--clr-text-3); background: none; transition: background 0.12s, color 0.12s; }
+.proj-act-ic:hover { background: var(--clr-border-light); color: var(--clr-text); }
+.proj-act-ic.danger:hover { background: rgba(255,59,48,0.1); color: var(--clr-danger); }
 .proj-sec {
   display: flex; align-items: baseline; gap: 6px;
   padding: 9px 10px 4px;
