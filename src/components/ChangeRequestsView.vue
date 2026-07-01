@@ -111,7 +111,7 @@ function changeRows(cr) {
 
 <style scoped>
 .crv { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.crv-head { display: flex; align-items: center; gap: 9px; padding: 16px 24px 12px; border-bottom: 1px solid var(--clr-border-light); color: var(--clr-text); flex-shrink: 0; }
+.crv-head { display: flex; align-items: center; gap: 9px; height: 56px; box-sizing: border-box; padding: 0 24px; border-bottom: 1px solid var(--clr-border-light); color: var(--clr-text); flex-shrink: 0; }
 .crv-title { font-size: 17px; font-weight: 700; }
 .crv-count { margin-left: 4px; font-size: 11px; font-weight: 700; color: #fff; background: #FF9F0A; border-radius: 100px; padding: 2px 9px; }
 .crv-new { margin-left: auto; font-size: 13px; font-weight: 600; color: #fff; background: var(--clr-accent); border-radius: var(--r-md); padding: 7px 14px; }

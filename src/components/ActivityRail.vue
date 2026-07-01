@@ -57,13 +57,14 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Home, CalendarDays, LayoutGrid, GitPullRequest, ClipboardCheck, Sun, Moon, Settings, SlidersHorizontal, ServerCog, KeyRound } from 'lucide-vue-next'
-import { store, session, settings, workspace, toggleTheme, useAppStore, canEditWorkspace, pendingCRCount } from '../stores/useAppStore.js'
+import { store, session, settings, workspace, toggleTheme, useAppStore, canEditWorkspace, pendingCRCount, goHomeView } from '../stores/useAppStore.js'
 
 defineEmits(['manage', 'settings', 'admin', 'login', 'logout', 'about'])
 
 const { setView } = useAppStore()
-// The discovery directory (all plans) lives at the bare root.
-function goHome() { window.location.assign('/') }
+// The discovery directory (all plans) lives at the bare root — switch to it
+// client-side (no full reload → no white flash).
+function goHome() { goHomeView() }
 const canEdit = computed(() => canEditWorkspace())
 const inPlan = computed(() => workspace.mode === 'plan')
 const initials = computed(() => (session.username || '?').trim().charAt(0).toUpperCase() || '?')
