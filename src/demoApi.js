@@ -234,6 +234,8 @@ export const demoApi = {
   setInstanceUISettings: () => ok(),
   getServerInfo: () => ok({ settings: {}, stats: { version: 'demo', uptimeSeconds: 0, users: 0, workspaces: 0, items: 0 } }),
   setServerSettings: () => ok(),
+  getLimits: () => ok({ writesPerMinute: 240, maxItemsPerPlan: 2000, maxProjectsPerUser: 50 }),
+  setLimits: (l) => ok(l),
 
   // users — not available in the backend-less demo (admin UI stays hidden)
   listUsers: () => ok({ users: [] }),
