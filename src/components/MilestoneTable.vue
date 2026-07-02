@@ -189,7 +189,12 @@
 
         <tr v-if="tableRows.length === 0">
           <td :colspan="15" class="empty-state">
-            No areas defined yet. Click "Settings" to get started.
+            <template v-if="!props.readOnly">
+              No areas defined yet — <button class="empty-link" @click="emit('manage', 'areas')">open Project settings</button> to get started.
+            </template>
+            <template v-else>
+              No areas defined yet.
+            </template>
           </td>
         </tr>
       </tbody>
@@ -372,7 +377,7 @@ const props = defineProps({
   zoom: { type: Number, default: 1 },
   readOnly: { type: Boolean, default: false },
 })
-const emit = defineEmits(['add-milestone', 'edit-milestone', 'show-history'])
+const emit = defineEmits(['add-milestone', 'edit-milestone', 'show-history', 'manage'])
 const { getLinkedIds, dependsOnIds, dependentIds, updateMilestone } = useAppStore()
 
 // Months fill the available width at 100% zoom; the zoom control then widens the
@@ -1387,6 +1392,8 @@ thead th {
 
 /* --- Empty state --- */
 .empty-state { text-align: center; padding: 80px 20px; color: var(--clr-text-3); font-size: 14px; }
+.empty-link { background: none; color: var(--clr-accent); font-size: 14px; font-weight: 600; cursor: pointer; padding: 0; }
+.empty-link:hover { text-decoration: underline; }
 
 /* --- Legend --- */
 /* The bottom legend + groups now live in the unified GroupLegend.vue dock. */
