@@ -88,6 +88,20 @@ func TestLocalSharing(t *testing.T) {
 		t.Fatalf("mirrored item should be read-only: want ErrLocked, got %v", err)
 	}
 
+	// ── the mirror can't be re-exported: a scope over a synced lane resolves
+	//    empty, so a subscription cycle A→B→A can't feed back and grow ─────────
+	mirrorLane := bp.Swimlanes[0].ID
+	_, err = s.CreateShareScope(ctx, bob.WorkspaceID, ShareScope{
+		ID: "scope-b", Name: "Re-share", DetailLevel: "full", Lanes: []string{mirrorLane},
+	})
+	must("bob scope over mirror", err)
+	must("publish b", s.SetShareScopePublished(ctx, bob.WorkspaceID, "scope-b", true))
+	reshared, err := s.ResolveScopePlan(ctx, bob.WorkspaceID, "scope-b", "full")
+	must("resolve b", err)
+	if len(reshared.Milestones) != 0 {
+		t.Fatalf("a published scope must not re-export mirrored items, got %d", len(reshared.Milestones))
+	}
+
 	// ── unpublishing withdraws consent: the next sync errors, mirror remains ─
 	must("unpublish", s.SetShareScopePublished(ctx, alice.WorkspaceID, "scope-a", false))
 	if _, err := s.publishedScopeDetail(ctx, alice.WorkspaceID, "scope-a"); err != ErrNotFound {

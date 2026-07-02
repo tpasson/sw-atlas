@@ -328,13 +328,17 @@ func (s *Store) ResolveToken(ctx context.Context, hash string) (ws, scopeID, det
 // ResolveScopePlan builds the plan a scope exposes: the included items (lanes ∪
 // items − excludes), the swimlanes/sub-lanes those items reference, and only the
 // links whose endpoints are both included. With detailLevel "timing", the
-// narrative fields are dropped; provenance is always stripped.
+// narrative fields are dropped; provenance is always stripped. Only native items
+// (source_system IS NULL) are exported — content this workspace itself mirrored
+// from elsewhere is never re-shared, so a subscription cycle A→B→A can't feed
+// back and grow without bound.
 func (s *Store) ResolveScopePlan(ctx context.Context, ws, scopeID, detailLevel string) (Plan, error) {
 	p := Plan{Swimlanes: []Swimlane{}, Milestones: []Item{}, Links: []Link{}}
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+itemReadColumns+` FROM item
 		 WHERE workspace_id = $2
+		 AND source_system IS NULL
 		 AND (
 		     swimlane_id IN (SELECT swimlane_id FROM share_scope_lane WHERE scope_id = $1)
 		     OR id IN (SELECT item_id FROM share_scope_item WHERE scope_id = $1)
