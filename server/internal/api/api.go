@@ -30,6 +30,10 @@ type Server struct {
 	auth      *auth.Auth
 	staticDir string
 	startedAt time.Time
+
+	writeRL *rateLimiter  // per-user write throttle (limit is configurable)
+	limMu   sync.RWMutex  // guards the cached limits below
+	lim     store.Limits  // cached instance limits (refreshed on PUT /instance/limits)
 }
 
 // rateLimiter is a tiny in-memory sliding-window limiter (per client IP), used to
@@ -43,6 +47,13 @@ type rateLimiter struct {
 
 func newRateLimiter(max int, window time.Duration) *rateLimiter {
 	return &rateLimiter{hits: map[string][]time.Time{}, max: max, window: window}
+}
+
+// setMax updates the ceiling (so an admin-configured write limit takes effect).
+func (l *rateLimiter) setMax(n int) {
+	l.mu.Lock()
+	l.max = n
+	l.mu.Unlock()
 }
 
 func (l *rateLimiter) allow(key string) bool {
@@ -80,6 +91,46 @@ func (l *rateLimiter) limit(next http.Handler) http.Handler {
 // loginRL: at most 10 login attempts per minute per IP.
 var loginRL = newRateLimiter(10, time.Minute)
 
+func (s *Server) currentLimits() store.Limits {
+	s.limMu.RLock()
+	defer s.limMu.RUnlock()
+	return s.lim
+}
+
+func (s *Server) setLimitsCache(lim store.Limits) {
+	s.limMu.Lock()
+	s.lim = lim
+	s.limMu.Unlock()
+}
+
+func isMutating(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// writeLimit throttles mutating requests per authenticated user, using the
+// admin-configured writesPerMinute (0 = off). Reads/anonymous requests pass
+// through untouched. Keying uses the signed cookie only (no DB round-trip).
+func (s *Server) writeLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isMutating(r.Method) {
+			if max := s.currentLimits().WritesPerMinute; max > 0 {
+				if sess, ok := s.auth.SessionFromRequest(r); ok && sess.UserID != "" {
+					s.writeRL.setMax(max)
+					if !s.writeRL.allow(sess.UserID) {
+						writeErr(w, http.StatusTooManyRequests, "you're making changes too quickly — please slow down a moment")
+						return
+					}
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // maxBodyBytes caps the request body to bound server memory (DoS defense). 16 MB
 // is generous for JSON plan imports while still rejecting abusive payloads.
 func maxBodyBytes(n int64) func(http.Handler) http.Handler {
@@ -95,6 +146,12 @@ func maxBodyBytes(n int64) func(http.Handler) http.Handler {
 
 func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 	s := &Server{store: st, auth: au, staticDir: staticDir, startedAt: time.Now()}
+	s.writeRL = newRateLimiter(store.DefaultLimits.WritesPerMinute, time.Minute)
+	if lim, err := st.GetLimits(context.Background()); err == nil {
+		s.lim = lim
+	} else {
+		s.lim = store.DefaultLimits
+	}
 
 	// Minimal container images (alpine) ship no /etc/mime.types, so Go can't map
 	// .svg → image/svg+xml and the favicon is served as text/xml (browsers then
@@ -103,7 +160,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer, maxBodyBytes(16<<20))
+	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer, maxBodyBytes(16<<20), s.writeLimit)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.health)
@@ -245,6 +302,8 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Put("/instance/ui-settings", s.setInstanceUISettings)
 			r.Get("/instance/server", s.getServerInfo)
 			r.Put("/instance/server", s.setServerSettings)
+			r.Get("/instance/limits", s.getLimits)
+			r.Put("/instance/limits", s.setLimits)
 			r.Get("/users", s.listUsers)
 			r.Post("/users", s.createUser)
 			r.Put("/users/{id}/role", s.setUserRole)
@@ -780,6 +839,13 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	// Instance quota: cap the collaborative projects a user can own.
+	if lim := s.currentLimits(); lim.MaxProjectsPerUser > 0 {
+		if n, err := s.store.CountOwnedProjects(r.Context(), sess.UserID); err == nil && n >= lim.MaxProjectsPerUser {
+			writeErr(w, http.StatusTooManyRequests, "project limit reached — ask an admin to raise it")
+			return
+		}
+	}
 	ws, err := s.store.CreateWorkspace(r.Context(), sess.UserID, in.Name)
 	if err != nil {
 		s.fail(w, err)
@@ -1314,6 +1380,8 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, store.ErrLimitReached):
+		writeErr(w, http.StatusTooManyRequests, err.Error())
 	default:
 		s.internalError(w, err)
 	}

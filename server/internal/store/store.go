@@ -252,6 +252,12 @@ type ImportSummary struct {
 // endpoint, are skipped rather than failing the whole import.
 func (s *Store) ImportPlan(ctx context.Context, ws string, p Plan) (ImportSummary, error) {
 	var sum ImportSummary
+	// Instance quota: reject an import that would push the plan past its item cap.
+	if lim, err := s.GetLimits(ctx); err == nil && lim.MaxItemsPerPlan > 0 {
+		if existing, err := s.countNativeItems(ctx, ws); err == nil && existing+len(p.Milestones) > lim.MaxItemsPerPlan {
+			return sum, ErrLimitReached
+		}
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return sum, err
@@ -554,6 +560,14 @@ func (s *Store) CreateItemAs(ctx context.Context, ws, actor string, it Item) (It
 	if it.SwimlaneID != "" {
 		if err := s.ensureSwimlaneUnlocked(ctx, ws, it.SwimlaneID); err != nil {
 			return it, err
+		}
+	}
+	// Instance quota: cap native items per plan (mirrored items don't count).
+	if it.SourceSystem == nil {
+		if lim, err := s.GetLimits(ctx); err == nil && lim.MaxItemsPerPlan > 0 {
+			if n, err := s.countNativeItems(ctx, ws); err == nil && n >= lim.MaxItemsPerPlan {
+				return it, ErrLimitReached
+			}
 		}
 	}
 	defaultsForItem(&it)

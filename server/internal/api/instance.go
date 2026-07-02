@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/tpasson/sw-atlas/server/internal/store"
 )
 
 // appVersion is shown in the admin server panel (keep in sync with the frontend).
-const appVersion = "1.4.5"
+const appVersion = "1.5.0"
 
 // getInstanceUISettings returns the global (instance-wide) Display config. Readable
 // by anyone — every plan renders with it.
@@ -77,4 +79,29 @@ func (s *Server) setServerSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeNoContent(w)
+}
+
+// getLimits returns the instance quotas / write-rate limit (admin panel).
+func (s *Server) getLimits(w http.ResponseWriter, r *http.Request) {
+	lim, err := s.store.GetLimits(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, lim)
+}
+
+// setLimits persists the instance quotas and refreshes the in-memory cache the
+// per-user write throttle reads.
+func (s *Server) setLimits(w http.ResponseWriter, r *http.Request) {
+	var lim store.Limits
+	if !decode(w, r, &lim) {
+		return
+	}
+	if err := s.store.SetLimits(r.Context(), lim); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.setLimitsCache(lim)
+	writeJSON(w, http.StatusOK, lim)
 }

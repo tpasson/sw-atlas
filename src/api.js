@@ -83,6 +83,8 @@ const realApi = {
   setInstanceUISettings: (settings) => req('PUT', '/instance/ui-settings', { settings }),
   getServerInfo: () => req('GET', '/instance/server'),
   setServerSettings: (settings) => req('PUT', '/instance/server', { settings }),
+  getLimits: () => req('GET', '/instance/limits'),
+  setLimits: (limits) => req('PUT', '/instance/limits', limits),
   getGitColors: () => req('GET', '/settings/git-colors'),
   setGitColors: (colors) => req('PUT', '/settings/git-colors', colors),
 
