@@ -16,7 +16,7 @@
             <form class="panel-form" @submit.prevent="submit">
               <div class="field">
                 <label class="field-label">Username</label>
-                <input v-model="username" class="field-input" autocomplete="username" ref="userInput" />
+                <input v-model="username" class="field-input" placeholder="Username" autocomplete="username" ref="userInput" />
               </div>
               <div class="field">
                 <label class="field-label">Password</label>
@@ -46,7 +46,7 @@ import { useAppStore } from '../stores/useAppStore.js'
 const emit = defineEmits(['close'])
 const { login } = useAppStore()
 
-const username = ref('atlas-admin')
+const username = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
