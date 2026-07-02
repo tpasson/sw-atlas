@@ -22,7 +22,9 @@
         </div>
 
         <div class="header-right">
-          <button v-if="session.authenticated && workspace.ownSlug" class="btn-manage" @click="goTo(workspace.ownSlug)">My plan</button>
+          <!-- Same plan switcher as the in-plan header: jump to your area, projects
+               or any public plan straight from the discovery landing. -->
+          <PlanSwitcher />
         </div>
       </div>
     </header>
@@ -56,6 +58,7 @@ import { User } from 'lucide-vue-next'
 import { api } from '../api.js'
 import { session, workspace, openProfile, personName } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
+import PlanSwitcher from './PlanSwitcher.vue'
 
 defineEmits(['about'])
 

@@ -143,75 +143,8 @@
         </span>
 
         <template v-if="authenticated">
-          <!-- Project switcher -->
-          <div v-if="workspace.myWorkspaces.length" class="bl-dd proj-dd" ref="projRef">
-            <button class="bl-select" :class="{ open: projOpen, guest: isForeign }" title="Switch plan" @click="toggleProj">
-              <Eye v-if="isForeign" :size="13" class="bl-guest-ic" />
-              <span class="bl-cur">{{ currentProjectName }}</span>
-              <svg class="bl-chevron" width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <div v-if="projOpen" class="bl-menu proj-menu">
-              <!-- Foreign plan: you're a guest here (not in your workspaces). -->
-              <template v-if="isForeign">
-                <div class="proj-sec">Viewing<span class="proj-sec-hint">a plan that isn't yours</span></div>
-                <div class="bl-opt active proj-guest">
-                  <span class="proj-glyph proj-glyph-guest"><Eye :size="13" /></span>
-                  <span class="bl-opt-name">{{ currentPublic?.name || currentProjectName }}</span>
-                  <span class="bl-opt-sub">{{ currentPublic?.ownerName || 'guest' }}</span>
-                </div>
-                <div class="proj-divider"></div>
-              </template>
-
-              <!-- Your personal space (your /{username} home plan). -->
-              <div class="proj-sec">Your area</div>
-              <button
-                v-if="homeWs"
-                class="bl-opt"
-                :class="{ active: homeWs.slug === workspace.slug }"
-                @click="goProject(homeWs.slug)"
-              >
-                <span class="proj-glyph proj-glyph-home"><User :size="13" /></span>
-                <span class="bl-opt-name">{{ homeWs.name }}</span>
-                <span class="bl-opt-sub">just you</span>
-              </button>
-
-              <!-- Collaborative projects — invite others to work together. -->
-              <div class="proj-sec">Projects<span class="proj-sec-hint">invite people to collaborate</span></div>
-              <div
-                v-for="p in projects"
-                :key="p.slug"
-                class="proj-row"
-                :class="{ active: p.slug === workspace.slug }"
-              >
-                <button class="proj-main" @click="goProject(p.slug)">
-                  <span class="proj-glyph proj-glyph-team"><Users :size="13" /></span>
-                  <span class="bl-opt-name">{{ p.name }}</span>
-                </button>
-                <div class="proj-acts">
-                  <template v-if="p.role === 'owner'">
-                    <button class="proj-act-ic" title="Invite people" @click.stop="inviteProj(p)"><UserPlus :size="15" /></button>
-                    <button class="proj-act-ic" title="Rename" @click.stop="renameProj(p)"><Pencil :size="15" /></button>
-                    <button class="proj-act-ic danger" title="Delete project" @click.stop="deleteProj(p)"><Trash2 :size="15" /></button>
-                  </template>
-                  <button v-else class="proj-act-ic" title="Leave project" @click.stop="leaveProj(p)"><LogOut :size="15" /></button>
-                </div>
-              </div>
-              <p v-if="!projects.length" class="proj-empty">No projects yet — create one to invite collaborators.</p>
-              <button class="bl-opt proj-new" @click="newProject"><Plus :size="14" /> New project</button>
-
-              <!-- Other public plans on this instance — read-only, hop between them. -->
-              <template v-if="otherPublic.length">
-                <div class="proj-divider"></div>
-                <div class="proj-sec">Public plans<span class="proj-sec-hint">read-only</span></div>
-                <button v-for="p in otherPublic" :key="p.slug" class="bl-opt" @click="goProject(p.slug)">
-                  <span class="proj-glyph proj-glyph-public"><Globe :size="13" /></span>
-                  <span class="bl-opt-name">{{ p.name || p.slug }}</span>
-                  <span class="bl-opt-sub">{{ p.ownerName }}</span>
-                </button>
-              </template>
-
-            </div>
-          </div>
+          <!-- Project switcher (shared component, also used in the landing header) -->
+          <PlanSwitcher @manage="(t) => emit('manage', t)" />
 
           <!-- Editable workspace (owner/editor): status + save baseline. Settings,
                theme, account live in the left activity rail now. -->
@@ -235,10 +168,10 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { Sun, Moon, AlertTriangle, Clock, Settings, Bookmark, User, Users, UserPlus, Plus, Pencil, Trash2, LogOut, Eye, Globe } from 'lucide-vue-next'
-import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, ui, session, workspace, canEditWorkspace, createProject, loadMyWorkspaces } from '../stores/useAppStore.js'
-import { api } from '../api.js'
+import { Sun, Moon, AlertTriangle, Clock, Settings, Bookmark } from 'lucide-vue-next'
+import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, ui, session, workspace, canEditWorkspace } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
+import PlanSwitcher from './PlanSwitcher.vue'
 
 defineProps({
   year: Number,
@@ -250,76 +183,6 @@ const emit = defineEmits(['prev-year', 'next-year', 'manage', 'zoom-in', 'zoom-o
 const version = APP_VERSION
 
 const canEdit = computed(() => canEditWorkspace())
-
-// Project switcher
-const projOpen = ref(false)
-const projRef = ref(null)
-const currentProjectName = computed(() => {
-  const cur = workspace.myWorkspaces.find(p => p.slug === workspace.slug)
-  return cur?.name || workspace.slug || 'Plan'
-})
-// Split the switcher into your personal home plan vs. collaborative projects.
-const homeWs = computed(() => workspace.myWorkspaces.find(p => p.slug === workspace.ownSlug))
-const projects = computed(() => workspace.myWorkspaces.filter(p => p.slug !== workspace.ownSlug))
-const currentIsProject = computed(() =>
-  !!workspace.slug && workspace.slug !== workspace.ownSlug && projects.value.some(p => p.slug === workspace.slug))
-
-// A "foreign" plan is one you're viewing but don't belong to (public/guest).
-const isForeign = computed(() => !!workspace.slug && !workspace.myWorkspaces.some(p => p.slug === workspace.slug))
-
-// Public plans (loaded lazily when the switcher opens) so you can hop between the
-// schedules available to you — and clearly see when you're a guest on one.
-const publicPlans = ref([])
-async function loadPublicPlans() {
-  try { publicPlans.value = (await api.listPublicWorkspaces()).workspaces || [] } catch { /* ignore */ }
-}
-const currentPublic = computed(() => publicPlans.value.find(p => p.slug === workspace.slug) || null)
-const otherPublic = computed(() => {
-  const mine = new Set(workspace.myWorkspaces.map(p => p.slug))
-  return publicPlans.value.filter(p => !mine.has(p.slug) && p.slug !== workspace.slug)
-})
-function toggleProj() {
-  projOpen.value = !projOpen.value
-  if (projOpen.value) loadPublicPlans()
-}
-
-function goProject(slug) {
-  projOpen.value = false
-  window.location.assign('/' + encodeURIComponent(slug))
-}
-async function newProject() {
-  projOpen.value = false
-  const name = prompt('New project name:')
-  if (!name || !name.trim()) return
-  try { await createProject(name.trim()) } catch (e) { alert(e?.message || 'Could not create the project') }
-}
-// Per-project actions (each works by slug, so they run inline from the list).
-function inviteProj(p) {
-  projOpen.value = false
-  if (p.slug === workspace.slug) { emit('manage', 'members'); return } // members panel of the open project
-  goProject(p.slug) // otherwise switch into it to manage members
-}
-async function renameProj(p) {
-  const name = prompt('Rename project:', p.name)
-  if (!name || !name.trim()) return
-  try { await api.renameProject(p.slug, name.trim()); await loadMyWorkspaces() } catch (e) { alert(e?.message || 'Rename failed') }
-}
-async function deleteProj(p) {
-  if (!confirm(`Delete “${p.name}” and all of its data? This can’t be undone.`)) return
-  try {
-    await api.deleteProject(p.slug)
-    if (p.slug === workspace.slug) window.location.assign('/')
-    else await loadMyWorkspaces()
-  } catch (e) { alert(e?.message || 'Could not delete the project') }
-}
-async function leaveProj(p) {
-  if (!confirm('Leave this project? You will lose access until an owner re-invites you.')) return
-  try {
-    await api.leaveProject(p.slug)
-    if (p.slug === workspace.slug) window.location.assign('/')
-    else await loadMyWorkspaces()
-  } catch (e) { alert(e?.message || 'Could not leave the project') }
-}
 
 // Account menu (username avatar → log out / about).
 const userOpen = ref(false)
@@ -378,7 +241,6 @@ const currentLabel = computed(() => {
 function pickBaseline(id) { selectBaseline(id); blOpen.value = false }
 function onDocClick(e) {
   if (blRef.value && !blRef.value.contains(e.target)) blOpen.value = false
-  if (projRef.value && !projRef.value.contains(e.target)) projOpen.value = false
   if (userRef.value && !userRef.value.contains(e.target)) userOpen.value = false
 }
 function onKeyDown(e) { if (e.key === 'Escape') { blOpen.value = false; projOpen.value = false; userOpen.value = false } }
