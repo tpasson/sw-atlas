@@ -76,6 +76,7 @@
         @add-milestone="openAdd"
         @edit-milestone="openEdit"
         @show-history="openEdit($event, 'history')"
+        @manage="openManage"
       />
     </template>
 
