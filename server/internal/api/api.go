@@ -1331,12 +1331,18 @@ func (s *Server) removeLink(w http.ResponseWriter, r *http.Request) {
 func (s *Server) mountStatic(r chi.Router) {
 	fileServer := http.FileServer(http.Dir(s.staticDir))
 	serve := func(w http.ResponseWriter, req *http.Request) {
-		setSecurityHeaders(w)
 		p := filepath.Join(s.staticDir, filepath.Clean(req.URL.Path))
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			// Static asset (favicon, JS, CSS, images): serve as-is. The CSP /
+			// nosniff / referrer headers belong on the HTML document — putting them
+			// on a favicon is inert, and Safari refuses to render a favicon that
+			// carries X-Content-Type-Options: nosniff (or a CSP).
 			fileServer.ServeHTTP(w, req)
 			return
 		}
+		// SPA document: this is where the CSP actually applies (it governs what the
+		// page may load), so set the security headers only here.
+		setSecurityHeaders(w)
 		http.ServeFile(w, req, filepath.Join(s.staticDir, "index.html"))
 	}
 	// Serve both GET and HEAD: a GET-only route answers HEAD with 405, and some
