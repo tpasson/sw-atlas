@@ -113,7 +113,8 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { store } from '../stores/useAppStore.js'
 import { api } from '../api.js'
 
-const swimlanes = computed(() => store.swimlanes)
+// Synced/mirrored lanes are read-only references — they can't be re-shared.
+const swimlanes = computed(() => store.swimlanes.filter(sw => !sw.sourceSystem))
 const itemsOf = (laneId) => store.milestones.filter(m => m.swimlaneId === laneId)
 
 const scopes = ref([])
