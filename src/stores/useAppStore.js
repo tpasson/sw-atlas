@@ -657,6 +657,8 @@ export async function initApp() {
     workspace.slug = ''
     workspace.isOwn = false
     setWorkspaceSlug('')
+    // Load the user's plans so the header switcher works on the landing too.
+    if (session.authenticated) await loadMyWorkspaces()
     session.ready = true
     return
   }
