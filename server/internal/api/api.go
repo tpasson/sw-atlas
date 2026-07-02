@@ -1330,7 +1330,7 @@ func (s *Server) removeLink(w http.ResponseWriter, r *http.Request) {
 // both the API and the UI.
 func (s *Server) mountStatic(r chi.Router) {
 	fileServer := http.FileServer(http.Dir(s.staticDir))
-	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+	serve := func(w http.ResponseWriter, req *http.Request) {
 		setSecurityHeaders(w)
 		p := filepath.Join(s.staticDir, filepath.Clean(req.URL.Path))
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
@@ -1338,7 +1338,12 @@ func (s *Server) mountStatic(r chi.Router) {
 			return
 		}
 		http.ServeFile(w, req, filepath.Join(s.staticDir, "index.html"))
-	})
+	}
+	// Serve both GET and HEAD: a GET-only route answers HEAD with 405, and some
+	// reverse proxies / CDNs HEAD static assets (e.g. the favicon) to validate or
+	// cache them — a 405 there stops the favicon from being delivered.
+	r.Get("/*", serve)
+	r.Head("/*", serve)
 }
 
 // setSecurityHeaders locks the SPA to its own origin: no external scripts,
