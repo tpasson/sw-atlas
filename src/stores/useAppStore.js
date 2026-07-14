@@ -418,7 +418,27 @@ export const swatchColors = computed(() => {
 
 // Item groups (shared, persisted) + transient UI state for group highlighting.
 export const groups = reactive({ list: [] })
-export const ui = reactive({ hoverGroupId: null, focusItemId: null, highlightIds: null })
+export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, highlightIds: null })
+
+// A reference-field value can pin a specific version of its target, encoded as
+// "<id>@v<n>". parseRef splits that back into { id, version } (version = null when
+// the reference points at the live/head item). Plain ids pass through unchanged.
+export function parseRef(v) {
+  const m = /^(.*)@v(\d+)$/.exec(String(v ?? ''))
+  return m ? { id: m[1], version: parseInt(m[2], 10) } : { id: String(v ?? ''), version: null }
+}
+
+// itemLink builds the stable deep-link for an item (optionally pinned to a
+// version): {origin}/{slug}?item={id}[&v={n}]. Opening it lands on the item in
+// the Explorer's web layout (see openDeepLinkTarget + ExplorerView).
+export function itemLink(id, version) {
+  const origin = (typeof window !== 'undefined') ? window.location.origin : ''
+  const slug = workspace.slug || ''
+  const base = origin + '/' + (slug ? encodeURIComponent(slug) : '')
+  const q = new URLSearchParams({ item: id })
+  if (version) q.set('v', String(version))
+  return base + '?' + q.toString()
+}
 
 // Global user-profile popover: any clickable user (owner, member, assignee) calls
 // openProfile(person, event); a single <UserProfilePopover> renders it at the click.
@@ -662,6 +682,23 @@ if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => window.location.reload())
 }
 
+// openDeepLinkTarget reads a ?item={id}[&v={n}] query param and, if present,
+// routes to the Explorer so the item opens in its web layout (ExplorerView reacts
+// to ui.focusItemId / ui.focusVersion). A stable item link therefore lands the
+// reader straight on that artifact — at head, or pinned to a specific version.
+function openDeepLinkTarget() {
+  if (typeof window === 'undefined') return
+  let q
+  try { q = new URL(window.location.href).searchParams } catch { return }
+  const id = q.get('item')
+  if (!id) return
+  const v = parseInt(q.get('v') || '', 10)
+  ui.focusItemId = id
+  ui.focusVersion = Number.isFinite(v) && v > 0 ? v : null
+  store.view = 'explorer'
+  try { localStorage.setItem(VIEW_KEY, 'explorer') } catch { /* ignore */ }
+}
+
 // initApp resolves auth, picks the workspace to view (from the /{slug} URL),
 // then loads its plan. Called once on mount.
 export async function initApp() {
@@ -719,6 +756,7 @@ export async function initApp() {
     await loadChangeRequests()
   }
   session.ready = true
+  if (!session.error) openDeepLinkTarget()
   if (IS_DEMO && !session.error) syncSeededDemoSources()
 }
 
