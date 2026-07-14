@@ -172,11 +172,23 @@ export const STATUS_TONES = [
   { key: 'negative', label: 'Negative', color: '#FF453A' },
 ]
 export const toneColor = (tone) => (STATUS_TONES.find(t => t.key === tone) || STATUS_TONES[0]).color
-// Resolve a status object for an item, from its type's status list.
+
+// A market-standard default workflow, seeded when a type opts into statuses.
+export const DEFAULT_STATUSES = [
+  { key: 'todo', label: 'To Do', tone: 'neutral', to: ['in-progress', 'cancelled'] },
+  { key: 'in-progress', label: 'In Progress', tone: 'progress', to: ['blocked', 'done', 'cancelled'] },
+  { key: 'blocked', label: 'Blocked', tone: 'warning', to: ['in-progress', 'cancelled'] },
+  { key: 'done', label: 'Done', tone: 'positive', to: ['in-progress'] },
+  { key: 'cancelled', label: 'Cancelled', tone: 'negative', to: ['todo'] },
+]
+// Resolve a status object for an item, from its type's status list. If the type
+// has statuses but the item has none (or an unknown one), fall back to the start
+// status (the first) — a status-typed item always shows a status.
 export function itemStatus(item) {
-  if (!item || !item.status) return null
-  const t = itemTypeByKey(item.typeKey || item.kind)
-  return (t?.statuses || []).find(s => s.key === item.status) || null
+  if (!item) return null
+  const sts = itemTypeByKey(item.typeKey || item.kind)?.statuses || []
+  if (!sts.length) return null
+  return sts.find(s => s.key === item.status) || sts[0]
 }
 
 // Parse a source-control URL into the pieces needed to render a compact badge.

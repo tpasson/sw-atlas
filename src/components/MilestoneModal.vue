@@ -7,8 +7,8 @@
             <!-- Header -->
             <div class="panel-header">
               <div class="panel-meta">
-                <span class="panel-badge" :style="{ background: swimlane?.color }">
-                  {{ swimlane?.name }}
+                <span v-if="swimlane" class="panel-badge" :style="{ background: swimlane.color }">
+                  {{ swimlane.name }}
                 </span>
                 <span v-if="subLane" class="panel-sub">{{ subLane.name }}</span>
                 <span v-if="mode === 'add'" class="panel-month">{{ displayMonth }}</span>
@@ -100,7 +100,7 @@
 
               <!-- Type-specific fields: schema comes from the selected item type. -->
               <div v-if="currentTypeFields.length" class="field type-fields">
-                <label class="field-label">{{ currentTypeLabel }} fields</label>
+                <label class="field-label">Fields</label>
                 <div v-for="f in currentTypeFields" :key="f.key" class="tf-row">
                   <label class="tf-label">{{ f.label || f.key }}<span v-if="f.required" class="tf-req" title="Required">*</span></label>
                   <select v-if="f.type === 'select'" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]">
@@ -119,38 +119,6 @@
                 </div>
               </div>
 
-              <div class="field">
-                <label class="field-label">Colour</label>
-                <div class="color-row">
-                  <button
-                    type="button"
-                    class="color-swatch area"
-                    :class="{ selected: !form.color }"
-                    :style="{ background: swimlane?.color || '#888' }"
-                    title="Use area colour"
-                    @click="form.color = null"
-                  >A</button>
-                  <button
-                    v-for="c in swatchColors"
-                    :key="c"
-                    type="button"
-                    class="color-swatch"
-                    :class="{ selected: form.color === c }"
-                    :style="{ background: c }"
-                    :title="c"
-                    @click="form.color = c"
-                  >
-                    <svg v-if="form.color === c" width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5 4.5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  </button>
-                  <input
-                    type="color"
-                    class="color-custom"
-                    :value="form.color || swimlane?.color || '#0A84FF'"
-                    @input="form.color = $event.target.value"
-                    title="Custom colour"
-                  />
-                </div>
-              </div>
 
               <div class="field">
                 <label class="field-label">
@@ -672,6 +640,10 @@ const titleInput = ref(null)
 onMounted(() => {
   // Preselect the Explorer's chosen type (sets kind / marker / colour / fields).
   if (props.mode === 'add' && props.initialType) applyType(props.initialType)
+  // A status-typed item always has a status — default to the start if unset.
+  if (typeStatuses.value.length && !typeStatuses.value.some(s => s.key === form.status)) {
+    form.status = typeStatuses.value[0].key
+  }
   titleInput.value?.focus()
 })
 
@@ -725,7 +697,7 @@ function submit() {
     when:       isEvent ? (form.startDate || null) : (form.when || null),
     startDate:  isEvent ? (form.startDate || null) : null,
     endDate:    isEvent ? (form.endDate || null) : null,
-    color:      form.color || null,
+    color:      null, // per-item colour removed — icon inherits the area/type colour
     maturity:   form.maturity || null,
     progress:   form.progress,
     scmUrl:     form.scmUrl.trim() || null,

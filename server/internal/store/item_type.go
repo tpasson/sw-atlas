@@ -187,3 +187,22 @@ func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) e
 		 ON CONFLICT (workspace_id, key) DO UPDATE SET value = $2`, ws, b)
 	return err
 }
+
+// resolveStatus fills an empty status with the type's start status (its first),
+// so a status-typed item always has a valid status stored — not just displayed.
+func (s *Store) resolveStatus(ctx context.Context, ws string, it *Item) {
+	if it.Status != "" {
+		return
+	}
+	types, err := s.ListItemTypes(ctx, ws)
+	if err != nil {
+		return
+	}
+	key := typeKeyOf(*it)
+	for _, t := range types {
+		if t.Key == key && len(t.Statuses) > 0 {
+			it.Status = t.Statuses[0].Key
+			return
+		}
+	}
+}
