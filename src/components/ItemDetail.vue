@@ -29,7 +29,7 @@
     <section v-if="fieldRows.length" class="id-block">
       <h2 class="id-h2">Fields</h2>
       <dl class="id-meta">
-        <template v-for="f in fieldRows" :key="f.k"><dt>{{ f.k }}</dt><dd>{{ f.v }}</dd></template>
+        <template v-for="f in fieldRows" :key="f.k"><dt>{{ f.k }}</dt><dd :class="{ 'id-empty': !f.v }">{{ f.v || '—' }}</dd></template>
       </dl>
     </section>
 
@@ -79,10 +79,11 @@ const metaRows = computed(() => [
   { k: 'Progress', v: props.item.progress != null ? props.item.progress + '%' : '' },
 ].filter(r => r.v))
 
+// Show every field the type defines — empty ones included, so it's clear which
+// fields exist and which are still blank (rendered as "—" in the template).
+const fieldDisplay = (v) => Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v))
 const fieldRows = computed(() =>
-  (type.value?.fields || [])
-    .map(f => ({ k: f.label || f.key, v: props.item.data?.[f.key] }))
-    .filter(f => f.v != null && String(f.v).trim() !== ''))
+  (type.value?.fields || []).map(f => ({ k: f.label || f.key, v: fieldDisplay(props.item.data?.[f.key]) })))
 
 // "Who" is now the assignee (shown as a chip up top), so it's no longer a
 // free-text description here.
@@ -115,6 +116,7 @@ const descriptions = computed(() => [
 .id-meta { display: grid; grid-template-columns: 110px 1fr; gap: 6px 14px; margin: 16px 0; }
 .id-meta dt { font-size: 12px; color: var(--clr-text-3); font-weight: 600; }
 .id-meta dd { font-size: 13px; color: var(--clr-text); }
+.id-meta dd.id-empty { color: var(--clr-text-3); }
 
 .id-block { margin-top: 20px; }
 .id-h2 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); margin-bottom: 7px; }
