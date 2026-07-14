@@ -51,15 +51,17 @@
               <option value="text">Text</option>
               <option value="number">Number</option>
               <option value="select">Select</option>
+              <option value="multiselect">Multi-select</option>
               <option value="date">Date</option>
             </select>
             <input
-              v-if="f.type === 'select'"
+              v-if="f.type === 'select' || f.type === 'multiselect'"
               class="ti tm-grow"
               :value="(f.options || []).join(', ')"
               placeholder="opt1, opt2, …"
-              @input="f.options = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
+              @change="f.options = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
             />
+            <label class="tm-req" title="Must be filled in"><input type="checkbox" v-model="f.required" /> req</label>
             <label class="tm-key" title="Auto-filled from the field name">key<input class="tm-keyin" v-model="f.key" @input="f._keyTouched = true" /></label>
             <button class="link danger" @click="t.fields.splice(fi, 1)" title="Remove field">×</button>
           </div>
@@ -90,7 +92,7 @@ const nextUid = () => `t${uid++}`
 const types = ref(itemTypes.list.map(t => ({
   _uid: nextUid(), builtin: !!t.builtin, _keyTouched: true,
   key: t.key, label: t.label, family: t.family, icon: t.icon, color: t.color || '', fill: t.fill !== false,
-  fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, options: [...(f.options || [])], _keyTouched: true })),
+  fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, options: [...(f.options || [])], required: !!f.required, _keyTouched: true })),
 })))
 
 const msg = ref('')
@@ -124,7 +126,7 @@ function addType() {
   types.value.push({ _uid: nextUid(), builtin: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, fields: [] })
 }
 function addField(t) {
-  t.fields.push({ key: '', label: '', type: 'text', options: [], _keyTouched: false })
+  t.fields.push({ key: '', label: '', type: 'text', options: [], required: false, _keyTouched: false })
 }
 
 // ── Icon picker ───────────────────────────────────────────────────────────────
@@ -160,7 +162,7 @@ function cleanFields(fields) {
     if (!f.label && !f.key) continue
     const fk = uniqueKey(f.key || slugify(f.label), fieldKeys)
     fieldKeys.add(fk)
-    out.push({ key: fk, label: f.label || fk, type: f.type, options: f.type === 'select' ? (f.options || []) : [] })
+    out.push({ key: fk, label: f.label || fk, type: f.type, required: !!f.required, options: (f.type === 'select' || f.type === 'multiselect') ? (f.options || []) : [] })
   }
   return out
 }
@@ -197,6 +199,7 @@ function fail(m) { okMsg.value = false; msg.value = m }
 .tm-fields { display: flex; flex-direction: column; gap: 6px; padding-left: 10px; border-left: 2px solid var(--clr-border-light); }
 .tm-field { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tm-grow { flex: 1; min-width: 120px; }
+.tm-req { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--clr-text-3); white-space: nowrap; }
 
 .ti {
   border: 1px solid var(--clr-border); border-radius: var(--r-sm);
