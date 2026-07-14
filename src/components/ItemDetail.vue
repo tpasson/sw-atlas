@@ -11,6 +11,7 @@
 
     <div class="id-chips">
       <span class="id-chip">{{ type?.label || item.typeKey || item.kind }}</span>
+      <span v-if="status" class="id-status" :style="statusStyle">{{ status.label }}</span>
       <button v-if="!item.sourceSystem" class="id-hist-btn" @click="showHistory = !showHistory"><History :size="13" /> {{ showHistory ? 'Hide history' : 'History' }} · v{{ item.version || 1 }}</button>
       <button v-if="item.assigneeId" type="button" class="id-chip id-assignee" title="View profile" @click.stop="openProfile(memberById(item.assigneeId), $event)"><span class="id-av">{{ initials(item.assigneeId) }}</span>{{ memberName(item.assigneeId) }}</button>
     </div>
@@ -48,7 +49,14 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { History } from 'lucide-vue-next'
-import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile } from '../stores/useAppStore.js'
+import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor } from '../stores/useAppStore.js'
+
+const status = computed(() => itemStatus(props.item))
+const statusStyle = computed(() => {
+  if (!status.value) return {}
+  const c = toneColor(status.value.tone)
+  return { color: c, background: c + '22', borderColor: c + '66' }
+})
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
 
@@ -104,6 +112,7 @@ const descriptions = computed(() => [
 
 .id-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
 .id-chip { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 4px 11px; }
+.id-status { font-size: 12px; font-weight: 700; border-radius: 100px; padding: 4px 11px; border: 1px solid transparent; }
 .id-assignee { display: inline-flex; align-items: center; gap: 6px; border: none; cursor: pointer; transition: filter 0.15s; }
 .id-assignee:hover { filter: brightness(0.95); }
 

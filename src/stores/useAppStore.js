@@ -161,6 +161,24 @@ const SETTINGS_DEFAULTS = {
 // Fixed 4-stage maturity scale (mirrors the ATLAS 4-square logo).
 export const MATURITY_STAGES = ['Concept', 'Design', 'Production', 'Series']
 
+// Status tones: you pick a MEANING, the colour follows — so "Approved" can't be
+// red. Consistent across every type (green = good, red = bad, everywhere).
+export const STATUS_TONES = [
+  { key: 'neutral', label: 'Neutral', color: '#8E8E93' },
+  { key: 'info', label: 'Info', color: '#0A84FF' },
+  { key: 'progress', label: 'In progress', color: '#5E5CE6' },
+  { key: 'positive', label: 'Positive', color: '#30D158' },
+  { key: 'warning', label: 'Warning', color: '#FF9F0A' },
+  { key: 'negative', label: 'Negative', color: '#FF453A' },
+]
+export const toneColor = (tone) => (STATUS_TONES.find(t => t.key === tone) || STATUS_TONES[0]).color
+// Resolve a status object for an item, from its type's status list.
+export function itemStatus(item) {
+  if (!item || !item.status) return null
+  const t = itemTypeByKey(item.typeKey || item.kind)
+  return (t?.statuses || []).find(s => s.key === item.status) || null
+}
+
 // Parse a source-control URL into the pieces needed to render a compact badge.
 // Supports GitHub, GitLab, Azure DevOps, Gitea/Forgejo/Codeberg and Bitbucket
 // (plus a generic git fallback). Returns null for anything that isn't a URL.
