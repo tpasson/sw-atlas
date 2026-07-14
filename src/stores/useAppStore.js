@@ -858,7 +858,12 @@ export function useAppStore() {
 
   // ── Milestones / items ────────────────────────────────────────────────────
   function addMilestone(data) {
-    const m = { id: uid(), kind: 'milestone', marker: 'l:Flag', ...data }
+    const m = { id: uid(), kind: 'milestone', marker: 'l:Flag', version: 1, ...data }
+    // Optimistic attribution so "Added by" shows immediately (the server stamps the
+    // creator too) — refined by the canonical row merged in below.
+    const me = workspace.members.find(w => w.username === session.username)
+    if (me) { m.createdBy = me.userId; m.updatedBy = me.userId }
+    m.createdAt = new Date().toISOString()
     store.milestones.push(m)
     // Merge the server's canonical row (version, createdBy, timestamps).
     api.createItem(m).then(created => { if (created && created.id) Object.assign(m, created) }).catch(onWriteError)
