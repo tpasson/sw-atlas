@@ -33,13 +33,22 @@ import { store, groups, ui, itemTypes, MATURITY_STAGES, workspace } from '../sto
 const dim = ref('group')
 const dimLabel = computed(() => (dim.value === 'group' ? 'groups' : dim.value === 'type' ? 'types' : dim.value === 'assignee' ? 'assignees' : 'maturity stages'))
 
+// Only items that actually sit on the timeline (have an area). Off-timeline
+// backlog items (work-item types like "Car") are managed in the Explorer and
+// must not appear in — or dim — the timeline legend.
+const timelineItems = computed(() => store.milestones.filter(m => m.swimlaneId))
+
 const facets = computed(() => {
+  const items = timelineItems.value
+  const tlIds = new Set(items.map(m => m.id))
   if (dim.value === 'group') {
-    return groups.list.map(g => ({ key: g.id, label: g.name, color: g.color, ids: new Set(g.itemIds || []) }))
+    return groups.list
+      .map(g => ({ key: g.id, label: g.name, color: g.color, ids: new Set((g.itemIds || []).filter(id => tlIds.has(id))) }))
+      .filter(f => f.ids.size)
   }
   if (dim.value === 'type') {
     const by = new Map()
-    for (const m of store.milestones) {
+    for (const m of items) {
       const k = m.typeKey || m.kind || 'milestone'
       if (!by.has(k)) by.set(k, new Set())
       by.get(k).add(m.id)
@@ -50,12 +59,12 @@ const facets = computed(() => {
   }
   if (dim.value === 'assignee') {
     return workspace.members
-      .map(mb => ({ key: mb.userId, label: mb.username, color: '', ids: new Set(store.milestones.filter(m => m.assigneeId === mb.userId).map(m => m.id)) }))
+      .map(mb => ({ key: mb.userId, label: mb.username, color: '', ids: new Set(items.filter(m => m.assigneeId === mb.userId).map(m => m.id)) }))
       .filter(f => f.ids.size)
   }
   // maturity
   return MATURITY_STAGES
-    .map((s, i) => ({ key: i + 1, label: s, color: '', ids: new Set(store.milestones.filter(m => m.maturity === i + 1).map(m => m.id)) }))
+    .map((s, i) => ({ key: i + 1, label: s, color: '', ids: new Set(items.filter(m => m.maturity === i + 1).map(m => m.id)) }))
     .filter(f => f.ids.size)
 })
 
