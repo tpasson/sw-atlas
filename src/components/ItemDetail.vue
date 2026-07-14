@@ -132,9 +132,17 @@ const itemGroups = computed(() => groups.list.filter(g => (g.itemIds || []).incl
 
 // Show every field the type defines — empty ones included, so it's clear which
 // fields exist and which are still blank (rendered as "—" in the template).
-const fieldDisplay = (v) => Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v))
+// Reference fields resolve item ids to their titles.
+function fieldValue(f) {
+  const v = props.item.data?.[f.key]
+  if (f.type === 'reference') {
+    const ids = Array.isArray(v) ? v : (v ? [v] : [])
+    return ids.map(id => store.milestones.find(m => m.id === id)?.title || id).join(', ')
+  }
+  return Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v))
+}
 const fieldRows = computed(() =>
-  (type.value?.fields || []).map(f => ({ k: f.label || f.key, v: fieldDisplay(props.item.data?.[f.key]) })))
+  (type.value?.fields || []).map(f => ({ k: f.label || f.key, v: fieldValue(f) })))
 
 </script>
 
