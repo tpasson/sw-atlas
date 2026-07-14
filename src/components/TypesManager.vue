@@ -47,10 +47,10 @@
         <div class="tm-fields">
           <div v-for="(f, fi) in t.fields" :key="fi" class="tm-field">
             <input class="ti tm-grow" v-model="f.label" placeholder="Field name (e.g. Severity)" @input="onFieldLabel(t, f)" />
-            <select class="ti" v-model="f.type" style="width:104px">
+            <select class="ti tm-ftype" v-model="f.type" title="Field type">
               <option value="text">Text</option>
               <option value="number">Number</option>
-              <option value="select">Select</option>
+              <option value="select">Select (one)</option>
               <option value="multiselect">Multi-select</option>
               <option value="date">Date</option>
             </select>
@@ -58,14 +58,14 @@
               v-if="f.type === 'select' || f.type === 'multiselect'"
               class="ti tm-grow"
               :value="(f.options || []).join(', ')"
-              placeholder="opt1, opt2, …"
+              placeholder="comma, separated, options"
               @change="f.options = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
             />
-            <label class="tm-req" title="Must be filled in"><input type="checkbox" v-model="f.required" /> req</label>
+            <button type="button" class="tm-toggle" :class="{ on: f.required }" title="Must be filled in" @click="f.required = !f.required">Required</button>
             <label class="tm-key" title="Auto-filled from the field name">key<input class="tm-keyin" v-model="f.key" @input="f._keyTouched = true" /></label>
-            <button class="link danger" @click="t.fields.splice(fi, 1)" title="Remove field">×</button>
+            <button class="tm-x" @click="t.fields.splice(fi, 1)" title="Remove field">×</button>
           </div>
-          <button class="link" @click="addField(t)">+ Field</button>
+          <button class="link tm-addfield" @click="addField(t)">+ Field</button>
         </div>
       </div>
 
@@ -197,9 +197,10 @@ function fail(m) { okMsg.value = false; msg.value = m }
 .tm-fam { font-size: 11px; color: var(--clr-text-3); background: var(--clr-bg); border-radius: 100px; padding: 4px 10px; white-space: nowrap; }
 .tm-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--clr-text-3); }
 .tm-fields { display: flex; flex-direction: column; gap: 6px; padding-left: 10px; border-left: 2px solid var(--clr-border-light); }
-.tm-field { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tm-field { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
 .tm-grow { flex: 1; min-width: 120px; }
-.tm-req { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--clr-text-3); white-space: nowrap; }
+.tm-ftype { width: 132px; flex-shrink: 0; }
+.tm-addfield { margin-top: 2px; }
 
 .ti {
   border: 1px solid var(--clr-border); border-radius: var(--r-sm);
@@ -207,8 +208,10 @@ function fail(m) { okMsg.value = false; msg.value = m }
 }
 .ti:focus { outline: none; border-color: var(--clr-accent); }
 .tm-color { width: 30px; height: 30px; border: none; background: none; padding: 0; cursor: pointer; flex-shrink: 0; }
-.tm-fill { font-size: 12px; font-weight: 600; color: var(--clr-text-3); border: 1px solid var(--clr-border); border-radius: var(--r-sm); padding: 5px 10px; background: var(--clr-bg); }
-.tm-fill.on { color: var(--clr-accent); border-color: var(--clr-accent); background: rgba(0,113,227,0.08); }
+.tm-fill, .tm-toggle { font-size: 12px; font-weight: 600; color: var(--clr-text-3); border: 1px solid var(--clr-border); border-radius: var(--r-sm); padding: 5px 10px; background: var(--clr-bg); white-space: nowrap; flex-shrink: 0; }
+.tm-fill.on, .tm-toggle.on { color: var(--clr-accent); border-color: var(--clr-accent); background: rgba(0,113,227,0.08); }
+.tm-x { width: 26px; height: 26px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 17px; line-height: 1; color: var(--clr-text-3); background: none; border-radius: var(--r-sm); }
+.tm-x:hover { color: var(--clr-danger); background: rgba(255,59,48,0.08); }
 
 .tm-key { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--clr-text-3); flex-shrink: 0; }
 .tm-keyin { width: 78px; border: 1px solid var(--clr-border-light); border-radius: var(--r-sm); padding: 4px 7px; font-size: 12px; color: var(--clr-text-2); background: var(--clr-surface-2); text-transform: none; letter-spacing: 0; font-weight: 400; }
