@@ -86,15 +86,22 @@
               <div v-if="currentTypeFields.length" class="field type-fields">
                 <label class="field-label">{{ currentTypeLabel }} fields</label>
                 <div v-for="f in currentTypeFields" :key="f.key" class="tf-row">
-                  <label class="tf-label">{{ f.label || f.key }}</label>
+                  <label class="tf-label">{{ f.label || f.key }}<span v-if="f.required" class="tf-req" title="Required">*</span></label>
                   <select v-if="f.type === 'select'" class="field-input" :disabled="formLocked" v-model="form.data[f.key]">
                     <option value="">—</option>
                     <option v-for="o in (f.options || [])" :key="o" :value="o">{{ o }}</option>
                   </select>
+                  <div v-else-if="f.type === 'multiselect'" class="tf-checks">
+                    <label v-for="o in (f.options || [])" :key="o" class="tf-check">
+                      <input type="checkbox" :disabled="formLocked" :checked="Array.isArray(form.data[f.key]) && form.data[f.key].includes(o)" @change="toggleMulti(f.key, o, $event.target.checked)" /> {{ o }}
+                    </label>
+                    <span v-if="!(f.options || []).length" class="tf-empty">No options defined.</span>
+                  </div>
                   <input v-else-if="f.type === 'number'" type="number" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
                   <input v-else-if="f.type === 'date'" type="date" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
                   <input v-else type="text" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
                 </div>
+                <p v-if="fieldError" class="tf-error">{{ fieldError }}</p>
               </div>
 
               <div class="field">
@@ -424,6 +431,7 @@ const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, ite
 
 const TABS = ['details', 'deps', 'groups', 'history']
 const tab = ref(props.mode === 'edit' && TABS.includes(props.initialTab) ? props.initialTab : 'details')
+const fieldError = ref('')
 
 // The form is read-only when you can't edit content here: a source-synced item,
 // a baseline (historical) view, or you're a viewer/non-member.
@@ -511,8 +519,17 @@ function applyType(key) {
   // Off-timeline types (backlog / folder) never carry a lane.
   if (t.family === 'work-item' || t.family === 'container') { form.swimlaneId = ''; form.subLaneId = '' }
   for (const f of (t.fields || [])) {
-    if (!(f.key in form.data)) form.data[f.key] = ''
+    if (!(f.key in form.data)) form.data[f.key] = f.type === 'multiselect' ? [] : ''
   }
+}
+
+// Toggle one option of a multi-select field on/off.
+function toggleMulti(key, opt, checked) {
+  const arr = Array.isArray(form.data[key]) ? [...form.data[key]] : []
+  const i = arr.indexOf(opt)
+  if (checked && i === -1) arr.push(opt)
+  else if (!checked && i !== -1) arr.splice(i, 1)
+  form.data[key] = arr
 }
 
 // Keep an event's end date on/after its start so the picker opens in the right
@@ -628,6 +645,15 @@ function submit() {
   if (formLocked.value) return // view-only and not proposing
   if (dateError.value) { tab.value = 'details'; return } // surface the date error
   if (!form.title.trim()) return
+
+  // Enforce mandatory type fields.
+  fieldError.value = ''
+  for (const f of currentTypeFields.value) {
+    if (!f.required) continue
+    const v = form.data[f.key]
+    const empty = v == null || v === '' || (Array.isArray(v) && v.length === 0)
+    if (empty) { fieldError.value = `"${f.label || f.key}" is required.`; tab.value = 'details'; return }
+  }
 
   const isEvent = form.kind === 'event'
   // Grid position derives from the start (event) or the date (milestone).
@@ -842,6 +868,11 @@ function remove() {
 .type-fields .tf-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .type-fields .tf-label { font-size: 12px; color: var(--clr-text-2); min-width: 120px; flex-shrink: 0; }
 .type-fields .tf-row .field-input { flex: 1; }
+.type-fields .tf-req { color: var(--clr-danger); margin-left: 2px; }
+.type-fields .tf-checks { flex: 1; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.type-fields .tf-check { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--clr-text); }
+.type-fields .tf-empty { font-size: 12px; color: var(--clr-text-3); }
+.type-fields .tf-error { color: var(--clr-danger); font-size: 12px; margin-top: 8px; }
 
 .field-input,
 .field-textarea {

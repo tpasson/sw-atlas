@@ -11,10 +11,11 @@ import (
 // ItemField declares one type-specific field. Values live in item.data keyed by
 // Key; the field set is rendered dynamically by the client.
 type ItemField struct {
-	Key     string   `json:"key"`
-	Label   string   `json:"label"`
-	Type    string   `json:"type"`              // text | number | select | date
-	Options []string `json:"options,omitempty"` // choices for type=select
+	Key      string   `json:"key"`
+	Label    string   `json:"label"`
+	Type     string   `json:"type"`              // text | number | select | multiselect | date
+	Options  []string `json:"options,omitempty"` // choices for select / multiselect
+	Required bool     `json:"required,omitempty"`
 }
 
 // ItemType is a registry entry: a kind of artifact bound to a coded behavior
