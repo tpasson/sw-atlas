@@ -3,7 +3,7 @@
   <article class="id">
     <header class="id-head">
       <div class="id-titlewrap">
-        <MarkerIcon :shape="type?.icon || item.marker || 'l:Diamond'" :color="item.color || '#8a8a8e'" :size="20" :fill="type?.fill !== false" />
+        <MarkerIcon :shape="type?.icon || item.marker || 'l:Diamond'" :color="type?.color || '#8a8a8e'" :size="20" :fill="type?.fill !== false" />
         <h1 class="id-title">{{ item.title }}</h1>
       </div>
       <button v-if="!readOnly" class="id-edit" @click="$emit('edit')">Edit</button>
@@ -23,7 +23,7 @@
 
     <dl class="id-meta">
       <template v-for="r in metaRows" :key="r.k">
-        <dt>{{ r.k }}</dt><dd>{{ r.v }}</dd>
+        <dt>{{ r.k }}</dt><dd :class="{ 'id-empty': !r.v }">{{ r.v || '—' }}</dd>
       </template>
     </dl>
 
@@ -34,9 +34,27 @@
       </dl>
     </section>
 
-    <section v-for="d in descriptions" :key="d.k" class="id-block">
-      <h2 class="id-h2">{{ d.label }}</h2>
-      <p class="id-text">{{ d.v }}</p>
+    <section class="id-block">
+      <h2 class="id-h2">Details</h2>
+      <dl class="id-meta">
+        <template v-for="d in details" :key="d.k"><dt>{{ d.k }}</dt><dd :class="{ 'id-empty': !d.v }">{{ d.v || '—' }}</dd></template>
+      </dl>
+    </section>
+
+    <section class="id-block">
+      <h2 class="id-h2">Dependencies</h2>
+      <ul v-if="dependencies.length" class="id-deps">
+        <li v-for="(d, i) in dependencies" :key="i"><span class="id-dep-rel">{{ d.rel }}</span> {{ d.title }}</li>
+      </ul>
+      <p v-else class="id-text id-empty">None.</p>
+    </section>
+
+    <section class="id-block">
+      <h2 class="id-h2">Groups</h2>
+      <div v-if="itemGroups.length" class="id-groups">
+        <span v-for="g in itemGroups" :key="g.id" class="id-group" :style="{ background: (g.color || '#888') + '22', color: g.color || '#888' }">{{ g.name }}</span>
+      </div>
+      <p v-else class="id-text id-empty">None.</p>
     </section>
 
     <section v-if="showHistory" class="id-block">
@@ -49,7 +67,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { History } from 'lucide-vue-next'
-import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor } from '../stores/useAppStore.js'
+import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor, groups, RELATIONSHIP_TYPES } from '../stores/useAppStore.js'
 
 const status = computed(() => itemStatus(props.item))
 const statusStyle = computed(() => {
@@ -80,12 +98,37 @@ const dateStr = computed(() => {
 })
 function initials(id) { return memberInitials(id) }
 
-const metaRows = computed(() => [
-  { k: 'Area', v: laneName.value },
-  { k: 'Date', v: dateStr.value },
-  { k: 'Maturity', v: props.item.maturity ? MATURITY_STAGES[props.item.maturity - 1] : '' },
-  { k: 'Progress', v: props.item.progress != null ? props.item.progress + '%' : '' },
-].filter(r => r.v))
+const metaRows = computed(() => {
+  const it = props.item
+  const rows = []
+  if (laneName.value) rows.push({ k: 'Area', v: laneName.value })
+  if (dateStr.value) rows.push({ k: 'Date', v: dateStr.value })
+  rows.push({ k: 'Maturity', v: it.maturity ? MATURITY_STAGES[it.maturity - 1] : '' })
+  rows.push({ k: 'Progress', v: it.progress != null ? it.progress + '%' : '' })
+  return rows
+})
+
+// Details, dependencies and groups — always shown, so the detail view is complete.
+const details = computed(() => [
+  { k: 'What', v: props.item.what },
+  { k: 'Why', v: props.item.why },
+  { k: 'How', v: props.item.how },
+])
+const dependencies = computed(() => {
+  const id = props.item.id
+  const byId = new Map(store.milestones.map(m => [m.id, m]))
+  const relLabel = (rel, forward) => {
+    const r = RELATIONSHIP_TYPES.find(x => x.key === rel)
+    return forward ? (r?.label || rel) : (r?.inverse || rel)
+  }
+  const out = []
+  for (const l of store.links) {
+    if (l.a === id && byId.has(l.b)) out.push({ rel: relLabel(l.rel, true), title: byId.get(l.b).title })
+    else if (l.b === id && byId.has(l.a)) out.push({ rel: relLabel(l.rel, false), title: byId.get(l.a).title })
+  }
+  return out
+})
+const itemGroups = computed(() => groups.list.filter(g => (g.itemIds || []).includes(props.item.id)))
 
 // Show every field the type defines — empty ones included, so it's clear which
 // fields exist and which are still blank (rendered as "—" in the template).
@@ -93,13 +136,6 @@ const fieldDisplay = (v) => Array.isArray(v) ? v.join(', ') : (v == null ? '' : 
 const fieldRows = computed(() =>
   (type.value?.fields || []).map(f => ({ k: f.label || f.key, v: fieldDisplay(props.item.data?.[f.key]) })))
 
-// "Who" is now the assignee (shown as a chip up top), so it's no longer a
-// free-text description here.
-const descriptions = computed(() => [
-  { k: 'what', label: 'What', v: props.item.what },
-  { k: 'why', label: 'Why', v: props.item.why },
-  { k: 'how', label: 'How', v: props.item.how },
-].filter(d => d.v && String(d.v).trim()))
 </script>
 
 <style scoped>
@@ -130,6 +166,11 @@ const descriptions = computed(() => [
 .id-block { margin-top: 20px; }
 .id-h2 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); margin-bottom: 7px; }
 .id-text { font-size: 14px; color: var(--clr-text); line-height: 1.6; white-space: pre-wrap; }
+.id-deps { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.id-deps li { font-size: 13px; color: var(--clr-text); }
+.id-dep-rel { display: inline-block; min-width: 96px; font-size: 11px; font-weight: 700; color: var(--clr-text-3); text-transform: uppercase; letter-spacing: 0.3px; }
+.id-groups { display: flex; flex-wrap: wrap; gap: 6px; }
+.id-group { font-size: 12px; font-weight: 600; border-radius: 100px; padding: 3px 10px; border: 1px solid currentColor; }
 .id-link { font-size: 13px; color: var(--clr-accent); word-break: break-all; }
 .id-link:hover { text-decoration: underline; }
 </style>

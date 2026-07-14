@@ -29,7 +29,7 @@
               :class="{ on: selectedId === m.id }"
               @click="selectedId = m.id"
             >
-              <span class="ex-leaf-dot" :style="{ background: m.color || laneColor(m) || '#8a8a8e' }"></span>
+              <span class="ex-leaf-dot" :style="{ background: dotColor(m) }"></span>
               <span class="ex-leaf-title">{{ m.title }}</span>
             </button>
             <div v-if="!g.items.length" class="ex-leaf-empty">— empty —</div>
@@ -96,7 +96,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { GitPullRequest } from 'lucide-vue-next'
-import { store, itemTypes } from '../stores/useAppStore.js'
+import { store, itemTypes, itemStatus, toneColor } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import TableView from './TableView.vue'
 import BoardView from './BoardView.vue'
@@ -147,6 +147,11 @@ const scmRepos = computed(() =>
 const scmCount = computed(() => scmRepos.value.reduce((n, r) => n + r.count, 0))
 
 function laneColor(m) { return store.swimlanes.find(s => s.id === m.swimlaneId)?.color }
+// Leaf dot: the item's status tone (a quick at-a-glance state), else its area colour.
+function dotColor(m) {
+  const s = itemStatus(m)
+  return s ? toneColor(s.tone) : (laneColor(m) || '#8a8a8e')
+}
 
 // Tree expand/collapse (types open by default; collapse-set tracks closed ones).
 const collapsed = ref(new Set())

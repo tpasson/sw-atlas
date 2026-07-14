@@ -1,6 +1,10 @@
 <template>
   <div class="se">
-    <div class="se-title">Statuses <span class="se-hint">workflow — pick a meaning (tone), not a colour · the top one is the start</span></div>
+    <template v-if="statuses.length">
+    <div class="se-title">
+      Statuses <span class="se-hint">workflow — pick a meaning (tone), not a colour · the top one is the start</span>
+      <button type="button" class="se-off" @click="disable">Turn off</button>
+    </div>
 
     <div v-for="(s, i) in statuses" :key="s._uid" class="se-row">
       <button type="button" class="se-start" :class="{ on: i === 0 }" title="Start status for new items" @click="makeStart(i)">start</button>
@@ -22,11 +26,16 @@
     </div>
 
     <button class="link se-add" @click="add">+ Status</button>
+    </template>
+
+    <button v-else type="button" class="se-enable" @click="enable">
+      + Enable status workflow <span class="se-enable-hint">seeds the standard To&nbsp;Do&nbsp;→&nbsp;Done set</span>
+    </button>
   </div>
 </template>
 
 <script setup>
-import { STATUS_TONES, toneColor } from '../stores/useAppStore.js'
+import { STATUS_TONES, toneColor, DEFAULT_STATUSES } from '../stores/useAppStore.js'
 
 const props = defineProps({ statuses: { type: Array, required: true } })
 
@@ -58,6 +67,13 @@ function makeStart(i) {
 function add() {
   props.statuses.push({ _uid: uid(), key: uniqueKey('status'), label: '', tone: 'neutral', to: [], _keyTouched: false })
 }
+function enable() {
+  for (const s of DEFAULT_STATUSES) props.statuses.push({ key: s.key, label: s.label, tone: s.tone, to: [...s.to], _uid: uid(), _keyTouched: true })
+}
+function disable() {
+  if (!confirm('Turn off statuses for this type? Its status settings will be removed.')) return
+  props.statuses.splice(0, props.statuses.length)
+}
 function remove(i) {
   const removed = props.statuses[i]
   props.statuses.splice(i, 1)
@@ -85,6 +101,11 @@ function remove(i) {
 .se-x { width: 26px; height: 26px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 17px; line-height: 1; color: var(--clr-text-3); background: none; border-radius: var(--r-sm); }
 .se-x:hover { color: var(--clr-danger); background: rgba(255,59,48,0.08); }
 .se-add { align-self: flex-start; }
+.se-off { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--clr-danger); background: none; text-transform: none; letter-spacing: 0; }
+.se-off:hover { text-decoration: underline; }
+.se-enable { align-self: flex-start; display: inline-flex; align-items: baseline; gap: 8px; color: var(--clr-accent); font-size: 13px; font-weight: 600; background: none; padding: 4px 6px; border-radius: var(--r-sm); }
+.se-enable:hover { text-decoration: underline; }
+.se-enable-hint { font-size: 11px; font-weight: 400; color: var(--clr-text-3); }
 .link { background: none; color: var(--clr-accent); font-size: 13px; font-weight: 600; padding: 4px 6px; border-radius: var(--r-sm); }
 .link:hover { text-decoration: underline; }
 </style>

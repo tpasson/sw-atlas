@@ -572,6 +572,7 @@ func (s *Store) CreateItemAs(ctx context.Context, ws, actor string, it Item) (It
 		}
 	}
 	defaultsForItem(&it)
+	s.resolveStatus(ctx, ws, &it) // status-typed items always start with the start status
 	whenV, startV, endV, err := itemDates(it)
 	if err != nil {
 		return it, err
@@ -615,6 +616,7 @@ func (s *Store) UpdateItemAs(ctx context.Context, ws, id, actor string, it Item)
 		return err
 	}
 	defaultsForItem(&it)
+	s.resolveStatus(ctx, ws, &it) // status-typed items always keep a valid status
 	whenV, startV, endV, err := itemDates(it)
 	if err != nil {
 		return err

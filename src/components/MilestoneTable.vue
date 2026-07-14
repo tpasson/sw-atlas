@@ -112,11 +112,11 @@
                   class="rail-dot"
                   :data-item-id="it.m.id"
                   :class="chipState(it.m)"
-                  :style="{ left: (it.x - 5) + 'px', top: (it.lane * g.laneH + (g.laneH - 10) / 2) + 'px', background: it.m.color || g.row.swimlane.color }"
+                  :style="{ left: (it.x - 5) + 'px', top: (it.lane * g.laneH + (g.laneH - 10) / 2) + 'px', background: g.row.swimlane.color }"
                   :title="it.m.title"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
-                  @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
+                  @click.stop="onChipClick($event, it.m, g.row.swimlane.color)"
                   @dblclick.stop="onEdit(it.m)"
                 ></div>
 
@@ -126,14 +126,14 @@
                   class="mk-item"
                   :data-item-id="it.m.id"
                   :class="chipState(it.m)"
-                  :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: it.m.color || g.row.swimlane.color }"
+                  :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: g.row.swimlane.color }"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
-                  @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
+                  @click.stop="onChipClick($event, it.m, g.row.swimlane.color)"
                   @dblclick.stop="onEdit(it.m)"
                 >
-                  <MarkerIcon :shape="markerOf(it.m)" :color="it.m.color || g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
-                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                  <MarkerIcon :shape="markerOf(it.m)" :color="g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
+                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
 
                 <!-- Cluster: collapsed overflow markers; click to expand the list -->
@@ -151,11 +151,11 @@
                   class="event-bar"
                   :data-item-id="it.m.id"
                   :class="[chipState(it.m), { draggable: !props.readOnly && !it.m.sourceSystem }]"
-                  :style="barStyleFull(it, it.m.color || g.row.swimlane.color, g.laneH, g.vOffset)"
+                  :style="barStyleFull(it, g.row.swimlane.color, g.laneH, g.vOffset)"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @pointerdown="startDrag($event, it, 'move')"
-                  @click.stop="onChipClick($event, it.m, it.m.color || g.row.swimlane.color)"
+                  @click.stop="onChipClick($event, it.m, g.row.swimlane.color)"
                   @dblclick.stop="onEdit(it.m)"
                 >
                   <span v-if="it.continuesLeft" class="bar-arrow">◀</span>
@@ -163,12 +163,12 @@
                     <MarkerIcon
                       :shape="markerOf(it.m)"
                       :fill="markerFillFor(it.m)"
-                      :color="it.m.color || g.row.swimlane.color"
+                      :color="g.row.swimlane.color"
                       :size="settings.items.markerSize"
                       :stroke-width="settings.items.markerStroke"
                       class="bar-marker"
                     />
-                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="it.m.color || g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                   </span>
                   <span v-if="it.continuesRight" class="bar-arrow">▶</span>
                   <template v-if="!props.readOnly && !it.m.sourceSystem">
