@@ -73,6 +73,7 @@ type Item struct {
 	ScmURL       *string         `json:"scmUrl"`     // link to a source-control resource (release/PR/branch/commit) or null
 	Data         json.RawMessage `json:"data"`       // type-specific field values; shape declared by the item's type
 	AssigneeID   *string         `json:"assigneeId"` // the user this artifact is assigned to (a project member) or null
+	Status       string          `json:"status"`     // current workflow status key (from the type's status set); "" = none
 	Version      int             `json:"version"`    // monotonic; bumps on every edit
 	CreatedBy    *string         `json:"createdBy"`  // user id who created the item (null for mirrored/legacy)
 	UpdatedBy    *string         `json:"updatedBy"`  // user id who last edited it
@@ -119,7 +120,7 @@ type Plan struct {
 
 const itemColumns = `id, swimlane_id, sub_lane_id, year, month, title, what, why, how, who,
 	when_date, kind, marker, start_date, end_date, color,
-	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url, type_key, data, assignee_id`
+	source_system, external_id, external_url, last_synced_at, maturity, progress, scm_url, type_key, data, assignee_id, status`
 
 // itemReadColumns adds the audit/version columns (DB-managed, not part of the
 // editable write set) for SELECTs that hydrate full items via scanItem.
@@ -213,7 +214,7 @@ func scanItem(row pgx.Row) (Item, error) {
 		&it.ID, &swl, &sub, &it.Year, &it.Month,
 		&it.Title, &it.What, &it.Why, &it.How, &it.Who,
 		&when, &it.Kind, &it.Marker, &start, &end, &color,
-		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey, &dataRaw, &assignee,
+		&src, &extID, &extURL, &last, &maturity, &progress, &scm, &it.TypeKey, &dataRaw, &assignee, &it.Status,
 		&it.Version, &createdBy, &updatedBy, &createdAt, &updatedAt,
 	); err != nil {
 		return it, err
@@ -583,10 +584,10 @@ func (s *Store) CreateItemAs(ctx context.Context, ws, actor string, it Item) (It
 	defer tx.Rollback(ctx)
 	_, err = tx.Exec(ctx,
 		`INSERT INTO item (`+itemColumns+`, workspace_id, created_by, updated_by)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)`,
 		it.ID, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
 		whenV, it.Kind, it.Marker, startV, endV, it.Color,
-		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws,
+		it.SourceSystem, it.ExternalID, it.ExternalURL, nil, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, it.Status, ws,
 		nullIfEmpty(actor), nullIfEmpty(actor))
 	if err != nil {
 		return it, err
@@ -628,14 +629,14 @@ func (s *Store) UpdateItemAs(ctx context.Context, ws, id, actor string, it Item)
 		`UPDATE item SET
 		   swimlane_id=$2, sub_lane_id=$3, year=$4, month=$5, title=$6,
 		   what=$7, why=$8, how=$9, who=$10, when_date=$11,
-		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21, assignee_id=$22,
+		   kind=$12, marker=$13, start_date=$14, end_date=$15, color=$16, maturity=$17, progress=$18, scm_url=$19, type_key=$20, data=$21, assignee_id=$22, status=$25,
 		   updated_by=$24, updated_at=now(), version=version+1
 		 WHERE id=$1 AND workspace_id=$23
 		 RETURNING version`,
 		id, nullIfEmpty(it.SwimlaneID), it.SubLaneID, it.Year, it.Month, it.Title,
 		it.What, it.Why, it.How, it.Who, whenV,
 		it.Kind, it.Marker, startV, endV, it.Color, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), it.AssigneeID, ws,
-		nullIfEmpty(actor)).Scan(&newVersion)
+		nullIfEmpty(actor), it.Status).Scan(&newVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
