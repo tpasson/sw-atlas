@@ -13,9 +13,11 @@ import (
 type ItemField struct {
 	Key      string   `json:"key"`
 	Label    string   `json:"label"`
-	Type     string   `json:"type"`              // text | number | select | multiselect | date
+	Type     string   `json:"type"`              // text | number | select | multiselect | date | reference
 	Options  []string `json:"options,omitempty"` // choices for select / multiselect
 	Required bool     `json:"required,omitempty"`
+	RefType  string   `json:"refType,omitempty"`  // type=reference: target item-type key
+	RefMulti bool     `json:"refMulti,omitempty"` // type=reference: allow multiple references
 }
 
 // ItemType is a registry entry: a kind of artifact bound to a coded behavior

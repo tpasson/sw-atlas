@@ -115,6 +115,16 @@
                   </div>
                   <input v-else-if="f.type === 'number'" type="number" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
                   <input v-else-if="f.type === 'date'" type="date" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <select v-else-if="f.type === 'reference' && !f.refMulti" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]">
+                    <option value="">—</option>
+                    <option v-for="r in refItems(f)" :key="r.id" :value="r.id">{{ r.title }}</option>
+                  </select>
+                  <div v-else-if="f.type === 'reference'" class="tf-checks" :class="{ 'tf-invalid': invalidFields.includes(f.key) }">
+                    <label v-for="r in refItems(f)" :key="r.id" class="tf-check">
+                      <input type="checkbox" :disabled="formLocked" :checked="Array.isArray(form.data[f.key]) && form.data[f.key].includes(r.id)" @change="toggleMulti(f.key, r.id, $event.target.checked)" /> {{ r.title }}
+                    </label>
+                    <span v-if="!refItems(f).length" class="tf-empty">No {{ refTypeLabel(f.refType) }} items to reference.</span>
+                  </div>
                   <input v-else type="text" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
                 </div>
               </div>
@@ -528,13 +538,21 @@ function applyType(key) {
   // Off-timeline types (backlog / folder) never carry a lane.
   if (t.family === 'work-item' || t.family === 'container') { form.swimlaneId = ''; form.subLaneId = '' }
   for (const f of (t.fields || [])) {
-    if (!(f.key in form.data)) form.data[f.key] = f.type === 'multiselect' ? [] : ''
+    if (!(f.key in form.data)) form.data[f.key] = (f.type === 'multiselect' || (f.type === 'reference' && f.refMulti)) ? [] : ''
   }
   // Default to the type's start status if the current one isn't valid for this type.
   const sts = t.statuses || []
   if (!sts.length) form.status = ''
   else if (!sts.some(s => s.key === form.status)) form.status = sts[0].key
 }
+
+// Items a reference field can point at: every item of the field's target type,
+// except this item itself.
+function refItems(f) {
+  if (!f.refType) return []
+  return store.milestones.filter(m => (m.typeKey || m.kind) === f.refType && m.id !== props.milestone?.id)
+}
+function refTypeLabel(key) { return itemTypeByKey(key)?.label || key || 'referenced' }
 
 // Toggle one option of a multi-select field on/off.
 function toggleMulti(key, opt, checked) {

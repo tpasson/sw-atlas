@@ -53,6 +53,7 @@
               <option value="select">Select (one)</option>
               <option value="multiselect">Multi-select</option>
               <option value="date">Date</option>
+              <option value="reference">Reference</option>
             </select>
             <input
               v-if="f.type === 'select' || f.type === 'multiselect'"
@@ -61,6 +62,13 @@
               placeholder="comma, separated, options"
               @change="f.options = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
             />
+            <template v-if="f.type === 'reference'">
+              <select class="ti tm-ftype" v-model="f.refType" title="References items of this type">
+                <option value="">— type —</option>
+                <option v-for="rt in refTypeOptions" :key="rt.key" :value="rt.key">{{ rt.label }}</option>
+              </select>
+              <button type="button" class="tm-toggle" :class="{ on: f.refMulti }" title="Allow multiple references" @click="f.refMulti = !f.refMulti">Multiple</button>
+            </template>
             <button type="button" class="tm-toggle" :class="{ on: f.required }" title="Must be filled in" @click="f.required = !f.required">Required</button>
             <label class="tm-key" title="Auto-filled from the field name">key<input class="tm-keyin" v-model="f.key" @input="f._keyTouched = true" /></label>
             <button class="tm-x" @click="t.fields.splice(fi, 1)" title="Remove field">×</button>
@@ -94,9 +102,12 @@ const nextUid = () => `t${uid++}`
 const types = ref(itemTypes.list.map(t => ({
   _uid: nextUid(), builtin: !!t.builtin, _keyTouched: true,
   key: t.key, label: t.label, family: t.family, icon: t.icon, color: t.color || '', fill: t.fill !== false,
-  fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, options: [...(f.options || [])], required: !!f.required, _keyTouched: true })),
+  fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, options: [...(f.options || [])], required: !!f.required, refType: f.refType || '', refMulti: !!f.refMulti, _keyTouched: true })),
   statuses: (t.statuses || []).map(s => ({ key: s.key, label: s.label, tone: s.tone || 'neutral', to: [...(s.to || [])], _keyTouched: true })),
 })))
+
+// Types a reference field can point at (any defined type).
+const refTypeOptions = computed(() => types.value.filter(x => x.key).map(x => ({ key: x.key, label: x.label || x.key })))
 
 const msg = ref('')
 const okMsg = ref(false)
@@ -129,7 +140,7 @@ function addType() {
   types.value.push({ _uid: nextUid(), builtin: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, fields: [], statuses: [] })
 }
 function addField(t) {
-  t.fields.push({ key: '', label: '', type: 'text', options: [], required: false, _keyTouched: false })
+  t.fields.push({ key: '', label: '', type: 'text', options: [], required: false, refType: '', refMulti: false, _keyTouched: false })
 }
 
 // ── Icon picker ───────────────────────────────────────────────────────────────
@@ -165,7 +176,9 @@ function cleanFields(fields) {
     if (!f.label && !f.key) continue
     const fk = uniqueKey(f.key || slugify(f.label), fieldKeys)
     fieldKeys.add(fk)
-    out.push({ key: fk, label: f.label || fk, type: f.type, required: !!f.required, options: (f.type === 'select' || f.type === 'multiselect') ? (f.options || []) : [] })
+    const o = { key: fk, label: f.label || fk, type: f.type, required: !!f.required, options: (f.type === 'select' || f.type === 'multiselect') ? (f.options || []) : [] }
+    if (f.type === 'reference') { o.refType = f.refType || ''; o.refMulti = !!f.refMulti }
+    out.push(o)
   }
   return out
 }
