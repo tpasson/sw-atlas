@@ -59,7 +59,7 @@ function onDelete(g) {
 .gm-row { display: flex; align-items: center; gap: 8px; }
 .gm-color { width: 30px; height: 30px; flex-shrink: 0; padding: 0; background: none;
   border: 1px solid var(--clr-border-light); border-radius: var(--r-sm); cursor: pointer; }
-.gm-count { font-size: 12px; color: var(--clr-text-3); white-space: nowrap; flex-shrink: 0; }
+.gm-count { font-size: 12px; color: var(--clr-text-3); white-space: nowrap; flex-shrink: 0; min-width: 64px; text-align: right; }
 .gm-new { display: flex; gap: 8px; margin-top: 4px; }
 .gm-row .field-input, .gm-new .field-input { flex: 1; min-width: 0; padding: 7px 10px; font-size: 13px;
   color: var(--clr-text); background: var(--clr-surface); border: 1px solid var(--clr-border-light); border-radius: var(--r-md); }

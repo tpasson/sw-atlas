@@ -11,7 +11,7 @@
                   {{ swimlane?.name }}
                 </span>
                 <span v-if="subLane" class="panel-sub">{{ subLane.name }}</span>
-                <span class="panel-month">{{ displayMonth }}</span>
+                <span v-if="mode === 'add'" class="panel-month">{{ displayMonth }}</span>
                 <button v-if="mode === 'edit' && milestone && !milestone.sourceSystem" type="button" class="panel-ver" :class="{ on: tab === 'history' }" title="View version history" @click="tab = 'history'">v{{ milestone.version || 1 }} <History :size="11" /></button>
                 <span v-if="readOnly" class="ro-badge"><Lock :size="11" :stroke-width="2.5" /> Read-only</span>
               </div>
@@ -33,6 +33,11 @@
                   </svg>
                 </button>
               </div>
+            </div>
+
+            <div v-if="mode === 'edit' && milestone && !milestone.sourceSystem" class="panel-attrib">
+              <span v-if="milestone.createdBy">Added by <strong>{{ who(milestone.createdBy) }}</strong><span v-if="milestone.createdAt"> · {{ fmtStamp(milestone.createdAt) }}</span></span>
+              <span v-if="milestone.updatedBy && (milestone.version || 1) > 1">Last edit by <strong>{{ who(milestone.updatedBy) }}</strong><span v-if="milestone.updatedAt"> · {{ fmtStamp(milestone.updatedAt) }}</span></span>
             </div>
 
             <div v-if="proposing" class="propose-banner">
@@ -87,21 +92,20 @@
                 <label class="field-label">{{ currentTypeLabel }} fields</label>
                 <div v-for="f in currentTypeFields" :key="f.key" class="tf-row">
                   <label class="tf-label">{{ f.label || f.key }}<span v-if="f.required" class="tf-req" title="Required">*</span></label>
-                  <select v-if="f.type === 'select'" class="field-input" :disabled="formLocked" v-model="form.data[f.key]">
+                  <select v-if="f.type === 'select'" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]">
                     <option value="">—</option>
                     <option v-for="o in (f.options || [])" :key="o" :value="o">{{ o }}</option>
                   </select>
-                  <div v-else-if="f.type === 'multiselect'" class="tf-checks">
+                  <div v-else-if="f.type === 'multiselect'" class="tf-checks" :class="{ 'tf-invalid': invalidFields.includes(f.key) }">
                     <label v-for="o in (f.options || [])" :key="o" class="tf-check">
                       <input type="checkbox" :disabled="formLocked" :checked="Array.isArray(form.data[f.key]) && form.data[f.key].includes(o)" @change="toggleMulti(f.key, o, $event.target.checked)" /> {{ o }}
                     </label>
                     <span v-if="!(f.options || []).length" class="tf-empty">No options defined.</span>
                   </div>
-                  <input v-else-if="f.type === 'number'" type="number" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
-                  <input v-else-if="f.type === 'date'" type="date" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
-                  <input v-else type="text" class="field-input" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <input v-else-if="f.type === 'number'" type="number" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <input v-else-if="f.type === 'date'" type="date" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <input v-else type="text" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
                 </div>
-                <p v-if="fieldError" class="tf-error">{{ fieldError }}</p>
               </div>
 
               <div class="field">
@@ -407,7 +411,14 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName } from '../stores/useAppStore.js'
+
+function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
+function fmtStamp(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
@@ -431,7 +442,8 @@ const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, ite
 
 const TABS = ['details', 'deps', 'groups', 'history']
 const tab = ref(props.mode === 'edit' && TABS.includes(props.initialTab) ? props.initialTab : 'details')
-const fieldError = ref('')
+const invalidFields = ref([]) // keys of empty required fields, framed red
+const isFieldEmpty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0)
 
 // The form is read-only when you can't edit content here: a source-synced item,
 // a baseline (historical) view, or you're a viewer/non-member.
@@ -493,6 +505,10 @@ const timelineLanes = computed(() => store.swimlanes.filter(s => !s.sourceSystem
 const chosenLaneSubs = computed(() => store.swimlanes.find(s => s.id === form.swimlaneId)?.subLanes || [])
 // Changing the Area clears the sub-area selection (it belonged to the old lane).
 watch(() => form.swimlaneId, () => { form.subLaneId = '' })
+// Clear a required field's red frame as soon as it's filled in.
+watch(() => form.data, () => {
+  if (invalidFields.value.length) invalidFields.value = invalidFields.value.filter(k => isFieldEmpty(form.data[k]))
+}, { deep: true })
 
 // Type-specific field schema for the selected type.
 const currentType = computed(() => itemTypeByKey(form.typeKey))
@@ -646,14 +662,9 @@ function submit() {
   if (dateError.value) { tab.value = 'details'; return } // surface the date error
   if (!form.title.trim()) return
 
-  // Enforce mandatory type fields.
-  fieldError.value = ''
-  for (const f of currentTypeFields.value) {
-    if (!f.required) continue
-    const v = form.data[f.key]
-    const empty = v == null || v === '' || (Array.isArray(v) && v.length === 0)
-    if (empty) { fieldError.value = `"${f.label || f.key}" is required.`; tab.value = 'details'; return }
-  }
+  // Enforce mandatory type fields: frame the empty ones in red instead of a message.
+  invalidFields.value = currentTypeFields.value.filter(f => f.required && isFieldEmpty(form.data[f.key])).map(f => f.key)
+  if (invalidFields.value.length) { tab.value = 'details'; return }
 
   const isEvent = form.kind === 'event'
   // Grid position derives from the start (event) or the date (milestone).
@@ -771,6 +782,8 @@ function remove() {
 
 .panel-sub { font-size: 12px; color: var(--clr-text-2); font-weight: 500; }
 .panel-month { font-size: 12px; color: var(--clr-text-3); }
+.panel-attrib { display: flex; flex-wrap: wrap; gap: 3px 18px; padding: 8px 20px 4px; font-size: 12px; color: var(--clr-text-3); }
+.panel-attrib strong { color: var(--clr-text-2); font-weight: 600; }
 .panel-ver { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 3px 10px; cursor: pointer; transition: background 0.12s, color 0.12s; }
 .panel-ver:hover, .panel-ver.on { background: rgba(0,113,227,0.12); color: var(--clr-accent); }
 
@@ -872,7 +885,8 @@ function remove() {
 .type-fields .tf-checks { flex: 1; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .type-fields .tf-check { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--clr-text); }
 .type-fields .tf-empty { font-size: 12px; color: var(--clr-text-3); }
-.type-fields .tf-error { color: var(--clr-danger); font-size: 12px; margin-top: 8px; }
+.type-fields .field-input.tf-invalid { border-color: var(--clr-danger); box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
+.type-fields .tf-checks.tf-invalid { border: 1px solid var(--clr-danger); border-radius: var(--r-md); padding: 6px 8px; box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
 
 .field-input,
 .field-textarea {

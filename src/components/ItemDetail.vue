@@ -11,13 +11,13 @@
 
     <div class="id-chips">
       <span class="id-chip">{{ type?.label || item.typeKey || item.kind }}</span>
+      <button v-if="!item.sourceSystem" class="id-hist-btn" @click="showHistory = !showHistory"><History :size="13" /> {{ showHistory ? 'Hide history' : 'History' }} · v{{ item.version || 1 }}</button>
       <button v-if="item.assigneeId" type="button" class="id-chip id-assignee" title="View profile" @click.stop="openProfile(memberById(item.assigneeId), $event)"><span class="id-av">{{ initials(item.assigneeId) }}</span>{{ memberName(item.assigneeId) }}</button>
     </div>
 
     <div v-if="!item.sourceSystem" class="id-attrib">
       <span v-if="item.createdBy">Added by <strong>{{ who(item.createdBy) }}</strong><span v-if="item.createdAt"> · {{ fmtStamp(item.createdAt) }}</span></span>
       <span v-if="item.updatedBy && (item.version || 1) > 1">Last edit by <strong>{{ who(item.updatedBy) }}</strong><span v-if="item.updatedAt"> · {{ fmtStamp(item.updatedAt) }}</span></span>
-      <button class="id-hist-btn" @click="showHistory = !showHistory"><History :size="13" /> {{ showHistory ? 'Hide history' : 'History' }} · v{{ item.version || 1 }}</button>
     </div>
 
     <dl class="id-meta">
@@ -60,7 +60,7 @@ function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
   if (!iso) return ''
   const d = new Date(iso)
-  return isNaN(d) ? '' : d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+  return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 const type = computed(() => itemTypes.list.find(t => t.key === (props.item.typeKey || props.item.kind || 'milestone')))
