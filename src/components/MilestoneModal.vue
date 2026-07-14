@@ -55,7 +55,7 @@
                 />
               </div>
 
-              <div v-if="mode === 'add' && isTimelineType" class="field">
+              <div v-if="isTimelineType" class="field">
                 <label class="field-label">Area</label>
                 <select class="field-input" :disabled="formLocked" v-model="form.swimlaneId">
                   <option value="">— No area (off-timeline) —</option>
@@ -63,7 +63,7 @@
                 </select>
               </div>
 
-              <div v-if="mode === 'add' && isTimelineType && chosenLaneSubs.length" class="field">
+              <div v-if="isTimelineType && chosenLaneSubs.length" class="field">
                 <label class="field-label">Sub-area</label>
                 <select class="field-input" :disabled="formLocked" v-model="form.subLaneId">
                   <option value="">— Top of area —</option>

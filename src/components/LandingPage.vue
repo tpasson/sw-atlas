@@ -93,8 +93,8 @@ const PlanCard = {
   props: { w: Object, admin: Boolean },
   emits: ['open', 'feature'],
   setup(props, { emit }) {
-    const fmt = (d) => { try { return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) } catch { return d } }
-    const fmtStamp = (d) => { try { return new Date(d).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) } catch { return d } }
+    const fmt = (d) => { try { return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) } catch { return d } }
+    const fmtStamp = (d) => { try { return new Date(d).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) } catch { return d } }
     return () => {
       const w = props.w
       const late = w.lateCount || 0

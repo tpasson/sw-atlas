@@ -29,7 +29,7 @@
               <input v-model="iconSearch" class="ti tm-iconsearch" placeholder="Search icons… (bug, flag, star, server…)" @click.stop />
               <div class="tm-icongrid">
                 <button v-for="s in iconChoices" :key="s" type="button" class="tm-iconopt" :class="{ on: s === t.icon }" :title="prettyShape(s)" @click="pickIcon(t, s)">
-                  <MarkerIcon :shape="s" :color="t.color || '#8a8a8e'" :size="16" :fill="true" />
+                  <MarkerIcon :shape="s" :color="t.color || '#8a8a8e'" :size="16" :fill="t.fill" />
                 </button>
                 <span v-if="!iconChoices.length" class="card-hint">No icons match “{{ iconSearch }}”.</span>
               </div>
