@@ -126,6 +126,15 @@
                     <span v-if="!refItems(f).length" class="tf-empty">No {{ refTypeLabel(f.refType) }} items to reference.</span>
                   </div>
                   <input v-else type="text" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <div v-if="f.type === 'reference' && selectedRefs(f).length" class="tf-pins">
+                    <span class="tf-pins-lbl" title="Pin a reference to the target's current version, or keep it tracking the latest">Version</span>
+                    <button
+                      v-for="id in selectedRefs(f)" :key="id" type="button"
+                      class="tf-pin" :class="{ on: isPinned(f.key, id) }" :disabled="formLocked"
+                      :title="isPinned(f.key, id) ? refTitle(id) + ' pinned to v' + pinnedVer(f.key, id) + ' — click to track latest' : 'Pin ' + refTitle(id) + ' to its current version'"
+                      @click="togglePin(f.key, id)"
+                    >{{ refTitle(id) }}: {{ isPinned(f.key, id) ? 'v' + pinnedVer(f.key, id) : 'latest' }}</button>
+                  </div>
                 </div>
               </div>
 
@@ -400,7 +409,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, STATUS_TONES, toneColor } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, STATUS_TONES, toneColor, parseRef } from '../stores/useAppStore.js'
 
 function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
@@ -490,6 +499,25 @@ const form = reactive({
   scmUrl: props.milestone?.scmUrl ?? '',
 })
 
+// Reference fields can pin a target to a specific version, stored as "id@vN".
+// Keep form.data on bare ids (so the pickers bind cleanly) and track pinned
+// versions separately in refPins; both are re-encoded on save. Decode any pins
+// already stored so editing an item preserves them.
+const refPins = reactive({}) // { [fieldKey]: { [id]: version } }
+for (const f of (itemTypeByKey(form.typeKey)?.fields || [])) {
+  if (f.type !== 'reference') continue
+  const raw = form.data[f.key]
+  const entries = Array.isArray(raw) ? raw : (raw ? [raw] : [])
+  const bare = []
+  for (const e of entries) {
+    const { id, version } = parseRef(e)
+    if (!id) continue
+    bare.push(id)
+    if (version) (refPins[f.key] || (refPins[f.key] = {}))[id] = version
+  }
+  form.data[f.key] = f.refMulti ? bare : (bare[0] || '')
+}
+
 // Lanes you can place a new item / proposal in (mirrored Git lanes excluded).
 const timelineLanes = computed(() => store.swimlanes.filter(s => !s.sourceSystem))
 const chosenLaneSubs = computed(() => store.swimlanes.find(s => s.id === form.swimlaneId)?.subLanes || [])
@@ -553,6 +581,33 @@ function refItems(f) {
   return store.milestones.filter(m => (m.typeKey || m.kind) === f.refType && m.id !== props.milestone?.id)
 }
 function refTypeLabel(key) { return itemTypeByKey(key)?.label || key || 'referenced' }
+
+// Version pinning for reference fields (see refPins above).
+function selectedRefs(f) {
+  const v = form.data[f.key]
+  return Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : [])
+}
+function refTitle(id) { return store.milestones.find(m => m.id === id)?.title || id }
+function isPinned(key, id) { return !!(refPins[key] && refPins[key][id]) }
+function pinnedVer(key, id) { return refPins[key] && refPins[key][id] }
+// Toggle a reference between tracking latest (head) and pinned-to-current-version.
+function togglePin(key, id) {
+  if (formLocked.value) return
+  if (isPinned(key, id)) delete refPins[key][id]
+  else (refPins[key] || (refPins[key] = {}))[id] = store.milestones.find(m => m.id === id)?.version || 1
+}
+// Re-encode reference values with their pinned versions for the save payload.
+function encodedData() {
+  const out = { ...form.data }
+  for (const f of (itemTypeByKey(form.typeKey)?.fields || [])) {
+    if (f.type !== 'reference') continue
+    const pins = refPins[f.key] || {}
+    const enc = (id) => (id && pins[id] ? `${id}@v${pins[id]}` : id)
+    const v = out[f.key]
+    out[f.key] = Array.isArray(v) ? v.map(enc) : enc(v)
+  }
+  return out
+}
 
 // Toggle one option of a multi-select field on/off.
 function toggleMulti(key, opt, checked) {
@@ -708,7 +763,7 @@ function submit() {
     who:        form.who,
     kind:       form.kind,
     typeKey:    form.typeKey,
-    data:       form.data,
+    data:       encodedData(),
     assigneeId: form.assigneeId || null,
     status:     form.status || '',
     marker:     null, // the icon now comes from the item's type, not a per-item marker
@@ -907,6 +962,13 @@ function remove() {
 .type-fields .tf-empty { font-size: 12px; color: var(--clr-text-3); }
 .type-fields .field-input.tf-invalid { border-color: var(--clr-danger); box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
 .type-fields .tf-checks.tf-invalid { border: 1px solid var(--clr-danger); border-radius: var(--r-md); padding: 6px 8px; box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
+.type-fields .tf-row { flex-wrap: wrap; } /* lets the version-pin strip drop to its own line */
+.type-fields .tf-pins { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 130px; }
+.type-fields .tf-pins-lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--clr-text-3); }
+.type-fields .tf-pin { font-size: 11px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-bg); border: 1px solid var(--clr-border); border-radius: 100px; padding: 3px 10px; }
+.type-fields .tf-pin.on { color: var(--clr-warning, #FF9F0A); border-color: var(--clr-warning, #FF9F0A); background: rgba(255,159,10,0.1); }
+.type-fields .tf-pin:hover:not(:disabled) { border-color: var(--clr-text-3); }
+.type-fields .tf-pin:disabled { opacity: 0.6; cursor: default; }
 .ms-status { display: flex; align-items: center; gap: 8px; }
 .ms-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 

@@ -27,7 +27,7 @@
               :key="m.id"
               class="ex-leaf"
               :class="{ on: selectedId === m.id }"
-              @click="selectedId = m.id"
+              @click="selectLeaf(m.id)"
             >
               <span class="ex-leaf-dot" :style="{ background: dotColor(m) }"></span>
               <span class="ex-leaf-title">{{ m.title }}</span>
@@ -66,7 +66,7 @@
                       :key="m.id"
                       class="ex-leaf scm-leaf"
                       :class="{ on: selectedId === m.id }"
-                      @click="selectedId = m.id"
+                      @click="selectLeaf(m.id)"
                     >
                       <span class="ex-leaf-dot" :style="{ background: m.color || '#8a8a8e' }"></span>
                       <span class="ex-leaf-title">{{ m.title }}</span>
@@ -84,7 +84,14 @@
       <div class="ev-resizer" :class="{ dragging: resizing }" title="Drag to resize · double-click to reset" @mousedown.prevent="startResize" @dblclick="resetWidth"></div>
 
       <section class="ev-detail">
-        <ItemDetail v-if="selected" :item="selected" :read-only="readOnly" @edit="$emit('edit', selected)" />
+        <template v-if="pinned">
+          <div class="ev-pin">
+            <span class="ev-pin-txt">Viewing <strong>v{{ pinned.version }}</strong> — not the latest (v{{ pinned.headVersion }}).</span>
+            <button class="ev-pin-latest" @click="clearPin">View latest</button>
+          </div>
+          <ItemDetail :item="pinned.item" :read-only="true" :pinned-version="pinned.version" />
+        </template>
+        <ItemDetail v-else-if="selected" :item="selected" :read-only="readOnly" @edit="$emit('edit', selected)" />
         <div v-else class="ev-detail-empty">
           <p>Select an item in the tree to see its content.</p>
         </div>
@@ -94,9 +101,10 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { GitPullRequest } from 'lucide-vue-next'
-import { store, itemTypes, itemStatus, toneColor } from '../stores/useAppStore.js'
+import { store, itemTypes, itemStatus, toneColor, ui } from '../stores/useAppStore.js'
+import { api } from '../api.js'
 import MarkerIcon from './MarkerIcon.vue'
 import TableView from './TableView.vue'
 import BoardView from './BoardView.vue'
@@ -166,6 +174,63 @@ function toggle(key) {
 // in sync with edits and clears if the item is deleted.
 const selectedId = ref(null)
 const selected = computed(() => store.milestones.find(m => m.id === selectedId.value) || null)
+
+// A pinned-version view: when a deep-link carries ?v={n} older than head, we show
+// that revision's immutable snapshot (with a banner) instead of the live item.
+const pinned = ref(null) // { item, version, headVersion } | null
+
+// Reflect the open item into the URL (?item=&v=) without adding a history entry,
+// so the address bar always yields a valid link and back/forward stay clean.
+function syncUrl(id, version) {
+  try {
+    const u = new URL(window.location.href)
+    if (id) {
+      u.searchParams.set('item', id)
+      if (version) u.searchParams.set('v', String(version)); else u.searchParams.delete('v')
+    } else { u.searchParams.delete('item'); u.searchParams.delete('v') }
+    window.history.replaceState(window.history.state, '', u.pathname + u.search)
+  } catch { /* ignore */ }
+}
+
+// Clicking an item in the tree always opens its live/head content.
+function selectLeaf(id) { pinned.value = null; selectedId.value = id; syncUrl(id, null) }
+
+// Leave the pinned snapshot and jump to the item's latest revision.
+function clearPin() {
+  const id = pinned.value?.item?.id || selectedId.value
+  pinned.value = null
+  if (id) { selectedId.value = id; syncUrl(id, null) }
+}
+
+// Load a specific revision's snapshot for the pinned-version view. If the request
+// is at (or past) head, fall back to the live item — no snapshot needed.
+async function loadPinned(id, version) {
+  const head = store.milestones.find(m => m.id === id)
+  const headVersion = head?.version || version
+  selectedId.value = id
+  if (!version || version >= headVersion) { pinned.value = null; syncUrl(id, null); return }
+  try {
+    const rev = await api.getRevision(id, version)
+    const snap = typeof rev.snapshot === 'string' ? JSON.parse(rev.snapshot) : rev.snapshot
+    pinned.value = { item: snap, version, headVersion }
+    syncUrl(id, version)
+  } catch { pinned.value = null; syncUrl(id, null) }
+}
+
+// Deep-link / cross-view focus: open the requested item (optionally a pinned
+// version) in the tree layout, expanding its folder so the selection is visible.
+watch(() => ui.focusItemId, (id) => {
+  if (!id) return
+  const version = ui.focusVersion
+  ui.focusItemId = null
+  ui.focusVersion = null
+  mode.value = 'folders'
+  const m = store.milestones.find(x => x.id === id)
+  const key = m ? (m.typeKey || m.kind || 'milestone') : null
+  if (key && collapsed.value.has(key)) { const s = new Set(collapsed.value); s.delete(key); collapsed.value = s }
+  if (version) loadPinned(id, version)
+  else { pinned.value = null; selectedId.value = id; syncUrl(id, null) }
+}, { immediate: true })
 
 // Draggable divider: resize the tree column (persisted; double-click resets).
 const TREE_W_KEY = 'atlas-explorer-tree-w'
@@ -248,4 +313,11 @@ function resetWidth() {
 
 .ev-detail { flex: 1; min-width: 0; overflow-y: auto; }
 .ev-detail-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--clr-text-3); font-size: 14px; }
+.ev-pin { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 32px 0; padding: 9px 14px;
+  background: rgba(255,159,10,0.1); border: 1px solid rgba(255,159,10,0.4); border-radius: var(--r-md); }
+.ev-pin-txt { font-size: 13px; color: var(--clr-text-2); }
+.ev-pin-txt strong { color: var(--clr-text); font-weight: 700; }
+.ev-pin-latest { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--clr-accent);
+  background: var(--clr-surface); border: 1px solid var(--clr-border); border-radius: 100px; padding: 4px 12px; }
+.ev-pin-latest:hover { background: var(--clr-surface-2); }
 </style>

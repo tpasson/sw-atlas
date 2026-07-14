@@ -6,13 +6,19 @@
         <MarkerIcon :shape="type?.icon || item.marker || 'l:Diamond'" :color="type?.color || '#8a8a8e'" :size="20" :fill="type?.fill !== false" />
         <h1 class="id-title">{{ item.title }}</h1>
       </div>
-      <button v-if="!readOnly" class="id-edit" @click="$emit('edit')">Edit</button>
+      <div class="id-actions">
+        <button class="id-act" :class="{ done: copied === 'link' }" title="Copy a stable link to this item" @click="copy('link')">{{ copied === 'link' ? 'Copied' : 'Copy link' }}</button>
+        <button class="id-act" :class="{ done: copied === 'json' }" title="Copy this item as JSON" @click="copy('json')">{{ copied === 'json' ? 'Copied' : 'JSON' }}</button>
+        <button class="id-act" :class="{ done: copied === 'yaml' }" title="Copy this item as YAML" @click="copy('yaml')">{{ copied === 'yaml' ? 'Copied' : 'YAML' }}</button>
+        <button v-if="!readOnly" class="id-edit" @click="$emit('edit')">Edit</button>
+      </div>
     </header>
 
     <div class="id-chips">
       <span class="id-chip">{{ type?.label || item.typeKey || item.kind }}</span>
       <span v-if="status" class="id-status" :style="statusStyle">{{ status.label }}</span>
-      <button v-if="!item.sourceSystem" class="id-hist-btn" @click="showHistory = !showHistory"><History :size="13" /> {{ showHistory ? 'Hide history' : 'History' }} · v{{ item.version || 1 }}</button>
+      <button v-if="!item.sourceSystem && !pinnedVersion" class="id-hist-btn" @click="showHistory = !showHistory"><History :size="13" /> {{ showHistory ? 'Hide history' : 'History' }} · v{{ item.version || 1 }}</button>
+      <span v-else-if="pinnedVersion" class="id-chip id-pin">Pinned · v{{ pinnedVersion }}</span>
       <button v-if="item.assigneeId" type="button" class="id-chip id-assignee" title="View profile" @click.stop="openProfile(memberById(item.assigneeId), $event)"><span class="id-av">{{ initials(item.assigneeId) }}</span>{{ memberName(item.assigneeId) }}</button>
     </div>
 
@@ -67,7 +73,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { History } from 'lucide-vue-next'
-import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor, groups, RELATIONSHIP_TYPES } from '../stores/useAppStore.js'
+import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor, groups, RELATIONSHIP_TYPES, itemLink, parseRef } from '../stores/useAppStore.js'
 
 const status = computed(() => itemStatus(props.item))
 const statusStyle = computed(() => {
@@ -78,7 +84,11 @@ const statusStyle = computed(() => {
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
 
-const props = defineProps({ item: { type: Object, required: true }, readOnly: { type: Boolean, default: false } })
+const props = defineProps({
+  item: { type: Object, required: true },
+  readOnly: { type: Boolean, default: false },
+  pinnedVersion: { type: Number, default: 0 }, // >0 = showing an older revision's snapshot
+})
 defineEmits(['edit'])
 
 const showHistory = ref(false)
@@ -133,16 +143,117 @@ const itemGroups = computed(() => groups.list.filter(g => (g.itemIds || []).incl
 // Show every field the type defines — empty ones included, so it's clear which
 // fields exist and which are still blank (rendered as "—" in the template).
 // Reference fields resolve item ids to their titles.
+// Resolve one reference entry to a display string. A pinned reference ("id@vN")
+// shows its version; if the target has since advanced, that's made explicit so a
+// stale pin is never mistaken for the latest.
+function refDisplay(entry) {
+  const { id, version } = parseRef(entry)
+  const target = store.milestones.find(m => m.id === id)
+  const title = target?.title || id
+  if (!version) return title
+  const head = target?.version
+  return head && head > version ? `${title} · v${version} (latest v${head})` : `${title} · v${version}`
+}
 function fieldValue(f) {
   const v = props.item.data?.[f.key]
   if (f.type === 'reference') {
     const ids = Array.isArray(v) ? v : (v ? [v] : [])
-    return ids.map(id => store.milestones.find(m => m.id === id)?.title || id).join(', ')
+    return ids.map(refDisplay).join(', ')
   }
   return Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v))
 }
 const fieldRows = computed(() =>
   (type.value?.fields || []).map(f => ({ k: f.label || f.key, v: fieldValue(f) })))
+
+// ── Stable link + JSON/YAML export ───────────────────────────────────────────
+const linkUrl = computed(() => itemLink(props.item.id, props.pinnedVersion || null))
+
+// A clean, human-readable projection of the item (labels resolved, ids hidden)
+// for the JSON/YAML "views" — the same object serialized either way.
+function exportFieldValue(f) {
+  const v = props.item.data?.[f.key]
+  if (f.type === 'reference') {
+    const ids = Array.isArray(v) ? v : (v ? [v] : [])
+    const names = ids.map(refDisplay)
+    return f.refMulti ? names : (names[0] || '')
+  }
+  if (Array.isArray(v)) return v
+  return v == null ? '' : v
+}
+const exportObj = computed(() => {
+  const it = props.item
+  const o = {
+    id: it.id,
+    type: type.value?.label || it.typeKey || it.kind || 'item',
+    title: it.title || '',
+    status: status.value?.label || it.status || '',
+    version: props.pinnedVersion || it.version || 1,
+  }
+  if (laneName.value) o.area = laneName.value
+  if (dateStr.value) o.date = dateStr.value
+  if (it.maturity) o.maturity = MATURITY_STAGES[it.maturity - 1]
+  if (it.progress != null) o.progress = it.progress
+  if (it.assigneeId) o.assignee = memberName(it.assigneeId) || it.assigneeId
+  const fields = {}
+  for (const f of (type.value?.fields || [])) fields[f.label || f.key] = exportFieldValue(f)
+  if (Object.keys(fields).length) o.fields = fields
+  const det = {}
+  if (it.what) det.what = it.what
+  if (it.why) det.why = it.why
+  if (it.how) det.how = it.how
+  if (Object.keys(det).length) o.details = det
+  return o
+})
+
+// Minimal, dependency-free YAML for the export shape (scalars, arrays of scalars,
+// one nested object level). Scalars are quoted whenever they could be misparsed.
+function yamlScalar(v) {
+  if (v == null) return '""'
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  const s = String(v)
+  const needsQuote = s === '' || /^[\s>|@`"'#%&*!?[\]{},-]/.test(s) || /:\s|\s#|[\n:]/.test(s) ||
+    /\s$/.test(s) || /^(true|false|null|yes|no|~)$/i.test(s) || /^-?\d/.test(s)
+  return needsQuote ? JSON.stringify(s) : s
+}
+function toYaml(obj, indent = 0) {
+  const pad = '  '.repeat(indent)
+  const lines = []
+  for (const [k, v] of Object.entries(obj)) {
+    if (Array.isArray(v)) {
+      if (!v.length) { lines.push(`${pad}${k}: []`); continue }
+      lines.push(`${pad}${k}:`)
+      for (const el of v) lines.push(`${pad}  - ${yamlScalar(el)}`)
+    } else if (v && typeof v === 'object') {
+      const entries = Object.entries(v)
+      if (!entries.length) { lines.push(`${pad}${k}: {}`); continue }
+      lines.push(`${pad}${k}:`)
+      lines.push(toYaml(v, indent + 1))
+    } else {
+      lines.push(`${pad}${k}: ${yamlScalar(v)}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+const copied = ref('')
+let copiedTimer = null
+async function copy(kind) {
+  const text = kind === 'link' ? linkUrl.value
+    : kind === 'json' ? JSON.stringify(exportObj.value, null, 2)
+    : toYaml(exportObj.value)
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    try { document.execCommand('copy') } catch { /* ignore */ }
+    document.body.removeChild(ta)
+  }
+  copied.value = kind
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => { copied.value = '' }, 1400)
+}
 
 </script>
 
@@ -151,8 +262,13 @@ const fieldRows = computed(() =>
 .id-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .id-titlewrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .id-title { font-size: 22px; font-weight: 700; color: var(--clr-text); line-height: 1.25; }
+.id-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.id-act { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: var(--r-md); padding: 6px 11px; transition: background 0.12s, color 0.12s; }
+.id-act:hover { background: var(--clr-surface); color: var(--clr-text); }
+.id-act.done { color: #fff; background: var(--clr-positive, #30D158); }
 .id-edit { flex-shrink: 0; background: var(--clr-accent); color: #fff; border-radius: var(--r-md); padding: 7px 16px; font-weight: 600; font-size: 13px; }
 .id-edit:hover { background: var(--clr-accent-hover); }
+.id-pin { color: #fff; background: var(--clr-warning, #FF9F0A); }
 
 .id-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
 .id-chip { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 4px 11px; }
