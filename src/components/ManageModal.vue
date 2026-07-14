@@ -17,6 +17,7 @@
             <!-- Tabs -->
             <div class="tabs" role="tablist">
               <button class="tab" :class="{ active: tab === 'areas' }" @click="tab = 'areas'">Areas</button>
+              <button class="tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
               <button v-if="canAdmin" class="tab" :class="{ active: tab === 'types' }" @click="tab = 'types'">Types</button>
               <button class="tab" :class="{ active: tab === 'baselines' }" @click="tab = 'baselines'">Baselines</button>
               <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
@@ -216,6 +217,11 @@
                 <TypesManager />
               </section>
 
+              <!-- ───────────────── GROUPS ───────────────── -->
+              <section v-if="tab === 'groups'" class="tab-pane">
+                <GroupsManager />
+              </section>
+
               <!-- ───────────────── BASELINES ───────────────── -->
               <section v-show="tab === 'baselines'" class="tab-pane">
                 <div class="card">
@@ -298,6 +304,7 @@ import ShareManager from './ShareManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
 import MembersManager from './MembersManager.vue'
 import TypesManager from './TypesManager.vue'
+import GroupsManager from './GroupsManager.vue'
 
 const isDemo = import.meta.env.VITE_DEMO
 // Configuration tabs (Display / Types / Sharing) are owner-only; demo acts as owner.
@@ -335,7 +342,7 @@ defineEmits(['close'])
 const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 
 // Open on a requested tab when it's available to this user; fall back to Areas.
-const ALLOWED_INITIAL = ['areas', 'types', 'baselines', 'data', 'sharing', 'members']
+const ALLOWED_INITIAL = ['areas', 'groups', 'types', 'baselines', 'data', 'sharing', 'members']
 const tab = ref(ALLOWED_INITIAL.includes(props.initialTab) ? props.initialTab : 'areas')
 
 // Label a mirrored lane by what it's synced from (GitHub/Gitea/… or a subscription).

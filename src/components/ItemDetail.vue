@@ -3,7 +3,7 @@
   <article class="id">
     <header class="id-head">
       <div class="id-titlewrap">
-        <MarkerIcon :shape="type?.icon || item.marker || 'l:Diamond'" :color="item.color || '#8a8a8e'" :size="20" :fill="true" />
+        <MarkerIcon :shape="type?.icon || item.marker || 'l:Diamond'" :color="item.color || '#8a8a8e'" :size="20" :fill="type?.fill !== false" />
         <h1 class="id-title">{{ item.title }}</h1>
       </div>
       <button v-if="!readOnly" class="id-edit" @click="$emit('edit')">Edit</button>

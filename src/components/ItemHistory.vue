@@ -65,7 +65,7 @@ function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmt(iso) {
   if (!iso) return ''
   const d = new Date(iso)
-  return isNaN(d) ? '' : d.toLocaleString('en-US', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 const snapType = computed(() => snapshot.value && itemTypes.list.find(t => t.key === (snapshot.value.typeKey || snapshot.value.kind)))

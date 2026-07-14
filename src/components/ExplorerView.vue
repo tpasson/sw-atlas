@@ -16,7 +16,7 @@
         <div v-for="g in folders" :key="g.key" class="ex-node">
           <div class="ex-row" @click="toggle(g.key)">
             <svg class="ex-chev" :class="{ open: isOpen(g.key) }" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5L6.5 5L3 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <MarkerIcon :shape="g.type.icon || 'l:Diamond'" :color="g.type.color || '#8a8a8e'" :size="14" :fill="true" />
+            <MarkerIcon :shape="g.type.icon || 'l:Diamond'" :color="g.type.color || '#8a8a8e'" :size="14" :fill="g.type.fill !== false" />
             <span class="ex-row-label">{{ g.type.label }}</span>
             <span class="ex-row-count">{{ g.items.length }}</span>
             <button v-if="!readOnly" class="ex-row-add" :title="'New ' + g.type.label" @click.stop="$emit('add', g.type)">+</button>
