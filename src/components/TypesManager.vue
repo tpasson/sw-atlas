@@ -67,6 +67,7 @@
           </div>
           <button class="link tm-addfield" @click="addField(t)">+ Field</button>
         </div>
+        <StatusEditor :statuses="t.statuses" />
       </div>
 
       <button class="link" @click="addType">+ Add type</button>
@@ -84,6 +85,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { itemTypes, saveItemTypes, MARKER_LIBRARY } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
+import StatusEditor from './StatusEditor.vue'
 
 let uid = 0
 const nextUid = () => `t${uid++}`
@@ -93,6 +95,7 @@ const types = ref(itemTypes.list.map(t => ({
   _uid: nextUid(), builtin: !!t.builtin, _keyTouched: true,
   key: t.key, label: t.label, family: t.family, icon: t.icon, color: t.color || '', fill: t.fill !== false,
   fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, options: [...(f.options || [])], required: !!f.required, _keyTouched: true })),
+  statuses: (t.statuses || []).map(s => ({ key: s.key, label: s.label, tone: s.tone || 'neutral', to: [...(s.to || [])], _keyTouched: true })),
 })))
 
 const msg = ref('')
@@ -123,7 +126,7 @@ function onFieldLabel(t, f) {
   f.key = uniqueKey(slugify(f.label), taken)
 }
 function addType() {
-  types.value.push({ _uid: nextUid(), builtin: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, fields: [] })
+  types.value.push({ _uid: nextUid(), builtin: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, fields: [], statuses: [] })
 }
 function addField(t) {
   t.fields.push({ key: '', label: '', type: 'text', options: [], required: false, _keyTouched: false })
@@ -166,18 +169,31 @@ function cleanFields(fields) {
   }
   return out
 }
+function cleanStatuses(statuses) {
+  const keys = new Set()
+  const out = []
+  for (const s of (statuses || [])) {
+    if (!s.label && !s.key) continue
+    const k = uniqueKey(s.key || slugify(s.label), keys)
+    keys.add(k)
+    out.push({ key: k, label: s.label || k, tone: s.tone || 'neutral', to: [...(s.to || [])] })
+  }
+  const valid = new Set(out.map(s => s.key))
+  for (const s of out) s.to = s.to.filter(k => valid.has(k) && k !== s.key)
+  return out
+}
 async function save() {
   const typeKeys = new Set(types.value.filter(t => t.builtin).map(t => t.key))
   const payload = []
   for (const t of types.value) {
     if (t.builtin) {
-      payload.push({ key: t.key, label: t.label || t.key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields) })
+      payload.push({ key: t.key, label: t.label || t.key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), statuses: cleanStatuses(t.statuses) })
       continue
     }
     if (!t.label && !t.key && !t.fields.length) continue
     const key = uniqueKey(t.key || slugify(t.label), typeKeys)
     typeKeys.add(key)
-    payload.push({ key, label: t.label || key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields) })
+    payload.push({ key, label: t.label || key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), statuses: cleanStatuses(t.statuses) })
   }
   try {
     await saveItemTypes(payload)

@@ -28,8 +28,20 @@ type ItemType struct {
 	Icon    string      `json:"icon"`           // lucide marker id (e.g. "l:Diamond")
 	Color   string      `json:"color"`          // "" = inherit the lane colour
 	Fill    *bool       `json:"fill,omitempty"` // nil/true = filled icon, false = outline
-	Fields  []ItemField `json:"fields"`
-	Builtin bool        `json:"builtin"`
+	Fields   []ItemField  `json:"fields"`
+	Statuses []ItemStatus `json:"statuses,omitempty"` // configurable workflow states + transitions
+	Builtin  bool         `json:"builtin"`
+}
+
+// ItemStatus is one workflow state a type can be in. The first status in a type's
+// list is the initial one for new items; To lists the status keys it may move to
+// (empty = any). Tone maps to a fixed semantic colour in the UI (so "approved"
+// can't be red): neutral | info | progress | positive | warning | negative.
+type ItemStatus struct {
+	Key   string   `json:"key"`
+	Label string   `json:"label"`
+	Tone  string   `json:"tone"`
+	To    []string `json:"to,omitempty"`
 }
 
 // Behavior families are CODED and finite — they decide rendering + field set.
@@ -119,6 +131,7 @@ func (s *Store) ListItemTypes(ctx context.Context, ws string) ([]ItemType, error
 			if ov.Fields != nil {
 				d.Fields = ov.Fields
 			}
+			d.Statuses = ov.Statuses
 		}
 		out = append(out, d)
 	}
@@ -156,7 +169,7 @@ func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) e
 			if fields == nil {
 				fields = []ItemField{}
 			}
-			clean = append(clean, ItemType{Key: d.Key, Label: label, Family: d.Family, Icon: icon, Color: t.Color, Fill: t.Fill, Fields: fields, Builtin: true})
+			clean = append(clean, ItemType{Key: d.Key, Label: label, Family: d.Family, Icon: icon, Color: t.Color, Fill: t.Fill, Fields: fields, Statuses: t.Statuses, Builtin: true})
 			continue
 		}
 		if !validFamily(t.Family) {

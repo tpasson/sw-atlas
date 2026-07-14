@@ -87,6 +87,17 @@
                 <p class="type-hint">The icon comes from the type — set it under Settings → Types.</p>
               </div>
 
+              <!-- Workflow status: allowed values come from the type's status set. -->
+              <div v-if="typeStatuses.length" class="field">
+                <label class="field-label">Status</label>
+                <div class="ms-status">
+                  <span class="ms-status-dot" :style="{ background: toneColor(currentStatusTone) }"></span>
+                  <select class="field-input" :disabled="formLocked" v-model="form.status">
+                    <option v-for="s in selectableStatuses" :key="s.key" :value="s.key">{{ s.label }}</option>
+                  </select>
+                </div>
+              </div>
+
               <!-- Type-specific fields: schema comes from the selected item type. -->
               <div v-if="currentTypeFields.length" class="field type-fields">
                 <label class="field-label">{{ currentTypeLabel }} fields</label>
@@ -411,7 +422,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, STATUS_TONES, toneColor } from '../stores/useAppStore.js'
 
 function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
@@ -487,6 +498,7 @@ const form = reactive({
   typeKey: props.milestone?.typeKey ?? (props.initialType || props.milestone?.kind || 'milestone'),
   data:   { ...(props.milestone?.data || {}) },
   assigneeId: props.milestone?.assigneeId ?? null,
+  status: props.milestone?.status ?? '',
   what:   props.milestone?.sourceSystem ? stripMarkdown(props.milestone?.what || '') : (props.milestone?.what ?? ''),
   why:    props.milestone?.why   ?? '',
   how:    props.milestone?.how   ?? '',
@@ -519,6 +531,19 @@ const isTimelineType = computed(() => {
 })
 const currentTypeFields = computed(() => currentType.value?.fields || [])
 const currentTypeLabel = computed(() => currentType.value?.label || 'Type')
+const typeStatuses = computed(() => currentType.value?.statuses || [])
+const currentStatusTone = computed(() => (typeStatuses.value.find(s => s.key === form.status)?.tone) || 'neutral')
+// While editing, offer only the current status plus its allowed transitions
+// (empty transitions = any). Creating an item can start in any status.
+const selectableStatuses = computed(() => {
+  const all = typeStatuses.value
+  if (!all.length) return []
+  if (props.mode === 'add') return all
+  const cur = all.find(s => s.key === form.status)
+  if (!cur || !(cur.to && cur.to.length)) return all
+  const allowed = new Set([cur.key, ...cur.to])
+  return all.filter(s => allowed.has(s.key))
+})
 
 // Switching the item type derives its rendering kind, and (for custom types)
 // seeds the marker/colour and any new field slots.
@@ -537,6 +562,10 @@ function applyType(key) {
   for (const f of (t.fields || [])) {
     if (!(f.key in form.data)) form.data[f.key] = f.type === 'multiselect' ? [] : ''
   }
+  // Default to the type's start status if the current one isn't valid for this type.
+  const sts = t.statuses || []
+  if (!sts.length) form.status = ''
+  else if (!sts.some(s => s.key === form.status)) form.status = sts[0].key
 }
 
 // Toggle one option of a multi-select field on/off.
@@ -691,6 +720,7 @@ function submit() {
     typeKey:    form.typeKey,
     data:       form.data,
     assigneeId: form.assigneeId || null,
+    status:     form.status || '',
     marker:     null, // the icon now comes from the item's type, not a per-item marker
     when:       isEvent ? (form.startDate || null) : (form.when || null),
     startDate:  isEvent ? (form.startDate || null) : null,
@@ -887,6 +917,8 @@ function remove() {
 .type-fields .tf-empty { font-size: 12px; color: var(--clr-text-3); }
 .type-fields .field-input.tf-invalid { border-color: var(--clr-danger); box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
 .type-fields .tf-checks.tf-invalid { border: 1px solid var(--clr-danger); border-radius: var(--r-md); padding: 6px 8px; box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
+.ms-status { display: flex; align-items: center; gap: 8px; }
+.ms-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
 .field-input,
 .field-textarea {
