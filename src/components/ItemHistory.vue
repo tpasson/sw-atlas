@@ -74,8 +74,10 @@ const snapFields = computed(() => {
   if (!s) return []
   const laneName = store.swimlanes.find(l => l.id === s.swimlaneId)?.name || ''
   const date = s.startDate && s.endDate ? `${s.startDate} → ${s.endDate}` : (s.when || (s.year ? `${MONTHS[(s.month || 1) - 1]} ${s.year}` : ''))
+  const statusLabel = (snapType.value?.statuses || []).find(st => st.key === s.status)?.label || s.status || ''
   const rows = [
     { k: 'Title', v: s.title },
+    { k: 'Status', v: statusLabel },
     { k: 'Area', v: laneName },
     { k: 'Date', v: date },
     { k: 'Maturity', v: s.maturity ? MATURITY_STAGES[s.maturity - 1] : '' },

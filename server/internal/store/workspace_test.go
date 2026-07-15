@@ -48,7 +48,7 @@ func TestWorkspaceIsolation(t *testing.T) {
 			_, err := s.CreateItem(ctx, w, Item{ID: "it-" + w + "-" + n, SwimlaneID: "sw-" + w, Year: 2026, Month: 6, Title: "T" + n, Kind: "milestone"})
 			must("CreateItem "+w, err)
 		}
-		must("AddLink "+w, s.AddLink(ctx, w, "it-"+w+"-1", "it-"+w+"-2", "depends-on"))
+		must("AddLink "+w, s.AddLink(ctx, w, "it-"+w+"-1", "it-"+w+"-2", "depends-on", nil))
 		must("SetPublicRead "+w, s.SetPublicRead(ctx, w, w == A))            // A=true, B=false
 		must("SetPalette "+w, s.SetPalette(ctx, w, []string{"#" + w[:1] + "00000"}))
 		must("SetGroups "+w, s.SetGroups(ctx, w, []Group{{ID: "g-" + w, Name: "G" + w}}))

@@ -91,6 +91,9 @@ const realApi = {
   // Item-type registry: catalog (built-ins + custom) and saving custom types.
   itemTypes: () => req('GET', '/item-types'),
   setItemTypes: (types) => req('PUT', '/item-types', types),
+  // Shared, reusable status workflows (referenced by types via workflowKey).
+  workflows: () => req('GET', '/workflows'),
+  setWorkflows: (wfs) => req('PUT', '/workflows', wfs),
 
   // swimlanes
   createSwimlane: (data) => req('POST', '/swimlanes', data),
@@ -109,7 +112,7 @@ const realApi = {
   deleteItem: (id) => req('DELETE', `/items/${id}`),
 
   // links
-  addLink: (a, b, rel = 'depends-on') => req('POST', '/links', { a, b, rel }),
+  addLink: (a, b, rel = 'depends-on', version = null) => req('POST', '/links', { a, b, rel, version }),
   removeLink: (a, b, rel = 'depends-on') => req('DELETE', '/links', { a, b, rel }),
 
   // sharing — federation producer side

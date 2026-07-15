@@ -31,9 +31,9 @@ type Server struct {
 	staticDir string
 	startedAt time.Time
 
-	writeRL *rateLimiter  // per-user write throttle (limit is configurable)
-	limMu   sync.RWMutex  // guards the cached limits below
-	lim     store.Limits  // cached instance limits (refreshed on PUT /instance/limits)
+	writeRL *rateLimiter // per-user write throttle (limit is configurable)
+	limMu   sync.RWMutex // guards the cached limits below
+	lim     store.Limits // cached instance limits (refreshed on PUT /instance/limits)
 }
 
 // rateLimiter is a tiny in-memory sliding-window limiter (per client IP), used to
@@ -186,6 +186,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/settings/ui", s.getUISettings)
 			r.Get("/settings/git-colors", s.getGitColors)
 			r.Get("/item-types", s.getItemTypes)
+			r.Get("/workflows", s.getWorkflows)
 			r.Get("/members", s.listWorkspaceMembers)
 			r.Get("/baselines", s.listBaselines)
 			r.Get("/baselines/{id}", s.getBaseline)
@@ -225,6 +226,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Put("/settings/ui", s.setUISettings)
 			r.Put("/settings/git-colors", s.setGitColors)
 			r.Put("/item-types", s.setItemTypes)
+			r.Put("/workflows", s.setWorkflows)
 
 			// GitHub sources (releases/tags/issues/PRs → read-only swimlane)
 			r.Post("/github-sources", s.createGitHubSource)
@@ -997,6 +999,35 @@ func (s *Server) setItemTypes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, types)
 }
 
+// getWorkflows returns the workspace's shared, reusable status workflows.
+func (s *Server) getWorkflows(w http.ResponseWriter, r *http.Request) {
+	wfs, err := s.store.GetWorkflows(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, wfs)
+}
+
+// setWorkflows replaces the workspace's shared workflows; item types reference
+// them by key, so editing one here updates every type that uses it.
+func (s *Server) setWorkflows(w http.ResponseWriter, r *http.Request) {
+	var in []store.Workflow
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.SetWorkflows(r.Context(), s.currentWorkspace(r), in); err != nil {
+		s.fail(w, err)
+		return
+	}
+	wfs, err := s.store.GetWorkflows(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, wfs)
+}
+
 func (s *Server) setGitColors(w http.ResponseWriter, r *http.Request) {
 	var in store.GitColors
 	if !decode(w, r, &in) {
@@ -1304,7 +1335,7 @@ func (s *Server) addLink(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.AddLink(r.Context(), s.currentWorkspace(r), in.A, in.B, in.Rel); err != nil {
+	if err := s.store.AddLink(r.Context(), s.currentWorkspace(r), in.A, in.B, in.Rel, in.Version); err != nil {
 		s.fail(w, err)
 		return
 	}

@@ -279,6 +279,30 @@
             </div>
           </div>
         </div>
+        <div v-if="usesMilestones.length > 0" class="tooltip-links">
+          <span class="tl-label">Uses</span>
+          <div class="tl-items">
+            <div v-for="um in usesMilestones.slice(0, 10)" :key="um.id" class="tl-item" @click.stop="openRelated(um, $event)">
+              <span class="tl-dot" :style="{ background: backlogDot(um) }"></span>
+              <span class="tl-title">{{ um.title }}<span v-if="um._pinV" class="tl-ver">· v{{ um._pinV }}</span></span>
+              <span class="tl-date">{{ backlogMeta(um) }}</span>
+            </div>
+            <div v-if="usesMilestones.length > 10" class="tl-more">+{{ usesMilestones.length - 10 }} more</div>
+          </div>
+        </div>
+
+        <div v-if="usedByMilestones.length > 0" class="tooltip-links">
+          <span class="tl-label">Used by</span>
+          <div class="tl-items">
+            <div v-for="ub in usedByMilestones.slice(0, 10)" :key="ub.id" class="tl-item" @click.stop="openRelated(ub, $event)">
+              <span class="tl-dot" :style="{ background: backlogDot(ub) }"></span>
+              <span class="tl-title">{{ ub.title }}<span v-if="ub._pinV" class="tl-ver">· v{{ ub._pinV }}</span></span>
+              <span class="tl-date">{{ backlogMeta(ub) }}</span>
+            </div>
+            <div v-if="usedByMilestones.length > 10" class="tl-more">+{{ usedByMilestones.length - 10 }} more</div>
+          </div>
+        </div>
+
         <div v-if="riskByItem[tooltip.ms.id] && riskByItem[tooltip.ms.id].length" class="tooltip-risk">
           <div class="tr-label"><AlertTriangle :size="12" :stroke-width="2.2" /><span>Late blockers</span></div>
           <div class="tr-items">
@@ -378,7 +402,7 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['add-milestone', 'edit-milestone', 'show-history', 'manage'])
-const { getLinkedIds, dependsOnIds, dependentIds, updateMilestone } = useAppStore()
+const { getLinkedIds, dependsOnIds, dependentIds, updateMilestone, setView } = useAppStore()
 
 // Months fill the available width at 100% zoom; the zoom control then widens the
 // months (horizontal detail) WITHOUT scaling the header height or fonts.
@@ -971,6 +995,33 @@ const parentMilestones = computed(() => {
   const parents = dependentIds(selectedMs.value.id)
   return store.milestones.filter(m => parents.has(m.id))
 })
+// Uses / Used-by (traceability to backlog items) — shown in the tooltip too, not
+// just in the item detail. These are off-timeline, so clicking opens the Explorer.
+const usesMilestones = computed(() => {
+  if (!selectedMs.value) return []
+  const id = selectedMs.value.id
+  const byId = new Map(store.milestones.map(m => [m.id, m]))
+  return store.links.filter(l => l.a === id && l.rel === 'uses' && byId.has(l.b))
+    .map(l => ({ ...byId.get(l.b), _pinV: l.version ?? null }))
+})
+const usedByMilestones = computed(() => {
+  if (!selectedMs.value) return []
+  const id = selectedMs.value.id
+  const byId = new Map(store.milestones.map(m => [m.id, m]))
+  return store.links.filter(l => l.b === id && l.rel === 'uses' && byId.has(l.a))
+    .map(l => ({ ...byId.get(l.a), _pinV: l.version ?? null }))
+})
+function backlogDot(m) { return itemTypeByKey(m.typeKey || m.kind)?.color || '#8a8a8e' }
+function backlogMeta(m) { return itemTypeByKey(m.typeKey || m.kind)?.label || (m.typeKey || m.kind || '') }
+// Open a related item: timeline items scroll into view; off-timeline (backlog)
+// items open in the Explorer (set the view first, then focus once it's mounted).
+function openRelated(m, e) {
+  if (m.swimlaneId) { selectFromTooltip(m, e); return }
+  tooltip.visible = false
+  ui.explorerItemId = m.id
+  ui.explorerItemVersion = m._pinV || null
+  setView('explorer') // pushes {view:explorer, item:m.id}; ExplorerView opens it
+}
 function swimlaneColor(swimlaneId) {
   return store.swimlanes.find(s => s.id === swimlaneId)?.color ?? '#888'
 }
@@ -1482,6 +1533,7 @@ thead th {
 .tl-item:hover { background: var(--clr-surface-2); }
 .tl-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .tl-title { font-size: 12.5px; color: var(--clr-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-ver { color: var(--clr-text-3); font-variant-numeric: tabular-nums; }
 .tl-date { font-size: 11px; color: var(--clr-text-3); white-space: nowrap; margin-left: auto; padding-left: 8px; flex-shrink: 0; }
 .tl-more { font-size: 11px; color: var(--clr-text-3); padding-left: 12px; }
 

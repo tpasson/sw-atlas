@@ -150,7 +150,7 @@ func Run(ctx context.Context, st *store.Store, ws string) (int, error) {
 		{"m-freeze", "m-release"}, {"m-sso", "m-audit"},
 	}
 	for _, lk := range links {
-		if err := st.AddLink(ctx, ws, lk[0], lk[1], ""); err != nil {
+		if err := st.AddLink(ctx, ws, lk[0], lk[1], "", nil); err != nil {
 			return 0, err
 		}
 	}

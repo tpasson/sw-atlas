@@ -18,13 +18,25 @@ export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 
 // Typed relationships for links (R1). For an edge a→b: `label` reads it from a's
 // side, `inverse` from b's side. 'depends-on' keeps the legacy blocking wording.
+// scheduling:true marks a temporal relationship — it only makes sense between
+// two timeline items (dated). The rest are traceability relations, valid across
+// families (incl. timeline ↔ backlog). See relationsFor() for the family rule.
 export const RELATIONSHIP_TYPES = [
-  { key: 'depends-on', label: 'Blocked by', inverse: 'Blocks' },
+  { key: 'depends-on', label: 'Blocked by', inverse: 'Blocks', scheduling: true },
+  { key: 'uses', label: 'Uses', inverse: 'Used by' },
   { key: 'relates-to', label: 'Relates to', inverse: 'Relates to' },
   { key: 'child-of', label: 'Child of', inverse: 'Parent of' },
   { key: 'implements', label: 'Implements', inverse: 'Implemented by' },
   { key: 'verifies', label: 'Verifies', inverse: 'Verified by' },
 ]
+
+// Whether an item sits on the timeline (schedulable) vs. off-timeline backlog —
+// decided by its type's behavior family. Unknown types default to schedulable
+// (legacy items are milestones).
+export function isSchedulableItem(item) {
+  const fam = itemTypeByKey(item?.typeKey || item?.kind)?.family
+  return fam !== 'work-item' && fam !== 'container'
+}
 
 export const PRESET_COLORS = [
   '#0A84FF', '#30D158', '#FF9F0A', '#FF375F',
@@ -418,7 +430,10 @@ export const swatchColors = computed(() => {
 
 // Item groups (shared, persisted) + transient UI state for group highlighting.
 export const groups = reactive({ list: [] })
-export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, highlightIds: null })
+// focusItemId/focusVersion: transient "jump to this item on the timeline" signal.
+// explorerItemId/explorerItemVersion: the Explorer's currently open item — kept in
+// the URL (?item=&v=) so browser back/forward restores it.
+export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, explorerItemId: null, explorerItemVersion: null, highlightIds: null })
 
 // A reference-field value can pin a specific version of its target, encoded as
 // "<id>@v<n>". parseRef splits that back into { id, version } (version = null when
@@ -456,6 +471,15 @@ export function closeProfile() { profilePopover.person = null }
 export const itemTypes = reactive({ list: [] })
 export function itemTypeByKey(key) {
   return itemTypes.list.find(t => t.key === key) || null
+}
+
+// Shared, reusable status workflows. A type may reference one by key; the server
+// then resolves that workflow's statuses + layout onto the type (so item
+// rendering reads type.statuses/type.layout unchanged). Managed in the type
+// editor; edited once, reflected on every type that uses it.
+export const workflows = reactive({ list: [] })
+export function workflowByKey(key) {
+  return workflows.list.find(w => w.key === key) || null
 }
 
 // Baselines (P2): named snapshots + a diff against the live plan.
@@ -607,6 +631,19 @@ export async function saveItemTypes(customTypes) {
   itemTypes.list = await api.setItemTypes(customTypes)
 }
 
+export async function loadWorkflows() {
+  try {
+    workflows.list = (api.workflows ? await api.workflows() : []) || []
+  } catch { workflows.list = [] }
+}
+
+// saveWorkflows persists the shared workflows, then reloads the type catalog so
+// each type's resolved statuses/layout reflect the edited workflow.
+export async function saveWorkflows(list) {
+  workflows.list = await api.setWorkflows(list)
+  await loadItemTypes()
+}
+
 function onWriteError(err) {
   console.error('ATLAS write failed:', err)
   // Discard the optimistic change by re-syncing from the server.
@@ -676,27 +713,51 @@ export function goHomeView() {
   workspace.mode = 'landing'
 }
 
-// Client-side Home uses pushState; reload on browser back/forward so the URL and
-// the rendered view always match (the app otherwise routes on full loads).
-if (typeof window !== 'undefined') {
-  window.addEventListener('popstate', () => window.location.reload())
-}
-
-// openDeepLinkTarget reads a ?item={id}[&v={n}] query param and, if present,
-// routes to the Explorer so the item opens in its web layout (ExplorerView reacts
-// to ui.focusItemId / ui.focusVersion). A stable item link therefore lands the
-// reader straight on that artifact — at head, or pinned to a specific version.
-function openDeepLinkTarget() {
+// applyNav reconciles the view + open item from the URL (?view=&item=&v=), without
+// a reload. Used on first load and on browser back/forward, so those states are
+// restorable. An ?item with no explicit ?view implies the Explorer (its web layout).
+function applyNav() {
   if (typeof window === 'undefined') return
   let q
   try { q = new URL(window.location.href).searchParams } catch { return }
   const id = q.get('item')
-  if (!id) return
+  const view = q.get('view')
+  const resolved = (view === 'explorer' || view === 'scm' || view === 'cr') ? view : (id ? 'explorer' : 'timeline')
+  store.view = resolved
+  try { localStorage.setItem(VIEW_KEY, resolved) } catch { /* ignore */ }
   const v = parseInt(q.get('v') || '', 10)
-  ui.focusItemId = id
-  ui.focusVersion = Number.isFinite(v) && v > 0 ? v : null
-  store.view = 'explorer'
-  try { localStorage.setItem(VIEW_KEY, 'explorer') } catch { /* ignore */ }
+  ui.explorerItemId = id || null
+  ui.explorerItemVersion = id && Number.isFinite(v) && v > 0 ? v : null
+}
+
+// pushNav records a navigable state (view + optional open item) into the URL and
+// browser history, so back/forward steps through views and items. Called from user
+// gestures (view switch, item click). programmatic/popstate updates use applyNav
+// and never push.
+export function pushNav({ view, item, version } = {}, replace = false) {
+  if (typeof window === 'undefined') return
+  const v = view || store.view
+  let url
+  try {
+    url = new URL(window.location.href)
+    url.searchParams.delete('view'); url.searchParams.delete('item'); url.searchParams.delete('v')
+    if (v && v !== 'timeline') url.searchParams.set('view', v)
+    if (item) { url.searchParams.set('item', item); if (version) url.searchParams.set('v', String(version)) }
+  } catch { return }
+  const href = url.pathname + url.search
+  const state = { atlasNav: true, view: v, item: item || null, version: version || null }
+  try { replace ? history.replaceState(state, '', href) : history.pushState(state, '', href) } catch { /* ignore */ }
+}
+
+// Browser back/forward: within the same plan, reconcile the view/item client-side
+// (no flash); leaving the plan (landing, a different plan) falls back to a full
+// load so routing + auth re-resolve, as before.
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', () => {
+    const target = workspaceSlugFromUrl()
+    if (IS_DEMO || (workspace.mode === 'plan' && target === (workspace.slug || ''))) applyNav()
+    else window.location.reload()
+  })
 }
 
 // initApp resolves auth, picks the workspace to view (from the /{slug} URL),
@@ -750,13 +811,14 @@ export async function initApp() {
     try { await loadBaselines() } catch { /* baselines non-fatal */ }
     await loadPalette()
     await loadGroups()
+    await loadWorkflows()
     await loadItemTypes()
     await loadWorkspaceMembers()
     await loadUISettings()
     await loadChangeRequests()
   }
   session.ready = true
-  if (!session.error) openDeepLinkTarget()
+  if (!session.error) applyNav()
   if (IS_DEMO && !session.error) syncSeededDemoSources()
 }
 
@@ -826,8 +888,12 @@ export function useAppStore() {
   function nextYear() { store.year++; persistYear() }
   function setGranularity(g) { store.granularity = g === 'month' ? 'month' : 'year'; persistYear() }
   function setView(v) {
-    store.view = v === 'explorer' || v === 'scm' || v === 'cr' ? v : 'timeline'
-    try { localStorage.setItem(VIEW_KEY, store.view) } catch { /* ignore */ }
+    const nv = v === 'explorer' || v === 'scm' || v === 'cr' ? v : 'timeline'
+    store.view = nv
+    try { localStorage.setItem(VIEW_KEY, nv) } catch { /* ignore */ }
+    // A view switch is a back-able step. Keep the open item only while in Explorer.
+    const item = nv === 'explorer' ? (ui.explorerItemId || null) : null
+    pushNav({ view: nv, item, version: nv === 'explorer' ? ui.explorerItemVersion : null })
   }
   function prevMonth() {
     if (store.viewMonth <= 1) { store.viewMonth = 12; store.year-- } else { store.viewMonth-- }
@@ -963,12 +1029,17 @@ export function useAppStore() {
   }
 
   // ── Links ─────────────────────────────────────────────────────────────────
-  function addLink(idA, idB, rel = 'depends-on') {
+  function addLink(idA, idB, rel = 'depends-on', version = null) {
     if (idA === idB) return
-    const exists = store.links.some(l => l.a === idA && l.b === idB && (l.rel || 'depends-on') === rel)
-    if (exists) return
-    store.links.push({ a: idA, b: idB, rel })
-    api.addLink(idA, idB, rel).catch(onWriteError)
+    const v = version ?? null
+    const existing = store.links.find(l => l.a === idA && l.b === idB && (l.rel || 'depends-on') === rel)
+    if (existing) {
+      if ((existing.version ?? null) === v) return // unchanged
+      existing.version = v // version-only change (e.g. re-pin a "uses" link)
+    } else {
+      store.links.push({ a: idA, b: idB, rel, version: v })
+    }
+    api.addLink(idA, idB, rel, v).catch(onWriteError)
   }
   function removeLink(idA, idB, rel = 'depends-on') {
     store.links = store.links.filter(l => !(l.a === idA && l.b === idB && (l.rel || 'depends-on') === rel))

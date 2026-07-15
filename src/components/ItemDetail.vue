@@ -4,7 +4,7 @@
     <header class="id-head">
       <div class="id-titlewrap">
         <MarkerIcon :shape="type?.icon || item.marker || 'l:Diamond'" :color="type?.color || '#8a8a8e'" :size="20" :fill="type?.fill !== false" />
-        <h1 class="id-title">{{ item.title }}</h1>
+        <h1 class="id-title"><span class="id-type" :style="{ color: type?.color || '#8a8a8e' }">{{ type?.label || item.typeKey || item.kind }}</span><span class="id-sep">·</span>{{ item.title }}</h1>
       </div>
       <div class="id-actions">
         <button class="id-act" :class="{ done: copied === 'link' }" title="Copy a stable link to this item" @click="copy('link')">{{ copied === 'link' ? 'Copied' : 'Copy link' }}</button>
@@ -15,9 +15,8 @@
     </header>
 
     <div class="id-chips">
-      <span class="id-chip">{{ type?.label || item.typeKey || item.kind }}</span>
-      <span v-if="status" class="id-status" :style="statusStyle">{{ status.label }}</span>
-      <button v-if="!item.sourceSystem && !pinnedVersion" class="id-hist-btn" @click="showHistory = !showHistory"><History :size="13" /> {{ showHistory ? 'Hide history' : 'History' }} · v{{ item.version || 1 }}</button>
+      <button v-if="status" type="button" class="id-status" :class="{ clickable: canOpenFlow, glow: statusReady, pulse: !statusReady }" :style="statusStyle" :disabled="!canOpenFlow" :title="canOpenFlow ? 'Show status flow' : ''" @click="showFlow = true">{{ status.label }}</button>
+      <button v-if="!item.sourceSystem && !pinnedVersion" class="id-hist-btn" @click="showHistory = !showHistory"><History :size="13" /> {{ showHistory ? 'Hide history' : 'History' }} <span class="id-hist-ver">· v{{ item.version || 1 }}</span></button>
       <span v-else-if="pinnedVersion" class="id-chip id-pin">Pinned · v{{ pinnedVersion }}</span>
       <button v-if="item.assigneeId" type="button" class="id-chip id-assignee" title="View profile" @click.stop="openProfile(memberById(item.assigneeId), $event)"><span class="id-av">{{ initials(item.assigneeId) }}</span>{{ memberName(item.assigneeId) }}</button>
     </div>
@@ -36,7 +35,21 @@
     <section v-if="fieldRows.length" class="id-block">
       <h2 class="id-h2">Fields</h2>
       <dl class="id-meta">
-        <template v-for="f in fieldRows" :key="f.k"><dt>{{ f.k }}</dt><dd :class="{ 'id-empty': !f.v }">{{ f.v || '—' }}</dd></template>
+        <template v-for="f in fieldRows" :key="f.k">
+          <dt>{{ f.k }}</dt>
+          <dd v-if="f.refs" :class="{ 'id-empty': !f.refs.length }">
+            <div v-if="f.refs.length" class="id-refs">
+              <button
+                v-for="r in f.refs" :key="r.id + ':' + (r.version || '')" type="button"
+                class="id-refpill" :class="{ missing: !r.exists }" :disabled="!r.exists"
+                :style="{ color: r.color, background: r.color + '22' }"
+                :title="refPillTitle(r)" @click="openRef(r)"
+              ><span class="id-refpill-dot" :style="{ background: r.dot }"></span><MarkerIcon :shape="r.icon" :color="r.color" :size="12" :fill="r.fill" />{{ r.title }}<span v-if="r.version" class="id-refpill-ver">v{{ r.version }}</span></button>
+            </div>
+            <template v-else>—</template>
+          </dd>
+          <dd v-else :class="{ 'id-empty': !f.v }">{{ f.v || '—' }}</dd>
+        </template>
       </dl>
     </section>
 
@@ -49,13 +62,18 @@
 
     <section class="id-block">
       <h2 class="id-h2">Dependencies</h2>
-      <ul v-if="dependencies.length" class="id-deps">
-        <li v-for="(d, i) in dependencies" :key="i"><span class="id-dep-rel">{{ d.rel }}</span> {{ d.title }}</li>
+      <ul v-if="dependencyGroups.length" class="id-deps">
+        <li v-for="g in dependencyGroups" :key="g.rel">
+          <span class="id-dep-rel">{{ g.rel }}</span>
+          <span class="id-dep-pills">
+            <button v-for="d in g.items" :key="d.id" type="button" class="id-refpill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="id-refpill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="id-refpill-ver">v{{ d.version }}</span></button>
+          </span>
+        </li>
       </ul>
       <p v-else class="id-text id-empty">None.</p>
     </section>
 
-    <section class="id-block">
+    <section v-if="isSchedulableItem(item)" class="id-block">
       <h2 class="id-h2">Groups</h2>
       <div v-if="itemGroups.length" class="id-groups">
         <span v-for="g in itemGroups" :key="g.id" class="id-group" :style="{ background: (g.color || '#888') + '22', color: g.color || '#888' }">{{ g.name }}</span>
@@ -67,22 +85,73 @@
       <h2 class="id-h2">Version history</h2>
       <ItemHistory :key="item.id" :item-id="item.id" />
     </section>
+
+    <StatusFlow v-if="showFlow" :statuses="type?.statuses || []" :current="status?.key || ''" :read-only="!canAdvance" :layout="type?.layout || null"
+      @advance="onAdvance" @save-layout="onSaveLayout" @reset-layout="onResetLayout" @close="showFlow = false" />
   </article>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
 import { History } from 'lucide-vue-next'
-import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor, groups, RELATIONSHIP_TYPES, itemLink, parseRef } from '../stores/useAppStore.js'
+import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor, groups, RELATIONSHIP_TYPES, itemLink, parseRef, ui, isSchedulableItem, pushNav, useAppStore, saveItemTypes, workflows, workflowByKey, saveWorkflows } from '../stores/useAppStore.js'
 
 const status = computed(() => itemStatus(props.item))
 const statusStyle = computed(() => {
   if (!status.value) return {}
   const c = toneColor(status.value.tone)
-  return { color: c, background: c + '22', borderColor: c + '66' }
+  return { color: c, background: c + '22', borderColor: c + '66', '--tone-glow': c + '80' }
 })
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
+import StatusFlow from './StatusFlow.vue'
+
+const { updateMilestone } = useAppStore()
+
+// Status flow popup + "action still pending" vs "ready/settled" pill animation.
+const showFlow = ref(false)
+const canOpenFlow = computed(() => !props.pinnedVersion && (type.value?.statuses?.length || 0) > 0)
+const canAdvance = computed(() => canOpenFlow.value && !props.readOnly && !props.item.sourceSystem)
+// Ready = a settled state (positive tone, or an end state with no next steps).
+const statusReady = computed(() => {
+  const s = status.value
+  return !!s && (s.tone === 'positive' || !((s.to || []).length))
+})
+function onAdvance(key) {
+  updateMilestone(props.item.id, { status: key })
+  showFlow.value = false
+}
+// Persist a dragged status-flow layout on the item's type (shared per workspace).
+function typeForItem() {
+  const key = props.item.typeKey || props.item.kind || 'milestone'
+  return itemTypes.list.find(tt => tt.key === key) || null
+}
+function onSaveLayout(layout) {
+  const t = typeForItem()
+  if (!t) return
+  if (t.workflowKey) {                 // shared workflow → arrange once, for all its types
+    const wf = workflowByKey(t.workflowKey)
+    if (!wf) return
+    wf.layout = layout
+    saveWorkflows(workflows.list)
+  } else {
+    t.layout = layout
+    saveItemTypes(itemTypes.list)
+  }
+}
+function onResetLayout() {
+  const t = typeForItem()
+  if (!t) return
+  if (t.workflowKey) {
+    const wf = workflowByKey(t.workflowKey)
+    if (!wf) return
+    delete wf.layout
+    saveWorkflows(workflows.list)
+  } else {
+    delete t.layout
+    saveItemTypes(itemTypes.list)
+  }
+}
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -133,12 +202,23 @@ const dependencies = computed(() => {
   }
   const out = []
   for (const l of store.links) {
-    if (l.a === id && byId.has(l.b)) out.push({ rel: relLabel(l.rel, true), title: byId.get(l.b).title })
-    else if (l.b === id && byId.has(l.a)) out.push({ rel: relLabel(l.rel, false), title: byId.get(l.a).title })
+    if (l.a === id && byId.has(l.b)) out.push({ rel: relLabel(l.rel, true), id: l.b, version: l.version ?? null, ...itemPill(l.b) })
+    else if (l.b === id && byId.has(l.a)) out.push({ rel: relLabel(l.rel, false), id: l.a, version: l.version ?? null, ...itemPill(l.a) })
   }
   return out
 })
 const itemGroups = computed(() => groups.list.filter(g => (g.itemIds || []).includes(props.item.id)))
+
+// Group links by relationship so each label ("Uses", "Blocks", …) is written once,
+// with all its pills lined up after it.
+const dependencyGroups = computed(() => {
+  const m = new Map()
+  for (const d of dependencies.value) {
+    if (!m.has(d.rel)) m.set(d.rel, [])
+    m.get(d.rel).push(d)
+  }
+  return [...m.entries()].map(([rel, items]) => ({ rel, items }))
+})
 
 // Show every field the type defines — empty ones included, so it's clear which
 // fields exist and which are still blank (rendered as "—" in the template).
@@ -154,6 +234,23 @@ function refDisplay(entry) {
   const head = target?.version
   return head && head > version ? `${title} · v${version} (latest v${head})` : `${title} · v${version}`
 }
+// Pill visuals for a referenced/linked item: its type icon + colour and its
+// status-tone dot (shown inside the pill).
+function itemPill(id) {
+  const target = store.milestones.find(m => m.id === id)
+  const t = target ? itemTypes.list.find(tt => tt.key === (target.typeKey || target.kind || 'milestone')) : null
+  const st = target ? itemStatus(target) : null
+  const lane = target ? store.swimlanes.find(s => s.id === target.swimlaneId)?.color : null
+  return {
+    title: target?.title || id,
+    exists: !!target,
+    head: target?.version,
+    icon: t?.icon || 'l:Diamond',
+    fill: t?.fill !== false,
+    color: t?.color || '#8a8a8e',                       // type colour → icon + text + tint
+    dot: st ? toneColor(st.tone) : (lane || '#8a8a8e'), // status dot — same logic as the Explorer tree
+  }
+}
 function fieldValue(f) {
   const v = props.item.data?.[f.key]
   if (f.type === 'reference') {
@@ -162,8 +259,34 @@ function fieldValue(f) {
   }
   return Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v))
 }
+// Reference fields become clickable chips (jump to the item); other fields stay
+// plain text. Pinned references carry their version so the click opens that revision.
 const fieldRows = computed(() =>
-  (type.value?.fields || []).map(f => ({ k: f.label || f.key, v: fieldValue(f) })))
+  (type.value?.fields || []).map(f => {
+    if (f.type !== 'reference') return { k: f.label || f.key, v: fieldValue(f) }
+    const v = props.item.data?.[f.key]
+    const ids = Array.isArray(v) ? v : (v ? [v] : [])
+    const refs = ids.map(entry => {
+      const { id, version } = parseRef(entry)
+      return { id, version, ...itemPill(id) }
+    })
+    return { k: f.label || f.key, refs }
+  }))
+
+// Navigate to a referenced / linked item (honouring a pinned version) by handing
+// it to the Explorer's focus watcher.
+function openRef(r) {
+  if (!r || r.exists === false || !r.id) return
+  ui.explorerItemId = r.id
+  ui.explorerItemVersion = r.version || null
+  pushNav({ view: 'explorer', item: r.id, version: r.version || null })
+}
+function refPillTitle(r) {
+  if (!r.exists) return r.title + ' (not found)'
+  if (!r.version) return 'Open ' + r.title
+  if (r.head && r.head > r.version) return `${r.title} — pinned to v${r.version}, latest is v${r.head}`
+  return `${r.title} — v${r.version}`
+}
 
 // ── Stable link + JSON/YAML export ───────────────────────────────────────────
 const linkUrl = computed(() => itemLink(props.item.id, props.pinnedVersion || null))
@@ -262,6 +385,8 @@ async function copy(kind) {
 .id-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .id-titlewrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .id-title { font-size: 22px; font-weight: 700; color: var(--clr-text); line-height: 1.25; }
+.id-type { font-weight: 600; }
+.id-sep { color: var(--clr-text-3); font-weight: 400; margin: 0 8px; }
 .id-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .id-act { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: var(--r-md); padding: 6px 11px; transition: background 0.12s, color 0.12s; }
 .id-act:hover { background: var(--clr-surface); color: var(--clr-text); }
@@ -272,7 +397,21 @@ async function copy(kind) {
 
 .id-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
 .id-chip { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 4px 11px; }
-.id-status { font-size: 12px; font-weight: 700; border-radius: 100px; padding: 4px 11px; border: 1px solid transparent; }
+.id-status { font-size: 12px; font-weight: 700; border-radius: 100px; padding: 4px 11px; border: 1px solid transparent; font-family: inherit; }
+.id-status.clickable { cursor: pointer; transition: filter 0.12s; }
+.id-status.clickable:hover { filter: brightness(1.06); }
+/* Pulses while a next action is pending; steady glow once it's a settled state. */
+.id-status.pulse { animation: id-status-pulse 1.9s ease-in-out infinite; }
+.id-status.glow { animation: id-status-glow 3s ease-in-out infinite; }
+@keyframes id-status-pulse {
+  0% { box-shadow: 0 0 0 0 var(--tone-glow, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes id-status-glow {
+  0%, 100% { box-shadow: 0 0 5px 0 var(--tone-glow, transparent); }
+  50% { box-shadow: 0 0 11px 1px var(--tone-glow, transparent); }
+}
 .id-assignee { display: inline-flex; align-items: center; gap: 6px; border: none; cursor: pointer; transition: filter 0.15s; }
 .id-assignee:hover { filter: brightness(0.95); }
 
@@ -280,6 +419,7 @@ async function copy(kind) {
 .id-attrib strong { color: var(--clr-text-2); font-weight: 600; }
 .id-hist-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--clr-accent); background: var(--clr-surface-2); border-radius: 100px; padding: 4px 11px; }
 .id-hist-btn:hover { background: var(--clr-surface); }
+.id-hist-ver { color: var(--clr-text-3); font-variant-numeric: tabular-nums; }
 .id-av { width: 18px; height: 18px; border-radius: 50%; background: var(--clr-accent); color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 
 .id-meta { display: grid; grid-template-columns: 110px 1fr; gap: 6px 14px; margin: 16px 0; }
@@ -290,11 +430,19 @@ async function copy(kind) {
 .id-block { margin-top: 20px; }
 .id-h2 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); margin-bottom: 7px; }
 .id-text { font-size: 14px; color: var(--clr-text); line-height: 1.6; white-space: pre-wrap; }
-.id-deps { list-style: none; display: flex; flex-direction: column; gap: 6px; }
-.id-deps li { font-size: 13px; color: var(--clr-text); }
-.id-dep-rel { display: inline-block; min-width: 96px; font-size: 11px; font-weight: 700; color: var(--clr-text-3); text-transform: uppercase; letter-spacing: 0.3px; }
+.id-deps { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.id-deps li { display: flex; align-items: flex-start; gap: 4px; font-size: 13px; color: var(--clr-text); }
+.id-dep-rel { flex-shrink: 0; padding-top: 5px; min-width: 96px; font-size: 12px; font-weight: 500; color: var(--clr-text-3); }
+.id-dep-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 .id-groups { display: flex; flex-wrap: wrap; gap: 6px; }
 .id-group { font-size: 12px; font-weight: 600; border-radius: 100px; padding: 3px 10px; border: 1px solid currentColor; }
 .id-link { font-size: 13px; color: var(--clr-accent); word-break: break-all; }
 .id-link:hover { text-decoration: underline; }
+.id-refs { display: flex; flex-wrap: wrap; gap: 6px; }
+.id-refpill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+  border-radius: 100px; padding: 4px 11px; cursor: pointer; transition: filter 0.12s; }
+.id-refpill:hover:not(:disabled) { filter: brightness(1.18); }
+.id-refpill-ver { font-weight: 500; color: var(--clr-text-3); font-variant-numeric: tabular-nums; }
+.id-refpill-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.id-refpill.missing { cursor: default; }
 </style>

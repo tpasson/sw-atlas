@@ -12,12 +12,17 @@
     <!-- VS-Code layout: type tree on the left, the selected item's content in the centre. -->
     <div v-else class="ev-split">
       <aside class="ev-tree" :style="{ width: treeWidth + 'px' }">
-        <div class="ev-tree-head">Explorer</div>
+        <div class="ev-tree-head">
+          <span>Explorer</span>
+          <div class="ev-sortbtns">
+            <button v-for="o in SORT_OPTIONS" :key="o.key" type="button" class="ev-sortbtn" :class="{ on: sortKey === o.key }" :title="'Sort: ' + o.label" @click="sortKey = o.key"><component :is="o.icon" :size="14" :stroke-width="2.2" /></button>
+          </div>
+        </div>
         <div v-for="g in folders" :key="g.key" class="ex-node">
           <div class="ex-row" @click="toggle(g.key)">
             <svg class="ex-chev" :class="{ open: isOpen(g.key) }" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5L6.5 5L3 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <MarkerIcon :shape="g.type.icon || 'l:Diamond'" :color="g.type.color || '#8a8a8e'" :size="14" :fill="g.type.fill !== false" />
-            <span class="ex-row-label">{{ g.type.label }}</span>
+            <span class="ex-row-label" :style="{ color: g.type.color || '#8a8a8e' }">{{ g.type.label }}</span>
             <span class="ex-row-count">{{ g.items.length }}</span>
             <button v-if="!readOnly" class="ex-row-add" :title="'New ' + g.type.label" @click.stop="$emit('add', g.type)">+</button>
           </div>
@@ -31,6 +36,7 @@
             >
               <span class="ex-leaf-dot" :style="{ background: dotColor(m) }"></span>
               <span class="ex-leaf-title">{{ m.title }}</span>
+              <span class="ex-leaf-ver">v{{ m.version || 1 }}</span>
             </button>
             <div v-if="!g.items.length" class="ex-leaf-empty">— empty —</div>
           </div>
@@ -102,8 +108,8 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { GitPullRequest } from 'lucide-vue-next'
-import { store, itemTypes, itemStatus, toneColor, ui } from '../stores/useAppStore.js'
+import { GitPullRequest, ArrowDownAZ, ArrowDownZA, Clock, ArrowDown10, ArrowDown01 } from 'lucide-vue-next'
+import { store, itemTypes, itemStatus, toneColor, ui, pushNav } from '../stores/useAppStore.js'
 import { api } from '../api.js'
 import MarkerIcon from './MarkerIcon.vue'
 import TableView from './TableView.vue'
@@ -118,9 +124,33 @@ const MODE_KEY = 'atlas-explorer-mode'
 const mode = ref(['folders', 'table', 'board'].includes(localStorage.getItem(MODE_KEY)) ? localStorage.getItem(MODE_KEY) : 'folders')
 function setMode(k) { mode.value = k; try { localStorage.setItem(MODE_KEY, k) } catch { /* ignore */ } }
 
+// Item ordering within each folder — stable (so nothing jumps when you add one).
+const SORT_KEY = 'atlas-explorer-sort'
+const SORT_OPTIONS = [
+  { key: 'name', label: 'Name (A–Z)', icon: ArrowDownAZ },
+  { key: 'name-desc', label: 'Name (Z–A)', icon: ArrowDownZA },
+  { key: 'updated', label: 'Recently updated', icon: Clock },
+  { key: 'version', label: 'Version (high–low)', icon: ArrowDown10 },
+  { key: 'version-asc', label: 'Version (low–high)', icon: ArrowDown01 },
+]
+const sortKey = ref(SORT_OPTIONS.some(o => o.key === localStorage.getItem(SORT_KEY)) ? localStorage.getItem(SORT_KEY) : 'name')
+watch(sortKey, (v) => { try { localStorage.setItem(SORT_KEY, v) } catch { /* ignore */ } })
+function sortItems(items) {
+  const name = (m) => (m.title || '').toLowerCase()
+  const by = sortKey.value
+  return [...items].sort((a, b) => {
+    if (by === 'name-desc') return name(b).localeCompare(name(a))
+    if (by === 'updated') return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '') || name(a).localeCompare(name(b))
+    if (by === 'version') return ((b.version || 1) - (a.version || 1)) || name(a).localeCompare(name(b))
+    if (by === 'version-asc') return ((a.version || 1) - (b.version || 1)) || name(a).localeCompare(name(b))
+    return name(a).localeCompare(name(b)) // name A–Z
+  })
+}
+
 
 // One folder per type: every defined type (so you can add into empty ones) plus
-// any orphan type keys that still have items. Sorted by item count.
+// any orphan type keys that still have items. Folders stay alphabetical and items
+// follow the chosen sort — both stable, so adding an item never reshuffles things.
 const folders = computed(() => {
   const byKey = new Map()
   for (const t of itemTypes.list) byKey.set(t.key, { key: t.key, type: t, items: [] })
@@ -131,9 +161,9 @@ const folders = computed(() => {
     if (!g) { g = { key: k, type: { key: k, label: k, icon: 'l:Diamond', color: '' }, items: [] }; byKey.set(k, g) }
     g.items.push(m)
   }
-  return [...byKey.values()]
-    .filter(g => g.items.length > 0 || (g.type && !g.type.builtin))
-    .sort((a, b) => (b.items.length - a.items.length) || a.type.label.localeCompare(b.type.label))
+  const out = [...byKey.values()].filter(g => g.items.length > 0 || (g.type && !g.type.builtin))
+  for (const g of out) g.items = sortItems(g.items)
+  return out.sort((a, b) => (a.type.label || '').localeCompare(b.type.label || ''))
 })
 
 // SCM tree: one node per connected repo (source swimlane), split into its
@@ -172,34 +202,30 @@ function toggle(key) {
 
 // Selected item → its content shows in the centre pane. Resolve by id so it stays
 // in sync with edits and clears if the item is deleted.
-const selectedId = ref(null)
+// The open item lives in the store (ui.explorerItemId), which mirrors the URL —
+// so browser back/forward restores the selection. Reads/writes go through it.
+const selectedId = computed({ get: () => ui.explorerItemId, set: (v) => { ui.explorerItemId = v } })
 const selected = computed(() => store.milestones.find(m => m.id === selectedId.value) || null)
 
-// A pinned-version view: when a deep-link carries ?v={n} older than head, we show
-// that revision's immutable snapshot (with a banner) instead of the live item.
+// A pinned-version view: when the URL carries ?v={n} older than head, we show that
+// revision's immutable snapshot (with a banner) instead of the live item.
 const pinned = ref(null) // { item, version, headVersion } | null
 
-// Reflect the open item into the URL (?item=&v=) without adding a history entry,
-// so the address bar always yields a valid link and back/forward stay clean.
-function syncUrl(id, version) {
-  try {
-    const u = new URL(window.location.href)
-    if (id) {
-      u.searchParams.set('item', id)
-      if (version) u.searchParams.set('v', String(version)); else u.searchParams.delete('v')
-    } else { u.searchParams.delete('item'); u.searchParams.delete('v') }
-    window.history.replaceState(window.history.state, '', u.pathname + u.search)
-  } catch { /* ignore */ }
+// Clicking an item in the tree opens its live/head content and pushes a history
+// entry (so Back returns to the previously viewed item).
+function selectLeaf(id) {
+  pinned.value = null
+  ui.explorerItemVersion = null
+  ui.explorerItemId = id
+  pushNav({ view: 'explorer', item: id })
 }
-
-// Clicking an item in the tree always opens its live/head content.
-function selectLeaf(id) { pinned.value = null; selectedId.value = id; syncUrl(id, null) }
 
 // Leave the pinned snapshot and jump to the item's latest revision.
 function clearPin() {
-  const id = pinned.value?.item?.id || selectedId.value
+  const id = selectedId.value
   pinned.value = null
-  if (id) { selectedId.value = id; syncUrl(id, null) }
+  ui.explorerItemVersion = null
+  if (id) pushNav({ view: 'explorer', item: id }, true)
 }
 
 // Load a specific revision's snapshot for the pinned-version view. If the request
@@ -207,29 +233,25 @@ function clearPin() {
 async function loadPinned(id, version) {
   const head = store.milestones.find(m => m.id === id)
   const headVersion = head?.version || version
-  selectedId.value = id
-  if (!version || version >= headVersion) { pinned.value = null; syncUrl(id, null); return }
+  if (!version || version >= headVersion) { pinned.value = null; return }
   try {
     const rev = await api.getRevision(id, version)
     const snap = typeof rev.snapshot === 'string' ? JSON.parse(rev.snapshot) : rev.snapshot
     pinned.value = { item: snap, version, headVersion }
-    syncUrl(id, version)
-  } catch { pinned.value = null; syncUrl(id, null) }
+  } catch { pinned.value = null }
 }
 
-// Deep-link / cross-view focus: open the requested item (optionally a pinned
-// version) in the tree layout, expanding its folder so the selection is visible.
-watch(() => ui.focusItemId, (id) => {
-  if (!id) return
-  const version = ui.focusVersion
-  ui.focusItemId = null
-  ui.focusVersion = null
+// React to the open item changing (tree click, deep-link, back/forward, cross-view
+// jump): switch to the tree layout, expand its folder, and load a pinned snapshot
+// if a version is requested.
+watch([() => ui.explorerItemId, () => ui.explorerItemVersion], ([id, version]) => {
+  if (!id) { pinned.value = null; return }
   mode.value = 'folders'
   const m = store.milestones.find(x => x.id === id)
   const key = m ? (m.typeKey || m.kind || 'milestone') : null
   if (key && collapsed.value.has(key)) { const s = new Set(collapsed.value); s.delete(key); collapsed.value = s }
   if (version) loadPinned(id, version)
-  else { pinned.value = null; selectedId.value = id; syncUrl(id, null) }
+  else pinned.value = null
 }, { immediate: true })
 
 // Draggable divider: resize the tree column (persisted; double-click resets).
@@ -265,8 +287,8 @@ function resetWidth() {
 <style scoped>
 .explorer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-.ev-bar { display: flex; align-items: center; justify-content: flex-end; height: 56px; box-sizing: border-box; padding: 0 24px; border-bottom: 1px solid var(--clr-border-light); flex-shrink: 0; }
-.ev-modes { display: inline-flex; gap: 2px; background: var(--clr-surface-2); border-radius: 100px; padding: 2px; }
+.ev-bar { display: flex; align-items: center; gap: 12px; height: 56px; box-sizing: border-box; padding: 0 24px; border-bottom: 1px solid var(--clr-border-light); flex-shrink: 0; }
+.ev-modes { display: inline-flex; gap: 2px; margin-left: auto; background: var(--clr-surface-2); border-radius: 100px; padding: 2px; }
 .ev-mode { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: transparent; border-radius: 100px; padding: 5px 14px; transition: background 0.12s, color 0.12s; }
 .ev-mode.on { background: var(--clr-surface); color: var(--clr-text); box-shadow: var(--sh-sm); }
 .ev-mode:hover:not(.on) { color: var(--clr-text); }
@@ -284,7 +306,11 @@ function resetWidth() {
   width: 1px; background: var(--clr-border-light); transition: background 0.12s, width 0.12s;
 }
 .ev-resizer:hover::before, .ev-resizer.dragging::before { width: 2px; background: var(--clr-accent); }
-.ev-tree-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--clr-text-3); padding: 4px 14px 8px; }
+.ev-tree-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--clr-text-3); padding: 4px 10px 8px 14px; }
+.ev-sortbtns { display: inline-flex; gap: 2px; }
+.ev-sortbtn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-sm); color: var(--clr-text-3); background: none; transition: background 0.12s, color 0.12s; }
+.ev-sortbtn:hover { background: var(--clr-surface-2); color: var(--clr-text); }
+.ev-sortbtn.on { background: var(--clr-accent); color: #fff; }
 .ev-tree-blank { padding: 14px; font-size: 13px; color: var(--clr-text-3); }
 
 .ex-row { display: flex; align-items: center; gap: 7px; padding: 5px 12px; cursor: pointer; user-select: none; transition: background 0.1s; }
@@ -302,7 +328,8 @@ function resetWidth() {
 .ex-leaf.on { background: var(--clr-surface-2); }
 .ex-leaf.on::before { content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--clr-accent); }
 .ex-leaf-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.ex-leaf-title { font-size: 13px; color: var(--clr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-leaf-title { flex: 1; min-width: 0; font-size: 13px; color: var(--clr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-leaf-ver { flex-shrink: 0; font-size: 11px; color: var(--clr-text-3); font-variant-numeric: tabular-nums; }
 .ex-leaf-empty { padding: 4px 12px 6px 31px; font-size: 12px; color: var(--clr-text-3); }
 
 /* SCM sub-tree: repo (level 1) → category (level 2) → items (leaves). */

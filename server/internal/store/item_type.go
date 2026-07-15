@@ -24,15 +24,17 @@ type ItemField struct {
 // family that decides how it renders, plus a field schema for its extra data.
 // Built-ins are seeded and non-deletable; per-workspace custom types merge on top.
 type ItemType struct {
-	Key     string      `json:"key"`
-	Label   string      `json:"label"`
-	Family  string      `json:"family"`         // see the Family* constants
-	Icon    string      `json:"icon"`           // lucide marker id (e.g. "l:Diamond")
-	Color   string      `json:"color"`          // "" = inherit the lane colour
-	Fill    *bool       `json:"fill,omitempty"` // nil/true = filled icon, false = outline
-	Fields   []ItemField  `json:"fields"`
-	Statuses []ItemStatus `json:"statuses,omitempty"` // configurable workflow states + transitions
-	Builtin  bool         `json:"builtin"`
+	Key         string          `json:"key"`
+	Label       string          `json:"label"`
+	Family      string          `json:"family"`         // see the Family* constants
+	Icon        string          `json:"icon"`           // lucide marker id (e.g. "l:Diamond")
+	Color       string          `json:"color"`          // "" = inherit the lane colour
+	Fill        *bool           `json:"fill,omitempty"` // nil/true = filled icon, false = outline
+	Fields      []ItemField     `json:"fields"`
+	WorkflowKey string          `json:"workflowKey,omitempty"` // reference a shared Workflow; when set, its statuses+layout are used
+	Statuses    []ItemStatus    `json:"statuses,omitempty"`    // configurable workflow states + transitions (inline, when no workflowKey)
+	Layout      json.RawMessage `json:"layout,omitempty"`      // optional saved status-flow layout: { nodes:{...}, edges:{...} }
+	Builtin     bool            `json:"builtin"`
 }
 
 // ItemStatus is one workflow state a type can be in. The first status in a type's
@@ -133,11 +135,29 @@ func (s *Store) ListItemTypes(ctx context.Context, ws string) ([]ItemType, error
 			if ov.Fields != nil {
 				d.Fields = ov.Fields
 			}
+			d.WorkflowKey = ov.WorkflowKey
 			d.Statuses = ov.Statuses
+			d.Layout = ov.Layout
 		}
 		out = append(out, d)
 	}
 	out = append(out, custom...)
+	// Resolve shared-workflow references: a type with a WorkflowKey inherits that
+	// workflow's statuses + layout (single source of truth for reused flows).
+	if wfs, werr := s.GetWorkflows(ctx, ws); werr == nil && len(wfs) > 0 {
+		byKey := make(map[string]Workflow, len(wfs))
+		for _, w := range wfs {
+			byKey[w.Key] = w
+		}
+		for i := range out {
+			if k := out[i].WorkflowKey; k != "" {
+				if w, ok := byKey[k]; ok {
+					out[i].Statuses = w.Statuses
+					out[i].Layout = w.Layout
+				}
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -171,7 +191,12 @@ func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) e
 			if fields == nil {
 				fields = []ItemField{}
 			}
-			clean = append(clean, ItemType{Key: d.Key, Label: label, Family: d.Family, Icon: icon, Color: t.Color, Fill: t.Fill, Fields: fields, Statuses: t.Statuses, Builtin: true})
+			bt := ItemType{Key: d.Key, Label: label, Family: d.Family, Icon: icon, Color: t.Color, Fill: t.Fill, Fields: fields, WorkflowKey: t.WorkflowKey, Statuses: t.Statuses, Layout: t.Layout, Builtin: true}
+			if bt.WorkflowKey != "" { // referencing a shared workflow → don't persist a stale inline copy
+				bt.Statuses = nil
+				bt.Layout = nil
+			}
+			clean = append(clean, bt)
 			continue
 		}
 		if !validFamily(t.Family) {
@@ -180,6 +205,10 @@ func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) e
 		t.Builtin = false
 		if t.Fields == nil {
 			t.Fields = []ItemField{}
+		}
+		if t.WorkflowKey != "" { // referencing a shared workflow → don't persist a stale inline copy
+			t.Statuses = nil
+			t.Layout = nil
 		}
 		clean = append(clean, t)
 	}

@@ -214,7 +214,7 @@
 
               <!-- ───────────────── ITEM TYPES ───────────────── -->
               <section v-if="tab === 'types'" class="tab-pane">
-                <TypesManager />
+                <TypesManager ref="typesMgr" />
               </section>
 
               <!-- ───────────────── GROUPS ───────────────── -->
@@ -287,7 +287,11 @@
             </div>
 
             <div class="panel-footer">
-              <button class="btn-primary" @click="$emit('close')">Done</button>
+              <template v-if="tab === 'types'">
+                <button class="reset-btn" @click="$emit('close')">Discard changes</button>
+                <button class="btn-primary" :disabled="savingTypes" @click="saveTypesAndClose">{{ savingTypes ? 'Saving…' : 'Save changes' }}</button>
+              </template>
+              <button v-else class="btn-primary" @click="$emit('close')">Done</button>
             </div>
           </div>
         </Transition>
@@ -337,7 +341,22 @@ function removeMarker(i) {
 }
 
 const props = defineProps({ initialTab: { type: String, default: 'areas' } })
-defineEmits(['close'])
+const emit = defineEmits(['close'])
+
+// The Item Types tab edits a local copy; the modal's "Done" persists it (and
+// "Discard changes" just closes, dropping the edits). Save failures keep the
+// modal open so the error stays visible.
+const typesMgr = ref(null)
+const savingTypes = ref(false)
+async function saveTypesAndClose() {
+  savingTypes.value = true
+  try {
+    const ok = await typesMgr.value?.save()
+    if (ok !== false) emit('close')
+  } finally {
+    savingTypes.value = false
+  }
+}
 
 const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 

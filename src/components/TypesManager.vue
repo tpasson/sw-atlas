@@ -39,15 +39,17 @@
           <input type="color" class="tm-color" :value="t.color || '#0A84FF'" @input="t.color = $event.target.value" title="Colour" />
           <button type="button" class="tm-fill" :class="{ on: t.fill }" title="Filled vs outline icon" @click="t.fill = !t.fill">Fill</button>
 
-          <label v-if="!t.builtin" class="tm-key" title="Auto-filled from the name">key<input class="tm-keyin" v-model="t.key" @input="t._keyTouched = true" /></label>
+          <label v-if="!t.builtin" class="tm-key">key<input class="tm-keyin" v-model="t.key" :disabled="t._persisted" @input="t._keyTouched = true"
+            :title="t._persisted ? 'Type key is locked once saved — it identifies existing items; to change it, remove this type and add a new one' : 'Auto-filled from the name'" /></label>
           <span v-else class="tm-tag" title="Built-in — can't be deleted">built-in</span>
-          <button v-if="!t.builtin" class="link danger" @click="types.splice(ti, 1)">Remove</button>
+          <button v-if="!t.builtin" class="link danger" @click="removeType(ti)">Remove</button>
         </div>
 
         <div class="tm-fields">
           <div v-for="(f, fi) in t.fields" :key="fi" class="tm-field">
             <input class="ti tm-grow" v-model="f.label" placeholder="Field name (e.g. Severity)" @input="onFieldLabel(t, f)" />
-            <select class="ti tm-ftype" v-model="f.type" title="Field type">
+            <select class="ti tm-ftype" v-model="f.type" :disabled="f._persisted"
+              :title="f._persisted ? 'Field type is locked once saved — to change it, remove this field and add a new one' : 'Field type'">
               <option value="text">Text</option>
               <option value="number">Number</option>
               <option value="select">Select (one)</option>
@@ -63,35 +65,60 @@
               @change="f.options = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
             />
             <template v-if="f.type === 'reference'">
-              <select class="ti tm-ftype" v-model="f.refType" title="References items of this type">
-                <option value="">— type —</option>
+              <select class="ti tm-ftype" :class="{ 'tm-need': !f.refType }" v-model="f.refType" :disabled="f._persisted && f._hadRefType"
+                :title="f._persisted && f._hadRefType ? 'Target type is locked once saved — to change it, remove this field and add a new one' : 'References items of this type — required'">
+                <option value="">— pick target type —</option>
                 <option v-for="rt in refTypeOptions" :key="rt.key" :value="rt.key">{{ rt.label }}</option>
               </select>
-              <button type="button" class="tm-toggle" :class="{ on: f.refMulti }" title="Allow multiple references" @click="f.refMulti = !f.refMulti">Multiple</button>
+              <button type="button" class="tm-toggle" :class="{ on: f.refMulti }" :disabled="f._persisted && f._hadRefType" title="Allow multiple references" @click="f.refMulti = !f.refMulti">Multiple</button>
             </template>
             <button type="button" class="tm-toggle" :class="{ on: f.required }" title="Must be filled in" @click="f.required = !f.required">Required</button>
-            <label class="tm-key" title="Auto-filled from the field name">key<input class="tm-keyin" v-model="f.key" @input="f._keyTouched = true" /></label>
-            <button class="tm-x" @click="t.fields.splice(fi, 1)" title="Remove field">×</button>
+            <label class="tm-key">key<input class="tm-keyin" v-model="f.key" :disabled="f._persisted" @input="f._keyTouched = true"
+              :title="f._persisted ? 'Field key is locked once saved — it stores the item values; to change it, remove this field and add a new one' : 'Auto-filled from the field name'" /></label>
+            <button class="tm-x" @click="removeField(t, fi)" title="Remove field">×</button>
           </div>
           <button class="link tm-addfield" @click="addField(t)">+ Field</button>
         </div>
-        <StatusEditor :statuses="t.statuses" />
+        <div class="tm-wfrow">
+          <span class="tm-wflabel">Workflow</span>
+          <select class="ti tm-wfsel" v-model="t._wf">
+            <option value="">None</option>
+            <option v-for="w in workflowOptions" :key="w.key" :value="w.key">Shared · {{ w.label || w.key }}</option>
+            <option value="__custom">Custom (own statuses)</option>
+          </select>
+          <span v-if="t._wf && t._wf !== '__custom'" class="tm-wfnote">→ edit “{{ wfLabel(t._wf) }}” under Shared workflows below</span>
+        </div>
+        <StatusEditor v-if="t._wf === '__custom'" :statuses="t.statuses" />
       </div>
 
       <button class="link" @click="addType">+ Add type</button>
 
-      <div class="row-between">
-        <span v-if="msg" class="data-msg" :class="{ ok: okMsg, err: !okMsg }">{{ msg }}</span>
-        <span v-else></span>
-        <button class="tm-save" @click="save">Save types</button>
+      <p v-if="msg" class="data-msg" :class="{ ok: okMsg, err: !okMsg }">{{ msg }}</p>
+    </div>
+
+    <div class="card">
+      <span class="section-label">Shared workflows</span>
+      <p class="card-hint">
+        Define a status flow <strong>once</strong> and point many types at it — editing the workflow updates
+        every type that uses it, and its status-flow diagram is arranged just once, for all of them.
+      </p>
+      <div v-for="(w, wi) in workflowDrafts" :key="w._uid" class="tm-type">
+        <div class="tm-head">
+          <input class="ti tm-grow" v-model="w.label" placeholder="Workflow name (e.g. Standard)" @input="onWfLabel(w)" />
+          <label class="tm-key">key<input class="tm-keyin" v-model="w.key" :disabled="w._persisted"
+            :title="w._persisted ? 'Workflow key is locked once saved — types reference it' : 'Auto-filled from the name'" /></label>
+          <button class="link danger" @click="removeWorkflow(wi)">Remove</button>
+        </div>
+        <StatusEditor :statuses="w.statuses" />
       </div>
+      <button class="link" @click="addWorkflow">+ Add workflow</button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { itemTypes, saveItemTypes, MARKER_LIBRARY } from '../stores/useAppStore.js'
+import { itemTypes, saveItemTypes, workflows, saveWorkflows, DEFAULT_STATUSES, MARKER_LIBRARY, store } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import StatusEditor from './StatusEditor.vue'
 
@@ -99,12 +126,24 @@ let uid = 0
 const nextUid = () => `t${uid++}`
 // One unified list. Built-ins are editable (label/icon/colour/fill/fields) but
 // keep their key + behaviour; only custom types are removable / re-keyed.
+// _wf drives the workflow choice: '' = none, '__custom' = own inline statuses,
+// otherwise a shared workflow key.
 const types = ref(itemTypes.list.map(t => ({
-  _uid: nextUid(), builtin: !!t.builtin, _keyTouched: true,
+  _uid: nextUid(), builtin: !!t.builtin, _persisted: true, _keyTouched: true,
   key: t.key, label: t.label, family: t.family, icon: t.icon, color: t.color || '', fill: t.fill !== false,
-  fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, options: [...(f.options || [])], required: !!f.required, refType: f.refType || '', refMulti: !!f.refMulti, _keyTouched: true })),
+  _wf: t.workflowKey ? t.workflowKey : ((t.statuses || []).length ? '__custom' : ''),
+  fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, _persisted: true, _hadRefType: !!f.refType, options: [...(f.options || [])], required: !!f.required, refType: f.refType || '', refMulti: !!f.refMulti, _keyTouched: true })),
   statuses: (t.statuses || []).map(s => ({ key: s.key, label: s.label, tone: s.tone || 'neutral', to: [...(s.to || [])], _keyTouched: true })),
 })))
+
+// Editable drafts of the shared workflows (mirrors workflows.list). Its saved
+// layout rides along untouched through the round-trip.
+const workflowDrafts = ref(workflows.list.map(w => ({
+  _uid: nextUid(), _persisted: true, _keyTouched: true, key: w.key, label: w.label, layout: w.layout,
+  statuses: (w.statuses || []).map(s => ({ key: s.key, label: s.label, tone: s.tone || 'neutral', to: [...(s.to || [])], _keyTouched: true })),
+})))
+const workflowOptions = computed(() => workflowDrafts.value.filter(w => w.key))
+function wfLabel(key) { return workflowDrafts.value.find(w => w.key === key)?.label || key }
 
 // Types a reference field can point at (any defined type).
 const refTypeOptions = computed(() => types.value.filter(x => x.key).map(x => ({ key: x.key, label: x.label || x.key })))
@@ -137,10 +176,55 @@ function onFieldLabel(t, f) {
   f.key = uniqueKey(slugify(f.label), taken)
 }
 function addType() {
-  types.value.push({ _uid: nextUid(), builtin: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, fields: [], statuses: [] })
+  types.value.push({ _uid: nextUid(), builtin: false, _persisted: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, fields: [], statuses: [] })
 }
 function addField(t) {
-  t.fields.push({ key: '', label: '', type: 'text', options: [], required: false, refType: '', refMulti: false, _keyTouched: false })
+  // A brand-new field: its type/target stay editable until the first save locks them.
+  t.fields.push({ key: '', label: '', type: 'text', _persisted: false, _hadRefType: false, options: [], required: false, refType: '', refMulti: false, _keyTouched: false })
+}
+
+// ── Shared workflows ──────────────────────────────────────────────────────────
+function onWfLabel(w) {
+  if (w._keyTouched) return
+  const taken = new Set(workflowDrafts.value.filter(x => x !== w).map(x => x.key))
+  w.key = uniqueKey(slugify(w.label), taken)
+}
+function addWorkflow() {
+  workflowDrafts.value.push({
+    _uid: nextUid(), _persisted: false, _keyTouched: false, key: '', label: '', layout: undefined,
+    statuses: DEFAULT_STATUSES.map(s => ({ key: s.key, label: s.label, tone: s.tone, to: [...s.to], _keyTouched: true })),
+  })
+}
+function removeWorkflow(wi) {
+  const w = workflowDrafts.value[wi]
+  const users = types.value.filter(t => t._wf === w.key)
+  if (users.length && !confirm(`Remove the “${w.label || w.key}” workflow?\n\n${users.length} type${users.length > 1 ? 's' : ''} use it and will fall back to no statuses until you pick another.`)) return
+  for (const t of types.value) if (t._wf === w.key) t._wf = ''
+  workflowDrafts.value.splice(wi, 1)
+}
+
+// ── Guardrails: schema changes must not silently drop existing item data ────────
+// A saved field's TYPE is immutable (locked in the UI) — changing it would
+// reinterpret stored values and break references. To change a field's type you
+// remove it and add a new one, which surfaces the data impact via removeField().
+const hasVal = (v) => !(v == null || v === '' || (Array.isArray(v) && v.length === 0))
+function itemsWithField(typeKey, fieldKey) {
+  return store.milestones.filter(m => (m.typeKey || m.kind || 'milestone') === typeKey && hasVal(m.data?.[fieldKey]))
+}
+function itemsOfType(typeKey) {
+  return store.milestones.filter(m => (m.typeKey || m.kind || 'milestone') === typeKey)
+}
+function removeField(t, fi) {
+  const f = t.fields[fi]
+  const n = f._persisted ? itemsWithField(t.key, f.key).length : 0
+  if (n && !confirm(`Remove “${f.label || f.key}”?\n\n${n} “${t.label || t.key}” item${n > 1 ? 's' : ''} hold a value in it. The value is NOT deleted — it stays stored but hidden, and reappears if you re-add a field with the same key.`)) return
+  t.fields.splice(fi, 1)
+}
+function removeType(ti) {
+  const t = types.value[ti]
+  const n = itemsOfType(t.key).length
+  if (n && !confirm(`Remove the “${t.label || t.key}” type?\n\n${n} item${n > 1 ? 's' : ''} use it. The items are kept, but they lose this type's fields, colour and workflow until a matching type exists again.`)) return
+  types.value.splice(ti, 1)
 }
 
 // ── Icon picker ───────────────────────────────────────────────────────────────
@@ -195,28 +279,60 @@ function cleanStatuses(statuses) {
   for (const s of out) s.to = s.to.filter(k => valid.has(k) && k !== s.key)
   return out
 }
+// Collect the shared workflows into a persistable payload (keyed, deduped).
+function cleanWorkflows() {
+  const keys = new Set()
+  const out = []
+  for (const w of workflowDrafts.value) {
+    if (!w.label && !w.key && !w.statuses.length) continue
+    const k = uniqueKey(w.key || slugify(w.label), keys)
+    keys.add(k)
+    const o = { key: k, label: w.label || k, statuses: cleanStatuses(w.statuses) }
+    if (w.layout) o.layout = w.layout
+    out.push(o)
+  }
+  return out
+}
 async function save() {
+  const wfPayload = cleanWorkflows()
+  const validWf = new Set(wfPayload.map(w => w.key))
   const typeKeys = new Set(types.value.filter(t => t.builtin).map(t => t.key))
   const payload = []
   for (const t of types.value) {
+    // Map the workflow choice: shared key, own inline statuses, or none.
+    const wfKey = (t._wf && t._wf !== '__custom' && validWf.has(t._wf)) ? t._wf : ''
+    const statuses = t._wf === '__custom' ? cleanStatuses(t.statuses) : []
     if (t.builtin) {
-      payload.push({ key: t.key, label: t.label || t.key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), statuses: cleanStatuses(t.statuses) })
+      payload.push({ key: t.key, label: t.label || t.key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), workflowKey: wfKey, statuses })
       continue
     }
     if (!t.label && !t.key && !t.fields.length) continue
     const key = uniqueKey(t.key || slugify(t.label), typeKeys)
     typeKeys.add(key)
-    payload.push({ key, label: t.label || key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), statuses: cleanStatuses(t.statuses) })
+    payload.push({ key, label: t.label || key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), workflowKey: wfKey, statuses })
   }
   try {
+    // Workflows first so the keys types reference already exist server-side.
+    if (wfPayload.length || workflows.list.length) await saveWorkflows(wfPayload)
     await saveItemTypes(payload)
+    // Everything is now persisted → lock structural props (keys, type, ref target).
+    for (const t of types.value) {
+      t._persisted = true
+      for (const f of (t.fields || [])) { f._persisted = true; f._hadRefType = !!f.refType }
+    }
+    for (const w of workflowDrafts.value) w._persisted = true
     okMsg.value = true
-    msg.value = 'Saved — icons, colours and the legend update everywhere.'
+    msg.value = 'Saved — icons, colours, workflows and the legend update everywhere.'
+    return true
   } catch {
     fail('Save failed.')
+    return false
   }
 }
 function fail(m) { okMsg.value = false; msg.value = m }
+
+// The hosting modal drives persistence: its "Done" button calls save().
+defineExpose({ save })
 </script>
 
 <style scoped>
@@ -225,6 +341,10 @@ function fail(m) { okMsg.value = false; msg.value = m }
 .tm-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tm-fam { font-size: 11px; color: var(--clr-text-3); background: var(--clr-bg); border-radius: 100px; padding: 4px 10px; white-space: nowrap; }
 .tm-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--clr-text-3); }
+.tm-wfrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 10px; border-left: 2px solid var(--clr-border-light); }
+.tm-wflabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--clr-text-3); }
+.tm-wfsel { min-width: 200px; }
+.tm-wfnote { font-size: 11px; color: var(--clr-text-3); }
 .tm-fields { display: flex; flex-direction: column; gap: 6px; padding-left: 10px; border-left: 2px solid var(--clr-border-light); }
 .tm-field { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
 .tm-grow { flex: 1; min-width: 120px; }
@@ -245,6 +365,7 @@ function fail(m) { okMsg.value = false; msg.value = m }
 .tm-key { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--clr-text-3); flex-shrink: 0; }
 .tm-keyin { width: 78px; border: 1px solid var(--clr-border-light); border-radius: var(--r-sm); padding: 4px 7px; font-size: 12px; color: var(--clr-text-2); background: var(--clr-surface-2); text-transform: none; letter-spacing: 0; font-weight: 400; }
 .tm-keyin:focus { outline: none; border-color: var(--clr-accent); background: var(--clr-bg); }
+.tm-keyin:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .tm-iconwrap { position: relative; flex-shrink: 0; }
 .tm-iconbtn { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border: 1px solid var(--clr-border); border-radius: var(--r-sm); background: var(--clr-bg); color: var(--clr-text-3); }
@@ -259,7 +380,7 @@ function fail(m) { okMsg.value = false; msg.value = m }
 .link { background: none; color: var(--clr-accent); font-size: 13px; font-weight: 600; padding: 4px 6px; align-self: flex-start; border-radius: var(--r-sm); }
 .link:hover { text-decoration: underline; }
 .link.danger { color: var(--clr-danger); }
-
-.tm-save { background: var(--clr-accent); color: #fff; border-radius: var(--r-md); padding: 8px 16px; font-weight: 600; }
-.tm-save:hover { background: var(--clr-accent-hover); }
+.tm-need { border-color: var(--clr-danger); box-shadow: 0 0 0 2px rgba(255,59,48,0.16); }
+.tm-ftype:disabled { cursor: not-allowed; opacity: 0.65; }
+.tm-toggle:disabled { cursor: not-allowed; opacity: 0.5; }
 </style>

@@ -107,9 +107,10 @@ func nullIfEmpty(s string) any {
 }
 
 type Link struct {
-	A   string `json:"a"`
-	B   string `json:"b"`
-	Rel string `json:"rel"` // relationship kind (depends-on, child-of, implements, …)
+	A       string `json:"a"`
+	B       string `json:"b"`
+	Rel     string `json:"rel"`               // relationship kind (depends-on, uses, child-of, …)
+	Version *int   `json:"version,omitempty"` // "uses" links may pin a target version; nil = latest
 }
 
 type Plan struct {
@@ -188,13 +189,13 @@ func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 		return p, err
 	}
 
-	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id, rel FROM link WHERE workspace_id = $1`, ws)
+	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id, rel, version FROM link WHERE workspace_id = $1`, ws)
 	if err != nil {
 		return p, err
 	}
 	for lkRows.Next() {
 		var l Link
-		if err := lkRows.Scan(&l.A, &l.B, &l.Rel); err != nil {
+		if err := lkRows.Scan(&l.A, &l.B, &l.Rel, &l.Version); err != nil {
 			lkRows.Close()
 			return p, err
 		}
@@ -712,22 +713,20 @@ func itemDates(it Item) (whenV, startV, endV interface{}, err error) {
 
 // ── Links ───────────────────────────────────────────────────────────────────
 
-func (s *Store) AddLink(ctx context.Context, ws, a, b, rel string) error {
+func (s *Store) AddLink(ctx context.Context, ws, a, b, rel string, version *int) error {
 	if a == b {
 		return nil
 	}
 	if rel == "" {
 		rel = "depends-on"
 	}
-	// Typed + directed: the same (a → b, rel) is deduped, but the reverse
-	// direction or a different relationship kind may coexist.
+	// The (a_item_id, b_item_id) pair is unique, so a directed pair holds one
+	// relationship; re-adding updates its kind + pinned version (for "uses").
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO link (a_item_id, b_item_id, rel, workspace_id)
-		 SELECT $1, $2, $3, $4
-		 WHERE NOT EXISTS (
-		   SELECT 1 FROM link WHERE workspace_id = $4 AND a_item_id=$1 AND b_item_id=$2 AND rel=$3
-		 )`,
-		a, b, rel, ws)
+		`INSERT INTO link (a_item_id, b_item_id, rel, workspace_id, version)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (a_item_id, b_item_id) DO UPDATE SET rel = EXCLUDED.rel, version = EXCLUDED.version`,
+		a, b, rel, ws, version)
 	return err
 }
 
