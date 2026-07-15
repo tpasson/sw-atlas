@@ -6,7 +6,7 @@
   --clr-header-sub: #2C2C2E;
   --clr-text: #1C1C1E;
   --clr-text-2: #636366;
-  --clr-text-3: #AEAEB2;
+  --clr-text-3: #86868B; /* darkened for readability on the light background */
   --clr-text-inv: #FFFFFF;
   --clr-border: #D1D1D6;
   --clr-border-light: #E5E5EA;

@@ -124,9 +124,18 @@ const itemTypeCatalog = () => {
   const builtins = BUILTIN_ITEM_TYPES.map(d => {
     const ov = overrides[d.key]
     if (!ov) return d
-    return { ...d, label: ov.label || d.label, icon: ov.icon || d.icon, color: ov.color || '', fill: ov.fill, fields: ov.fields || d.fields, builtin: true }
+    return { ...d, label: ov.label || d.label, icon: ov.icon || d.icon, color: ov.color || '', fill: ov.fill, fields: ov.fields || d.fields, workflowKey: ov.workflowKey, statuses: ov.statuses, layout: ov.layout, builtin: true }
   })
-  return [...builtins, ...custom]
+  const out = [...builtins, ...custom]
+  // Resolve shared-workflow references (mirrors the server).
+  const wfs = db.workflows || []
+  if (wfs.length) {
+    const byKey = Object.fromEntries(wfs.map(w => [w.key, w]))
+    for (const t of out) {
+      if (t.workflowKey && byKey[t.workflowKey]) { t.statuses = byKey[t.workflowKey].statuses; t.layout = byKey[t.workflowKey].layout }
+    }
+  }
+  return out
 }
 
 async function ghReleases(cfg) {
@@ -320,6 +329,12 @@ export const demoApi = {
     save()
     return ok(itemTypeCatalog())
   },
+  workflows: () => ok(db.workflows || []),
+  setWorkflows: (wfs) => {
+    db.workflows = (wfs || []).filter(w => w.key).map(w => ({ ...w, statuses: w.statuses || [] }))
+    save()
+    return ok(db.workflows)
+  },
 
   createSwimlane: (data) => {
     const sw = { id: data.id || uid(), name: data.name, color: data.color || '#0A84FF', subLanes: [] }
@@ -386,8 +401,11 @@ export const demoApi = {
     save(); return ok()
   },
 
-  addLink: (a, b, rel = 'depends-on') => {
-    if (a !== b && !db.links.some(l => l.a === a && l.b === b && (l.rel || 'depends-on') === rel)) db.links.push({ a, b, rel })
+  addLink: (a, b, rel = 'depends-on', version = null) => {
+    if (a !== b) {
+      const e = db.links.find(l => l.a === a && l.b === b && (l.rel || 'depends-on') === rel)
+      if (e) e.version = version ?? null; else db.links.push({ a, b, rel, version: version ?? null })
+    }
     save(); return ok()
   },
   removeLink: (a, b, rel = 'depends-on') => {

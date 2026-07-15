@@ -49,7 +49,7 @@ func (s *Store) CreateBaseline(ctx context.Context, ws, id, name, note string) (
 		          'startDate', to_char(start_date, 'YYYY-MM-DD'),
 		          'endDate', to_char(end_date, 'YYYY-MM-DD'),
 		          'color', color, 'maturity', maturity, 'progress', progress,
-		          'scmUrl', scm_url, 'assigneeId', assignee_id,
+		          'scmUrl', scm_url, 'assigneeId', assignee_id, 'status', status,
 		          'sourceSystem', source_system, 'data', data, 'version', version
 		        ),
 		        updated_by

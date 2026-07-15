@@ -119,21 +119,35 @@
                     <option value="">—</option>
                     <option v-for="r in refItems(f)" :key="r.id" :value="r.id">{{ r.title }}</option>
                   </select>
-                  <div v-else-if="f.type === 'reference'" class="tf-checks" :class="{ 'tf-invalid': invalidFields.includes(f.key) }">
-                    <label v-for="r in refItems(f)" :key="r.id" class="tf-check">
-                      <input type="checkbox" :disabled="formLocked" :checked="Array.isArray(form.data[f.key]) && form.data[f.key].includes(r.id)" @change="toggleMulti(f.key, r.id, $event.target.checked)" /> {{ r.title }}
-                    </label>
-                    <span v-if="!refItems(f).length" class="tf-empty">No {{ refTypeLabel(f.refType) }} items to reference.</span>
+                  <div v-else-if="f.type === 'reference'" class="tf-multiref" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" @focusout="onComboBlur">
+                    <input
+                      class="field-input" :disabled="formLocked" v-model="refSearch[f.key]"
+                      :placeholder="refItems(f).length ? 'Search ' + refTypeLabel(f.refType) + ' to add…' : ''"
+                      @focus="refOpen = f.key"
+                    />
+                    <div v-if="refOpen === f.key && refItems(f).length" class="tf-combo-list">
+                      <button
+                        v-for="r in filteredRefItems(f)" :key="r.id" type="button"
+                        class="tf-combo-opt" :class="{ on: isSelected(f, r.id) }"
+                        @mousedown.prevent @click="toggleMulti(f.key, r.id, !isSelected(f, r.id))"
+                      ><span class="tf-combo-check">{{ isSelected(f, r.id) ? '✓' : '' }}</span>{{ r.title }}</button>
+                      <div v-if="!filteredRefItems(f).length" class="tf-combo-empty">No matches</div>
+                      <div v-else-if="moreCount(f)" class="tf-combo-more">+{{ moreCount(f) }} more — keep typing to narrow</div>
+                    </div>
+                    <span v-if="!refItems(f).length" class="tf-empty">{{ refHint(f) }}</span>
                   </div>
                   <input v-else type="text" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
+                  <span v-if="f.type === 'reference' && !f.refMulti && !refItems(f).length" class="tf-refhint">{{ refHint(f) }}</span>
                   <div v-if="f.type === 'reference' && selectedRefs(f).length" class="tf-pins">
-                    <span class="tf-pins-lbl" title="Pin a reference to the target's current version, or keep it tracking the latest">Version</span>
-                    <button
-                      v-for="id in selectedRefs(f)" :key="id" type="button"
-                      class="tf-pin" :class="{ on: isPinned(f.key, id) }" :disabled="formLocked"
-                      :title="isPinned(f.key, id) ? refTitle(id) + ' pinned to v' + pinnedVer(f.key, id) + ' — click to track latest' : 'Pin ' + refTitle(id) + ' to its current version'"
-                      @click="togglePin(f.key, id)"
-                    >{{ refTitle(id) }}: {{ isPinned(f.key, id) ? 'v' + pinnedVer(f.key, id) : 'latest' }}</button>
+                    <span class="tf-pins-lbl" title="Track the latest revision, or pin each reference to a specific version">Version</span>
+                    <span v-for="id in selectedRefs(f)" :key="id" class="tf-pinitem">
+                      <span class="tf-pin-name">{{ refTitle(id) }}</span>
+                      <select class="tf-pin-sel" :class="{ on: isPinned(f.key, id) }" :disabled="formLocked" v-model="refPins[f.key][id]">
+                        <option :value="''">latest (v{{ refHead(id) }})</option>
+                        <option v-for="v in refVersions(id)" :key="v" :value="v">v{{ v }}</option>
+                      </select>
+                      <button v-if="f.refMulti" type="button" class="tf-pin-x" :disabled="formLocked" title="Remove reference" @click="toggleMulti(f.key, id, false)">×</button>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -194,8 +208,9 @@
 
               <div class="ms-tabs" role="tablist">
                 <button type="button" class="ms-tab" :class="{ active: tab === 'details' }" @click="tab = 'details'">Details</button>
-                <button type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'">Dependencies</button>
-                <button type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
+                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'">Dependencies</button>
+                <button type="button" class="ms-tab" :class="{ active: tab === 'uses' }" @click="tab = 'uses'">Uses</button>
+                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
                 <button v-if="mode === 'edit' && !milestone?.sourceSystem" type="button" class="ms-tab" :class="{ active: tab === 'history' }" @click="tab = 'history'">History</button>
               </div>
 
@@ -254,7 +269,7 @@
               <div class="field">
                 <label class="field-label">Relationship</label>
                 <select v-model="relType" class="field-input" :disabled="formLocked">
-                  <option v-for="r in RELATIONSHIP_TYPES" :key="r.key" :value="r.key">{{ r.label }} ↔ {{ r.inverse }}</option>
+                  <option v-for="r in availableRelTypes" :key="r.key" :value="r.key">{{ r.label }} ↔ {{ r.inverse }}</option>
                 </select>
               </div>
               <!-- The two directions of the selected relationship (side by side) -->
@@ -374,6 +389,74 @@
               </div>
               </div>
 
+              <div v-show="tab === 'uses'" class="ms-panel">
+              <p class="uses-hint">Backlog items this one <strong>uses</strong> (components / sub-artifacts). Timeline items aren't selectable here.</p>
+              <div class="two-col dep-cols">
+              <div class="field">
+                <label class="field-label">
+                  Uses
+                  <span v-if="localUsesIds.size > 0" class="link-count link-toggle" :class="{ on: showOnlyU1 }" :title="showOnlyU1 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnlyU1 = !showOnlyU1">{{ localUsesIds.size }}</span>
+                </label>
+                <div class="ms-picker">
+                  <div class="picker-search">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    <input v-model="usesSearch" class="picker-input" placeholder="Search backlog items…" autocomplete="off" />
+                    <button v-if="usesSearch" type="button" class="picker-clear" @click="usesSearch = ''">×</button>
+                  </div>
+                  <div class="picker-list">
+                    <template v-for="group in usesGroups" :key="'u-' + group.swimlane.id">
+                      <div v-for="m in group.milestones" :key="m.id" class="picker-row">
+                        <button
+                          type="button" class="picker-item"
+                          :class="{ 'picker-active': localUsesIds.has(m.id) }"
+                          :style="localUsesIds.has(m.id) ? activePickerStyle(usesDot(m)) : {}"
+                          @click="toggleUses(m.id)"
+                        >
+                          <span class="picker-dot" :style="{ background: usesDot(m) }"></span>
+                          <div class="picker-info"><span class="picker-title">{{ m.title }}</span><span class="picker-meta">{{ usesTypeLabel(m) }}</span></div>
+                          <svg v-if="localUsesIds.has(m.id)" class="picker-check" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+                        </button>
+                        <select v-if="localUsesIds.has(m.id)" class="picker-ver" v-model="usesPins[m.id]" title="Pin a version (or track the latest)" @click.stop @mousedown.stop>
+                          <option :value="''">latest</option>
+                          <option v-for="v in refVersions(m.id)" :key="v" :value="v">v{{ v }}</option>
+                        </select>
+                      </div>
+                    </template>
+                    <div v-if="usesGroups.length === 0" class="picker-empty">{{ usesSearch ? 'No backlog items match' : 'No backlog items to reference' }}</div>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label class="field-label">
+                  Used by
+                  <span v-if="localUsedByIds.size > 0" class="link-count link-toggle" :class="{ on: showOnlyU2 }" :title="showOnlyU2 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnlyU2 = !showOnlyU2">{{ localUsedByIds.size }}</span>
+                </label>
+                <div class="ms-picker">
+                  <div class="picker-search">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    <input v-model="usesSearch2" class="picker-input" placeholder="Search backlog items…" autocomplete="off" />
+                    <button v-if="usesSearch2" type="button" class="picker-clear" @click="usesSearch2 = ''">×</button>
+                  </div>
+                  <div class="picker-list">
+                    <template v-for="group in usesGroups2" :key="'ub-' + group.swimlane.id">
+                      <button
+                        v-for="m in group.milestones" :key="m.id" type="button" class="picker-item"
+                        :class="{ 'picker-active': localUsedByIds.has(m.id) }"
+                        :style="localUsedByIds.has(m.id) ? activePickerStyle(usesDot(m)) : {}"
+                        @click="toggleUsedBy(m.id)"
+                      >
+                        <span class="picker-dot" :style="{ background: usesDot(m) }"></span>
+                        <div class="picker-info"><span class="picker-title">{{ m.title }}</span><span class="picker-meta">{{ usesTypeLabel(m) }}</span></div>
+                        <svg v-if="localUsedByIds.has(m.id)" class="picker-check" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+                      </button>
+                    </template>
+                    <div v-if="usesGroups2.length === 0" class="picker-empty">{{ usesSearch2 ? 'No backlog items match' : 'No backlog items to reference' }}</div>
+                  </div>
+                </div>
+              </div>
+              </div>
+              </div>
+
               <div v-show="tab === 'groups'" class="ms-panel">
               <!-- Group membership -->
               <div v-if="groups.list.length" class="field">
@@ -438,7 +521,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, itemGroupIds, setItemGroups } = useAppStore()
 
-const TABS = ['details', 'deps', 'groups', 'history']
+const TABS = ['details', 'deps', 'uses', 'groups', 'history']
 const tab = ref(props.mode === 'edit' && TABS.includes(props.initialTab) ? props.initialTab : 'details')
 const invalidFields = ref([]) // keys of empty required fields, framed red
 const isFieldEmpty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0)
@@ -506,6 +589,7 @@ const form = reactive({
 const refPins = reactive({}) // { [fieldKey]: { [id]: version } }
 for (const f of (itemTypeByKey(form.typeKey)?.fields || [])) {
   if (f.type !== 'reference') continue
+  refPins[f.key] = {} // always present so the version <select>'s v-model path is safe
   const raw = form.data[f.key]
   const entries = Array.isArray(raw) ? raw : (raw ? [raw] : [])
   const bare = []
@@ -513,7 +597,7 @@ for (const f of (itemTypeByKey(form.typeKey)?.fields || [])) {
     const { id, version } = parseRef(e)
     if (!id) continue
     bare.push(id)
-    if (version) (refPins[f.key] || (refPins[f.key] = {}))[id] = version
+    if (version) refPins[f.key][id] = version
   }
   form.data[f.key] = f.refMulti ? bare : (bare[0] || '')
 }
@@ -567,6 +651,7 @@ function applyType(key) {
   if (t.family === 'work-item' || t.family === 'container') { form.swimlaneId = ''; form.subLaneId = '' }
   for (const f of (t.fields || [])) {
     if (!(f.key in form.data)) form.data[f.key] = (f.type === 'multiselect' || (f.type === 'reference' && f.refMulti)) ? [] : ''
+    if (f.type === 'reference' && !refPins[f.key]) refPins[f.key] = {}
   }
   // Default to the type's start status if the current one isn't valid for this type.
   const sts = t.statuses || []
@@ -582,6 +667,30 @@ function refItems(f) {
 }
 function refTypeLabel(key) { return itemTypeByKey(key)?.label || key || 'referenced' }
 
+// Multi-reference picker: a searchable, capped dropdown instead of one checkbox
+// per candidate — so it stays usable with hundreds of referenceable items.
+const refSearch = reactive({}) // { [fieldKey]: query }
+const refOpen = ref('')        // fieldKey whose dropdown is open
+const REF_LIST_CAP = 50
+function isSelected(f, id) {
+  const v = form.data[f.key]
+  return Array.isArray(v) ? v.includes(id) : v === id
+}
+function matchedRefItems(f) {
+  const q = (refSearch[f.key] || '').trim().toLowerCase()
+  const items = refItems(f)
+  return q ? items.filter(r => (r.title || '').toLowerCase().includes(q)) : items
+}
+function filteredRefItems(f) { return matchedRefItems(f).slice(0, REF_LIST_CAP) }
+function moreCount(f) { return Math.max(0, matchedRefItems(f).length - REF_LIST_CAP) }
+function onComboBlur() { setTimeout(() => { refOpen.value = '' }, 120) }
+// Why a reference field shows no options: either it has no target type configured
+// (a mis-set field) or that type simply has no items yet.
+function refHint(f) {
+  if (!f.refType) return 'This reference field has no target type set — fix it in Manage → Item types.'
+  return `No ${refTypeLabel(f.refType)} items to reference yet.`
+}
+
 // Version pinning for reference fields (see refPins above).
 function selectedRefs(f) {
   const v = form.data[f.key]
@@ -590,11 +699,13 @@ function selectedRefs(f) {
 function refTitle(id) { return store.milestones.find(m => m.id === id)?.title || id }
 function isPinned(key, id) { return !!(refPins[key] && refPins[key][id]) }
 function pinnedVer(key, id) { return refPins[key] && refPins[key][id] }
-// Toggle a reference between tracking latest (head) and pinned-to-current-version.
-function togglePin(key, id) {
-  if (formLocked.value) return
-  if (isPinned(key, id)) delete refPins[key][id]
-  else (refPins[key] || (refPins[key] = {}))[id] = store.milestones.find(m => m.id === id)?.version || 1
+// A referenced item's current (head) version, and the full list of pickable
+// versions (head → 1) so you can pin to any past revision, not just the latest.
+function refHead(id) { return store.milestones.find(m => m.id === id)?.version || 1 }
+function refVersions(id) {
+  const out = []
+  for (let v = refHead(id); v >= 1; v--) out.push(v)
+  return out
 }
 // Re-encode reference values with their pinned versions for the save payload.
 function encodedData() {
@@ -637,10 +748,32 @@ const dateError = computed(() => {
 // the selected rel and the diff is applied on save (preserving cancel).
 const relType = ref('depends-on')
 const relDef = computed(() => RELATIONSHIP_TYPES.find(r => r.key === relType.value) || RELATIONSHIP_TYPES[0])
+// Scheduling relations (Blocked by / Blocks) only make sense between timeline
+// items. When this item is off-timeline (backlog/container) they're not offered;
+// cross-family links use traceability relations (Uses / Used by, Implements, …).
+const currentSchedulable = computed(() => {
+  const fam = itemTypeByKey(form.typeKey)?.family
+  return fam !== 'work-item' && fam !== 'container'
+})
+// 'uses' has its own dedicated tab (backlog-only) — keep it out of the general
+// relationship dropdown so there's a single home for it.
+const availableRelTypes = computed(() => RELATIONSHIP_TYPES.filter(r => r.key !== 'uses' && (!r.scheduling || currentSchedulable.value)))
+watch(availableRelTypes, (types) => {
+  if (!types.some(r => r.key === relType.value)) relType.value = types[0]?.key || 'relates-to'
+}, { immediate: true })
+// Backlog/container items don't sit in the timeline: the Dependencies (scheduling)
+// and Groups (timeline legend/highlight) tabs are hidden for them — their
+// relationships live in the Uses tab.
+watch(currentSchedulable, (ok) => { if (!ok && (tab.value === 'deps' || tab.value === 'groups')) tab.value = 'details' }, { immediate: true })
 const SELF = props.milestone?.id || '__NEW__'
 const originalEdges = (props.milestone ? store.links.filter(l => l.a === SELF || l.b === SELF) : [])
-  .map(l => ({ a: l.a, b: l.b, rel: l.rel || 'depends-on' }))
+  .map(l => ({ a: l.a, b: l.b, rel: l.rel || 'depends-on', version: l.version ?? null }))
 const edges = ref(originalEdges.map(e => ({ ...e })))
+
+// Pinned versions for outgoing "uses" links (this item uses X at version N).
+// Kept separate from edge membership so the version <select> can v-model it.
+const usesPins = reactive({}) // { [usedItemId]: version }
+for (const l of originalEdges) if (l.rel === 'uses' && l.a === SELF && l.version != null) usesPins[l.b] = l.version
 
 // Sets for the SELECTED relationship — drive the two pickers.
 const localLinkedIds = computed(() => new Set(edges.value.filter(e => e.a === SELF && e.rel === relType.value).map(e => e.b)))
@@ -684,9 +817,21 @@ function activePickerStyle(color) {
 const pickerSearch = ref('')
 const pickerSearch2 = ref('')
 
-function buildPickerGroups(query, onlyIds) {
+function buildPickerGroups(query, onlyIds, backlogOnly = false) {
   const q = (query || '').toLowerCase()
   const groups = []
+  // Uses tab: off-timeline (backlog) items only, in one flat "Backlog" group.
+  if (backlogOnly) {
+    const backlog = store.milestones.filter(m => {
+      if (m.id === props.milestone?.id) return false
+      if (m.swimlaneId || m.sourceSystem) return false
+      if (onlyIds && !onlyIds.has(m.id)) return false
+      if (q && !m.title.toLowerCase().includes(q)) return false
+      return true
+    })
+    if (backlog.length) groups.push({ swimlane: { id: '__backlog__', name: 'Backlog', color: '#8E8E93' }, subLane: null, milestones: backlog })
+    return groups
+  }
   for (const sw of store.swimlanes) {
     const subs = sw.subLanes.length ? sw.subLanes : [null]
     for (const sub of subs) {
@@ -709,6 +854,29 @@ const showOnly2 = ref(false)
 const pickerGroups = computed(() => buildPickerGroups(pickerSearch.value, showOnly1.value && localLinkedIds.value.size ? localLinkedIds.value : null))
 const pickerGroups2 = computed(() => buildPickerGroups(pickerSearch2.value, showOnly2.value && localDependentIds.value.size ? localDependentIds.value : null))
 
+// ── Uses tab (#86): reference Backlog items only. Same edge store, rel='uses',
+// with a backlog-only picker. Two directions: "Uses" (this → backlog) and
+// "Used by" (backlog → this).
+const localUsesIds = computed(() => new Set(edges.value.filter(e => e.a === SELF && e.rel === 'uses').map(e => e.b)))
+const localUsedByIds = computed(() => new Set(edges.value.filter(e => e.b === SELF && e.rel === 'uses').map(e => e.a)))
+function toggleUses(id) {
+  const had = edges.value.some(e => e.a === SELF && e.b === id && e.rel === 'uses')
+  edges.value = edges.value.filter(e => !(e.rel === 'uses' && ((e.a === SELF && e.b === id) || (e.a === id && e.b === SELF))))
+  if (!had) edges.value.push({ a: SELF, b: id, rel: 'uses' })
+  else delete usesPins[id]
+}
+function toggleUsedBy(id) {
+  const had = edges.value.some(e => e.a === id && e.b === SELF && e.rel === 'uses')
+  edges.value = edges.value.filter(e => !(e.rel === 'uses' && ((e.a === id && e.b === SELF) || (e.a === SELF && e.b === id))))
+  if (!had) edges.value.push({ a: id, b: SELF, rel: 'uses' })
+}
+function usesDot(m) { return itemTypeByKey(m.typeKey || m.kind)?.color || '#8a8a8e' }
+function usesTypeLabel(m) { return itemTypeByKey(m.typeKey || m.kind)?.label || (m.typeKey || m.kind || '') }
+const usesSearch = ref(''); const usesSearch2 = ref('')
+const showOnlyU1 = ref(false); const showOnlyU2 = ref(false)
+const usesGroups = computed(() => buildPickerGroups(usesSearch.value, showOnlyU1.value && localUsesIds.value.size ? localUsesIds.value : null, true))
+const usesGroups2 = computed(() => buildPickerGroups(usesSearch2.value, showOnlyU2.value && localUsedByIds.value.size ? localUsedByIds.value : null, true))
+
 const titleInput = ref(null)
 onMounted(() => {
   // Preselect the Explorer's chosen type (sets kind / marker / colour / fields).
@@ -722,12 +890,20 @@ onMounted(() => {
 
 function syncLinks(msId) {
   // Resolve the placeholder self-id, then diff the working edges against the
-  // originals (keyed a|b|rel) and apply add/remove for the differences.
-  const resolve = (e) => ({ a: e.a === SELF ? msId : e.a, b: e.b === SELF ? msId : e.b, rel: e.rel })
+  // originals (keyed a|b|rel). Outgoing "uses" links carry a pinned version.
+  const resolve = (e) => ({
+    a: e.a === SELF ? msId : e.a,
+    b: e.b === SELF ? msId : e.b,
+    rel: e.rel,
+    version: (e.rel === 'uses' && e.a === SELF && usesPins[e.b]) ? Number(usesPins[e.b]) : null,
+  })
   const key = (e) => `${e.a}|${e.b}|${e.rel}`
   const want = new Map(edges.value.map(resolve).map(e => [key(e), e]))
   const orig = new Map(originalEdges.map(e => [key(e), e]))
-  for (const [k, e] of want) if (!orig.has(k)) addLink(e.a, e.b, e.rel)
+  for (const [k, e] of want) {
+    const o = orig.get(k)
+    if (!o || (o.version ?? null) !== (e.version ?? null)) addLink(e.a, e.b, e.rel, e.version) // new link or version change → upsert
+  }
   for (const [k, e] of orig) if (!want.has(k)) removeLink(e.a, e.b, e.rel)
 }
 
@@ -925,6 +1101,14 @@ function remove() {
 .scm-hint { font-size: 12.5px; color: var(--clr-text-3); line-height: 1.45; margin-top: -1px; }
 
 /* Dependencies tab: let the two pickers grow to fill the tab height instead of leaving whitespace below */
+.uses-hint { font-size: 12px; color: var(--clr-text-3); margin: 0 0 10px; }
+.uses-hint strong { color: var(--clr-text-2); font-weight: 700; }
+/* Uses picker: version dropdown inline in each selected row. */
+.picker-row { display: flex; align-items: center; }
+.picker-row .picker-item { flex: 1; min-width: 0; width: auto; }
+.picker-ver { flex-shrink: 0; margin-right: 8px; padding: 3px 6px; font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--clr-text-2); background: var(--clr-bg); border: 1px solid var(--clr-border); border-radius: var(--r-sm); }
+.picker-ver:focus { outline: none; border-color: var(--clr-accent); }
 .dep-cols { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .dep-cols .field { min-height: 0; }
 .dep-cols .ms-picker { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -963,12 +1147,29 @@ function remove() {
 .type-fields .field-input.tf-invalid { border-color: var(--clr-danger); box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
 .type-fields .tf-checks.tf-invalid { border: 1px solid var(--clr-danger); border-radius: var(--r-md); padding: 6px 8px; box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
 .type-fields .tf-row { flex-wrap: wrap; } /* lets the version-pin strip drop to its own line */
-.type-fields .tf-pins { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 130px; }
+.type-fields .tf-pins { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-left: 130px; }
+.type-fields .tf-refhint { flex-basis: 100%; padding-left: 130px; font-size: 12px; color: var(--clr-warning, #FF9F0A); }
 .type-fields .tf-pins-lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--clr-text-3); }
-.type-fields .tf-pin { font-size: 11px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-bg); border: 1px solid var(--clr-border); border-radius: 100px; padding: 3px 10px; }
-.type-fields .tf-pin.on { color: var(--clr-warning, #FF9F0A); border-color: var(--clr-warning, #FF9F0A); background: rgba(255,159,10,0.1); }
-.type-fields .tf-pin:hover:not(:disabled) { border-color: var(--clr-text-3); }
-.type-fields .tf-pin:disabled { opacity: 0.6; cursor: default; }
+.type-fields .tf-pinitem { display: inline-flex; align-items: center; gap: 6px; }
+.type-fields .tf-pin-name { font-size: 12px; color: var(--clr-text-2); }
+.type-fields .tf-pin-sel { padding: 4px 8px; font-size: 12px; color: var(--clr-text); background: var(--clr-bg); border: 1px solid var(--clr-border); border-radius: var(--r-sm); }
+.type-fields .tf-pin-sel:focus { outline: none; border-color: var(--clr-accent); }
+.type-fields .tf-pin-sel.on { color: var(--clr-warning, #FF9F0A); border-color: var(--clr-warning, #FF9F0A); }
+.type-fields .tf-pin-sel:disabled { opacity: 0.6; cursor: default; }
+.type-fields .tf-pin-x { width: 22px; height: 22px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; color: var(--clr-text-3); background: none; border-radius: var(--r-sm); }
+.type-fields .tf-pin-x:hover { color: var(--clr-danger); background: rgba(255,59,48,0.08); }
+
+/* Searchable multi-reference picker (scales to many candidates). */
+.type-fields .tf-multiref { flex: 1; min-width: 0; position: relative; }
+.type-fields .tf-multiref .field-input { width: 100%; }
+.type-fields .tf-multiref.tf-invalid .field-input { border-color: var(--clr-danger); box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
+.type-fields .tf-combo-list { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-height: 220px; overflow-y: auto;
+  background: var(--clr-surface, var(--clr-bg)); border: 1px solid var(--clr-border); border-radius: var(--r-md); box-shadow: 0 10px 28px rgba(0,0,0,0.28); padding: 4px; }
+.type-fields .tf-combo-opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; font-size: 13px; color: var(--clr-text); background: none; border-radius: var(--r-sm); }
+.type-fields .tf-combo-opt:hover { background: var(--clr-surface-2); }
+.type-fields .tf-combo-opt.on { color: var(--clr-accent); font-weight: 600; }
+.type-fields .tf-combo-check { width: 12px; flex-shrink: 0; color: var(--clr-accent); }
+.type-fields .tf-combo-empty, .type-fields .tf-combo-more { padding: 6px 10px; font-size: 12px; color: var(--clr-text-3); }
 .ms-status { display: flex; align-items: center; gap: 8px; }
 .ms-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
