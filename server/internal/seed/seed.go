@@ -4,11 +4,32 @@ package seed
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/tpasson/sw-atlas/server/internal/store"
 )
+
+// descData packs the demo What/Why/Where prose into the item's data bag (these
+// are ordinary type fields now, not columns). "who" was retired.
+func descData(what, why, how string) json.RawMessage {
+	m := map[string]string{}
+	if what != "" {
+		m["what"] = what
+	}
+	if why != "" {
+		m["why"] = why
+	}
+	if how != "" {
+		m["how"] = how
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(m)
+	return json.RawMessage(b)
+}
 
 // Run seeds demo data into the given workspace and returns the resulting
 // swimlane count.
@@ -73,10 +94,11 @@ func Run(ctx context.Context, st *store.Store, ws string) (int, error) {
 			subp = &s
 		}
 		mat := ((month - 1) % 4) + 1 // demo spread across the 4 maturity stages
-		prog := mat*25 - 10         // demo % progress, varies with the stage
+		prog := mat*25 - 10          // demo % progress, varies with the stage
+		_ = who                      // "who" retired; demo prose goes into data (what/why/how)
 		return store.Item{
 			ID: id, SwimlaneID: sw, SubLaneID: subp, Year: year, Month: month,
-			Title: title, What: what, Why: why, How: how, Who: who, When: when,
+			Title: title, When: when, Data: descData(what, why, how),
 			Kind: "milestone", Marker: "l:Diamond", Maturity: &mat, Progress: &prog,
 		}
 	}
@@ -116,8 +138,8 @@ func Run(ctx context.Context, st *store.Store, ws string) (int, error) {
 	// One time-spanning event to exercise the bar rendering coming in P1.
 	summitWeek := store.Item{
 		ID: "m-summit-week", SwimlaneID: "ev", SubLaneID: strptr("ev-summit"), Year: year, Month: 9,
-		Title: "Summit Week", What: "On-site exhibition week", Why: "Customer meetings", How: "Conference venue",
-		Who: "Whole team", Kind: "event", Marker: "bar", StartDate: d(9, 8), EndDate: d(9, 14), When: d(9, 8),
+		Title: "Summit Week", Data: descData("On-site exhibition week", "Customer meetings", "Conference venue"),
+		Kind: "event", Marker: "bar", StartDate: d(9, 8), EndDate: d(9, 14), When: d(9, 8),
 	}
 	items = append(items, summitWeek)
 

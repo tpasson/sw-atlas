@@ -17,23 +17,68 @@ type Workflow struct {
 	Label    string          `json:"label"`
 	Statuses []ItemStatus    `json:"statuses"`
 	Layout   json.RawMessage `json:"layout,omitempty"`
+	Builtin  bool            `json:"builtin,omitempty"` // seeded default, always present
 }
 
-// GetWorkflows returns the workspace's shared workflows.
+// DefaultWorkflows are the shipped defaults, always present (like built-in item
+// types). "standard" carries a hand-arranged status-flow layout so the diagram
+// looks right out of the box; a workspace can override its statuses/layout.
+func DefaultWorkflows() []Workflow {
+	standardLayout := json.RawMessage(`{"nodes":{"todo":{"x":49,"y":28},"in-progress":{"x":270,"y":27},"blocked":{"x":270,"y":127},"done":{"x":270,"y":-76},"cancelled":{"x":653,"y":31}},"edges":{"todo|cancelled":{"x":352,"y":-147,"a":"T","b":"T"},"in-progress|done":{"a":"T","b":"B"},"in-progress|cancelled":{"b":"L"},"blocked|cancelled":{"x":526,"y":128,"a":"R","b":"B"}}}`)
+	return []Workflow{{
+		Key: "standard", Label: "Standard", Builtin: true,
+		Statuses: []ItemStatus{
+			{Key: "todo", Label: "To Do", Tone: "neutral", To: []string{"in-progress", "cancelled"}},
+			{Key: "in-progress", Label: "In Progress", Tone: "progress", To: []string{"blocked", "done", "cancelled"}},
+			{Key: "blocked", Label: "Blocked", Tone: "warning", To: []string{"in-progress", "cancelled"}},
+			{Key: "done", Label: "Done", Tone: "positive", To: []string{"in-progress"}},
+			{Key: "cancelled", Label: "Cancelled", Tone: "negative", To: []string{"todo"}},
+		},
+		Layout: standardLayout,
+	}}
+}
+
+// mergeWorkflows returns the built-in defaults (overridden by a stored workflow
+// of the same key), then any stored custom workflows.
+func mergeWorkflows(stored []Workflow) []Workflow {
+	byKey := map[string]Workflow{}
+	for _, w := range stored {
+		byKey[w.Key] = w
+	}
+	out := []Workflow{}
+	isDefault := map[string]bool{}
+	for _, d := range DefaultWorkflows() {
+		isDefault[d.Key] = true
+		if ov, ok := byKey[d.Key]; ok {
+			ov.Builtin = true
+			out = append(out, ov)
+		} else {
+			out = append(out, d)
+		}
+	}
+	for _, w := range stored {
+		if isDefault[w.Key] {
+			continue
+		}
+		w.Builtin = false
+		out = append(out, w)
+	}
+	return out
+}
+
+// GetWorkflows returns the workspace's shared workflows: built-in defaults merged
+// with any stored overrides + custom workflows.
 func (s *Store) GetWorkflows(ctx context.Context, ws string) ([]Workflow, error) {
+	var stored []Workflow
 	var v string
 	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'workflows' AND workspace_id = $1`, ws).Scan(&v)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return []Workflow{}, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	var wfs []Workflow
-	if err := json.Unmarshal([]byte(v), &wfs); err != nil {
-		return []Workflow{}, nil // tolerate a malformed blob rather than break reads
+	if err == nil {
+		_ = json.Unmarshal([]byte(v), &stored) // tolerate a malformed blob → treated as none
 	}
-	return wfs, nil
+	return mergeWorkflows(stored), nil
 }
 
 // SetWorkflows replaces the workspace's shared workflows (keyed, deduped).

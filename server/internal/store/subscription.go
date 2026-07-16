@@ -394,10 +394,10 @@ func (s *Store) applyMirror(ctx context.Context, ws, subID, remoteURL, kind stri
 		itemLocal[it.ID] = nid
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO item (`+itemColumns+`, workspace_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
-			nid, lid, nsub, it.Year, it.Month, it.Title, it.What, it.Why, it.How, it.Who,
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+			nid, lid, nsub, it.Year, it.Month, it.Title,
 			whenV, it.Kind, it.Marker, startV, endV, it.Color,
-			subID, it.ID, remoteURL, now, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), nil, ws); err != nil { // type_key, data; assignee nil (no cross-instance user)
+			subID, it.ID, remoteURL, now, it.Maturity, it.Progress, it.ScmURL, typeKeyOf(it), itemData(it), nil, it.Status, ws); err != nil { // type_key, data; assignee nil (no cross-instance user)
 			return err
 		}
 	}

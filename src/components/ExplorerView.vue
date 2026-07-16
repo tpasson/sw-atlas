@@ -18,7 +18,9 @@
             <button v-for="o in SORT_OPTIONS" :key="o.key" type="button" class="ev-sortbtn" :class="{ on: sortKey === o.key }" :title="'Sort: ' + o.label" @click="sortKey = o.key"><component :is="o.icon" :size="14" :stroke-width="2.2" /></button>
           </div>
         </div>
-        <div v-for="g in folders" :key="g.key" class="ex-node">
+        <template v-for="g in groupedFolders" :key="g.key">
+        <div v-if="g.showHeader" class="ex-group-head">{{ g.groupLabel }}</div>
+        <div class="ex-node">
           <div class="ex-row" @click="toggle(g.key)">
             <svg class="ex-chev" :class="{ open: isOpen(g.key) }" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5L6.5 5L3 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <MarkerIcon :shape="g.type.icon || 'l:Diamond'" :color="g.type.color || '#8a8a8e'" :size="14" :fill="g.type.fill !== false" />
@@ -41,6 +43,7 @@
             <div v-if="!g.items.length" class="ex-leaf-empty">— empty —</div>
           </div>
         </div>
+        </template>
 
         <!-- Source control: mirrored repo content is NOT mixed in with milestones.
              It lives in its own SCM → repo → category (issue/release/…) → items tree. -->
@@ -109,7 +112,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { GitPullRequest, ArrowDownAZ, ArrowDownZA, Clock, ArrowDown10, ArrowDown01 } from 'lucide-vue-next'
-import { store, itemTypes, itemStatus, toneColor, ui, pushNav } from '../stores/useAppStore.js'
+import { store, itemTypes, itemStatus, statusColor, ui, pushNav, workspace } from '../stores/useAppStore.js'
 import { api } from '../api.js'
 import MarkerIcon from './MarkerIcon.vue'
 import TableView from './TableView.vue'
@@ -166,6 +169,31 @@ const folders = computed(() => {
   return out.sort((a, b) => (a.type.label || '').localeCompare(b.type.label || ''))
 })
 
+// Group the type-folders by the type's behaviour family — Timeline / Backlog /
+// Structure — in a fixed order (stable). Adaptive: headers only appear when more
+// than one family is present; a single-family workspace stays flat.
+const GROUP_ORDER = ['timeline', 'backlog', 'structure']
+const GROUP_LABEL = { timeline: 'Timeline', backlog: 'Backlog', structure: 'Structure' }
+function familyGroup(fam) {
+  if (fam === 'work-item') return 'backlog'
+  if (fam === 'container') return 'structure'
+  return 'timeline' // timeline-point / timeline-range (+ unknown legacy → timeline)
+}
+const folderGroups = computed(() => {
+  const byGroup = { timeline: [], backlog: [], structure: [] }
+  for (const f of folders.value) byGroup[familyGroup(f.type?.family)].push(f)
+  return GROUP_ORDER.map(k => ({ key: k, label: GROUP_LABEL[k], folders: byGroup[k] })).filter(s => s.folders.length)
+})
+const showGroups = computed(() => folderGroups.value.length > 1)
+// Flattened list with a header flag on the first folder of each group (one folder
+// block in the template, no duplication). Flat when only one family exists.
+const groupedFolders = computed(() => {
+  if (!showGroups.value) return folders.value
+  const out = []
+  for (const grp of folderGroups.value) grp.folders.forEach((f, i) => out.push({ ...f, groupLabel: grp.label, showHeader: i === 0 }))
+  return out
+})
+
 // SCM tree: one node per connected repo (source swimlane), split into its
 // categories (the repo's sub-lanes: Releases / Tags / Issues / Pull requests),
 // with the mirrored items underneath.
@@ -188,16 +216,22 @@ function laneColor(m) { return store.swimlanes.find(s => s.id === m.swimlaneId)?
 // Leaf dot: the item's status tone (a quick at-a-glance state), else its area colour.
 function dotColor(m) {
   const s = itemStatus(m)
-  return s ? toneColor(s.tone) : (laneColor(m) || '#8a8a8e')
+  return s ? statusColor(s) : (laneColor(m) || '#8a8a8e')
 }
 
 // Tree expand/collapse (types open by default; collapse-set tracks closed ones).
-const collapsed = ref(new Set())
+// Folder collapse state persists per workspace (survives view switches + reloads).
+const collapseKey = () => `atlas-explorer-collapsed:${workspace.slug || 'default'}`
+function loadCollapsed() {
+  try { const a = JSON.parse(localStorage.getItem(collapseKey()) || '[]'); return new Set(Array.isArray(a) ? a : []) } catch { return new Set() }
+}
+const collapsed = ref(loadCollapsed())
 function isOpen(key) { return !collapsed.value.has(key) }
 function toggle(key) {
   const s = new Set(collapsed.value)
   s.has(key) ? s.delete(key) : s.add(key)
   collapsed.value = s
+  try { localStorage.setItem(collapseKey(), JSON.stringify([...s])) } catch { /* ignore */ }
 }
 
 // Selected item → its content shows in the centre pane. Resolve by id so it stays
@@ -312,6 +346,8 @@ function resetWidth() {
 .ev-sortbtn:hover { background: var(--clr-surface-2); color: var(--clr-text); }
 .ev-sortbtn.on { background: var(--clr-accent); color: #fff; }
 .ev-tree-blank { padding: 14px; font-size: 13px; color: var(--clr-text-3); }
+.ex-group-head { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--clr-text-3); padding: 12px 10px 3px 14px; }
+.ex-group-head:first-child { padding-top: 2px; }
 
 .ex-row { display: flex; align-items: center; gap: 7px; padding: 5px 12px; cursor: pointer; user-select: none; transition: background 0.1s; }
 .ex-row:hover { background: var(--clr-surface-2); }

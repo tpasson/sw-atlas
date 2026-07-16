@@ -80,18 +80,18 @@
                 <label class="field-label">Type</label>
                 <div class="type-row">
                   <span class="type-ico"><MarkerIcon :shape="currentType?.icon || 'l:Diamond'" :color="currentType?.color || swimlane?.color || '#8a8a8e'" :size="18" :fill="currentType?.fill !== false" /></span>
-                  <select class="field-input" :value="form.typeKey" :disabled="formLocked" @change="applyType($event.target.value)">
+                  <select class="field-input" :value="form.typeKey" :disabled="formLocked || mode === 'edit'" :title="mode === 'edit' ? 'The type is fixed once an item is created' : ''" @change="applyType($event.target.value)">
                     <option v-for="t in itemTypes.list" :key="t.key" :value="t.key">{{ t.label }}</option>
                   </select>
                 </div>
-                <p class="type-hint">The icon comes from the type — set it under Settings → Types.</p>
+                <p class="type-hint">{{ mode === 'edit' ? 'The type is fixed once an item is created.' : 'The icon comes from the type — set it under Settings → Types.' }}</p>
               </div>
 
               <!-- Workflow status: allowed values come from the type's status set. -->
               <div v-if="typeStatuses.length" class="field">
                 <label class="field-label">Status</label>
                 <div class="ms-status">
-                  <span class="ms-status-dot" :style="{ background: toneColor(currentStatusTone) }"></span>
+                  <span class="ms-status-dot" :style="{ background: currentStatusColor }"></span>
                   <select class="field-input" :disabled="formLocked" v-model="form.status">
                     <option v-for="s in selectableStatuses" :key="s.key" :value="s.key">{{ s.label }}</option>
                   </select>
@@ -136,6 +136,7 @@
                     </div>
                     <span v-if="!refItems(f).length" class="tf-empty">{{ refHint(f) }}</span>
                   </div>
+                  <textarea v-else-if="f.type === 'textarea'" class="field-textarea" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :rows="readOnly ? 8 : 3" :disabled="formLocked" v-model="form.data[f.key]"></textarea>
                   <input v-else type="text" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
                   <span v-if="f.type === 'reference' && !f.refMulti && !refItems(f).length" class="tf-refhint">{{ refHint(f) }}</span>
                   <div v-if="f.type === 'reference' && selectedRefs(f).length" class="tf-pins">
@@ -221,29 +222,12 @@
                 <ItemHistory v-if="milestone" :key="milestone.id" :item-id="milestone.id" />
               </div>
               <div v-show="tab === 'details'" class="ms-panel">
-              <div class="two-col">
-                <div class="field">
-                  <label class="field-label">What</label>
-                  <textarea v-model="form.what" class="field-textarea" :rows="readOnly ? 12 : 3" placeholder="What will be achieved?"></textarea>
-                </div>
-                <div class="field">
-                  <label class="field-label">Why</label>
-                  <textarea v-model="form.why" class="field-textarea" rows="3" placeholder="Why is this important?"></textarea>
-                </div>
-              </div>
-
-              <div class="two-col">
-                <div class="field">
-                  <label class="field-label">Where</label>
-                  <textarea v-model="form.how" class="field-textarea" rows="3" placeholder="Where will it take place?"></textarea>
-                </div>
-                <div class="field">
-                  <label class="field-label">Who</label>
-                  <select class="field-input" :disabled="formLocked" v-model="form.assigneeId">
-                    <option :value="null">Unassigned</option>
-                    <option v-for="mb in workspace.members" :key="mb.userId" :value="mb.userId">{{ mb.username }}</option>
-                  </select>
-                </div>
+              <div class="field">
+                <label class="field-label">Assigned to</label>
+                <select class="field-input" :disabled="formLocked" v-model="form.assigneeId">
+                  <option :value="null">Unassigned</option>
+                  <option v-for="mb in workspace.members" :key="mb.userId" :value="mb.userId">{{ mb.username }}</option>
+                </select>
               </div>
 
               <template v-if="isTimelineType">
@@ -492,7 +476,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, STATUS_TONES, toneColor, parseRef } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, STATUS_TONES, toneColor, statusColor, parseRef } from '../stores/useAppStore.js'
 
 function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
@@ -566,13 +550,11 @@ const form = reactive({
   title:  props.milestone?.title ?? '',
   kind:   props.milestone?.kind ?? 'milestone',
   typeKey: props.milestone?.typeKey ?? (props.initialType || props.milestone?.kind || 'milestone'),
-  data:   { ...(props.milestone?.data || {}) },
+  // Description fields (what/why/how) are ordinary type fields now → they live in
+  // data. Mirrored items keep the markdown-stripped body in data.what.
+  data:   (() => { const d = { ...(props.milestone?.data || {}) }; if (props.milestone?.sourceSystem && typeof d.what === 'string') d.what = stripMarkdown(d.what); return d })(),
   assigneeId: props.milestone?.assigneeId ?? null,
   status: props.milestone?.status ?? '',
-  what:   props.milestone?.sourceSystem ? stripMarkdown(props.milestone?.what || '') : (props.milestone?.what ?? ''),
-  why:    props.milestone?.why   ?? '',
-  how:    props.milestone?.how   ?? '',
-  who:    props.milestone?.who   ?? '',
   when:   props.milestone?.when ?? defaultDate,
   startDate: props.milestone?.startDate ?? defaultDate,
   endDate:   props.milestone?.endDate ?? addDays(defaultDate, 7),
@@ -623,6 +605,7 @@ const currentTypeFields = computed(() => currentType.value?.fields || [])
 const currentTypeLabel = computed(() => currentType.value?.label || 'Type')
 const typeStatuses = computed(() => currentType.value?.statuses || [])
 const currentStatusTone = computed(() => (typeStatuses.value.find(s => s.key === form.status)?.tone) || 'neutral')
+const currentStatusColor = computed(() => statusColor(typeStatuses.value.find(s => s.key === form.status)))
 // While editing, offer only the current status plus its allowed transitions
 // (empty transitions = any). Creating an item can start in any status.
 const selectableStatuses = computed(() => {
@@ -933,10 +916,6 @@ function submit() {
     year,
     month,
     title:      form.title.trim(),
-    what:       form.what,
-    why:        form.why,
-    how:        form.how,
-    who:        form.who,
     kind:       form.kind,
     typeKey:    form.typeKey,
     data:       encodedData(),

@@ -58,9 +58,14 @@ const YEAR_KEY = 'atlas-view-year'
 const GRAN_KEY = 'atlas-view-gran'
 const MONTH_KEY = 'atlas-view-month'
 const VIEW_KEY = 'atlas-view-mode'
+const SETTINGS_SECTION_KEY = 'atlas-settings-section'
+const NAV_VIEWS = ['explorer', 'scm', 'cr', 'settings', 'project-settings'] // non-default views carried in the URL
 function initialView() {
   const v = localStorage.getItem(VIEW_KEY)
-  return v === 'explorer' || v === 'scm' || v === 'cr' ? v : 'timeline'
+  return NAV_VIEWS.includes(v) ? v : 'timeline'
+}
+function initialSettingsSection() {
+  return localStorage.getItem(SETTINGS_SECTION_KEY) || 'areas'
 }
 function initialYear() {
   const v = parseInt(localStorage.getItem(YEAR_KEY) || '', 10)
@@ -176,7 +181,7 @@ export const MATURITY_STAGES = ['Concept', 'Design', 'Production', 'Series']
 // Status tones: you pick a MEANING, the colour follows — so "Approved" can't be
 // red. Consistent across every type (green = good, red = bad, everywhere).
 export const STATUS_TONES = [
-  { key: 'neutral', label: 'Neutral', color: '#8E8E93' },
+  { key: 'neutral', label: 'Neutral', color: '#7C89A6' },
   { key: 'info', label: 'Info', color: '#0A84FF' },
   { key: 'progress', label: 'In progress', color: '#5E5CE6' },
   { key: 'positive', label: 'Positive', color: '#30D158' },
@@ -184,6 +189,8 @@ export const STATUS_TONES = [
   { key: 'negative', label: 'Negative', color: '#FF453A' },
 ]
 export const toneColor = (tone) => (STATUS_TONES.find(t => t.key === tone) || STATUS_TONES[0]).color
+// A status's display colour: a custom per-status colour if set, else its tone's.
+export const statusColor = (s) => (s && s.color) ? s.color : toneColor(s && s.tone)
 
 // A market-standard default workflow, seeded when a type opts into statuses.
 export const DEFAULT_STATUSES = [
@@ -433,7 +440,7 @@ export const groups = reactive({ list: [] })
 // focusItemId/focusVersion: transient "jump to this item on the timeline" signal.
 // explorerItemId/explorerItemVersion: the Explorer's currently open item — kept in
 // the URL (?item=&v=) so browser back/forward restores it.
-export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, explorerItemId: null, explorerItemVersion: null, highlightIds: null })
+export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, explorerItemId: null, explorerItemVersion: null, highlightIds: null, settingsSection: initialSettingsSection() })
 
 // A reference-field value can pin a specific version of its target, encoded as
 // "<id>@v<n>". parseRef splits that back into { id, version } (version = null when
@@ -722,9 +729,13 @@ function applyNav() {
   try { q = new URL(window.location.href).searchParams } catch { return }
   const id = q.get('item')
   const view = q.get('view')
-  const resolved = (view === 'explorer' || view === 'scm' || view === 'cr') ? view : (id ? 'explorer' : 'timeline')
+  const resolved = NAV_VIEWS.includes(view) ? view : (id ? 'explorer' : 'timeline')
   store.view = resolved
   try { localStorage.setItem(VIEW_KEY, resolved) } catch { /* ignore */ }
+  if (resolved === 'settings' || resolved === 'project-settings') {
+    const sec = q.get('section')
+    if (sec) rememberSection(sec)
+  }
   const v = parseInt(q.get('v') || '', 10)
   ui.explorerItemId = id || null
   ui.explorerItemVersion = id && Number.isFinite(v) && v > 0 ? v : null
@@ -734,19 +745,55 @@ function applyNav() {
 // browser history, so back/forward steps through views and items. Called from user
 // gestures (view switch, item click). programmatic/popstate updates use applyNav
 // and never push.
-export function pushNav({ view, item, version } = {}, replace = false) {
+export function pushNav({ view, item, version, section } = {}, replace = false) {
   if (typeof window === 'undefined') return
   const v = view || store.view
   let url
   try {
     url = new URL(window.location.href)
-    url.searchParams.delete('view'); url.searchParams.delete('item'); url.searchParams.delete('v')
+    url.searchParams.delete('view'); url.searchParams.delete('item'); url.searchParams.delete('v'); url.searchParams.delete('section')
     if (v && v !== 'timeline') url.searchParams.set('view', v)
+    if (v === 'settings' || v === 'project-settings') { const s = section || ui.settingsSection; if (s) url.searchParams.set('section', s) }
     if (item) { url.searchParams.set('item', item); if (version) url.searchParams.set('v', String(version)) }
   } catch { return }
   const href = url.pathname + url.search
   const state = { atlasNav: true, view: v, item: item || null, version: version || null }
   try { replace ? history.replaceState(state, '', href) : history.pushState(state, '', href) } catch { /* ignore */ }
+}
+
+// Settings has two entries — Project (workspace config) and General (account /
+// appearance / instance). Each remembers its own last section, so reopening an
+// entry returns where you were; the current section also rides in the URL.
+const SETTINGS_PROJ_KEY = 'atlas-settings-proj-section'
+const SETTINGS_GEN_KEY = 'atlas-settings-gen-section'
+export const PROJECT_SECTIONS = ['areas', 'groups', 'types', 'workflows', 'baselines', 'data', 'sharing', 'members']
+function rememberSection(key) {
+  ui.settingsSection = key
+  try {
+    localStorage.setItem(SETTINGS_SECTION_KEY, key)
+    localStorage.setItem(PROJECT_SECTIONS.includes(key) ? SETTINGS_PROJ_KEY : SETTINGS_GEN_KEY, key)
+  } catch { /* ignore */ }
+}
+function gotoSettings(view, section) {
+  if (section) rememberSection(section)
+  store.view = view
+  try { localStorage.setItem(VIEW_KEY, view) } catch { /* ignore */ }
+  pushNav({ view, section: ui.settingsSection })
+}
+// Project settings — its own view (Areas/Groups/Types/…); reopens its last section.
+export function openProjectSettings(section) {
+  gotoSettings('project-settings', section || localStorage.getItem(SETTINGS_PROJ_KEY) || 'areas')
+}
+// General settings — its own view (Account/Appearance/Instance); reopens its last section.
+export function openGeneralSettings() {
+  gotoSettings('settings', localStorage.getItem(SETTINGS_GEN_KEY) || 'account')
+}
+// Open straight onto an explicit project section (e.g. "Invite people…" → Members).
+export function openSettings(section) { openProjectSettings(section) }
+// setSettingsSection changes the active section from the sidebar (within a view).
+export function setSettingsSection(key) {
+  rememberSection(key)
+  if (store.view === 'settings' || store.view === 'project-settings') pushNav({ view: store.view, section: key })
 }
 
 // Browser back/forward: within the same plan, reconcile the view/item client-side
@@ -888,10 +935,11 @@ export function useAppStore() {
   function nextYear() { store.year++; persistYear() }
   function setGranularity(g) { store.granularity = g === 'month' ? 'month' : 'year'; persistYear() }
   function setView(v) {
-    const nv = v === 'explorer' || v === 'scm' || v === 'cr' ? v : 'timeline'
+    const nv = NAV_VIEWS.includes(v) ? v : 'timeline'
     store.view = nv
     try { localStorage.setItem(VIEW_KEY, nv) } catch { /* ignore */ }
-    // A view switch is a back-able step. Keep the open item only while in Explorer.
+    // A view switch is a back-able step. Keep the open item only while in Explorer;
+    // Settings carries its remembered section (pushNav reads ui.settingsSection).
     const item = nv === 'explorer' ? (ui.explorerItemId || null) : null
     pushNav({ view: nv, item, version: nv === 'explorer' ? ui.explorerItemVersion : null })
   }

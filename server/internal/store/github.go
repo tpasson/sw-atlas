@@ -703,12 +703,22 @@ func ghPulls(ctx context.Context, cfg ghConfig) ([]Item, error) {
 
 func ghItem(id, sub, title, when string, y, m int, marker, scm, what, who string, progress, maturity *int, color *string) Item {
 	sl, w, sc := sub, when, scm
+	_ = who // author is no longer stored (the "who" field was retired)
 	return Item{
 		ID: id, SwimlaneID: "repo", SubLaneID: &sl,
 		Year: y, Month: m, When: &w, Title: title,
 		Kind: "milestone", Marker: marker, ScmURL: &sc,
-		What: what, Who: who, Progress: progress, Maturity: maturity, Color: color,
+		Data: ghData(what), Progress: progress, Maturity: maturity, Color: color,
 	}
+}
+
+// ghData packs a mirrored item's body into the "what" description field.
+func ghData(what string) json.RawMessage {
+	if strings.TrimSpace(what) == "" {
+		return nil
+	}
+	b, _ := json.Marshal(map[string]string{"what": what})
+	return json.RawMessage(b)
 }
 
 func ghDate(ts string) (string, int, int, bool) {

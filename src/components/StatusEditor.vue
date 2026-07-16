@@ -2,15 +2,18 @@
   <div class="se">
     <template v-if="statuses.length">
     <div class="se-title">
-      Statuses <span class="se-hint">workflow — pick a meaning (tone), not a colour · the top one is the start</span>
-      <button type="button" class="se-off" @click="disable">Turn off</button>
+      Statuses <span class="se-hint">workflow — tone sets the meaning, the colour swatch overrides it · the top one is the start</span>
     </div>
 
     <div v-for="(s, i) in statuses" :key="s._uid" class="se-row">
       <button type="button" class="se-start" :class="{ on: i === 0 }" title="Start status for new items" @click="makeStart(i)">start</button>
-      <select class="ti se-tone" v-model="s.tone" :style="{ boxShadow: 'inset 4px 0 0 ' + toneColor(s.tone) }" title="Tone — the meaning sets the colour">
+      <select class="ti se-tone" v-model="s.tone" :style="{ boxShadow: 'inset 4px 0 0 ' + toneColor(s.tone) }" title="Tone — the meaning (drives logic like ‘ready’)">
         <option v-for="t in STATUS_TONES" :key="t.key" :value="t.key">{{ t.label }}</option>
       </select>
+      <span class="se-colorwrap">
+        <input type="color" class="se-color" :value="statusColor(s)" @input="s.color = $event.target.value" title="Colour — overrides the tone colour" />
+        <button v-if="s.color" type="button" class="se-color-x" title="Reset to the tone colour" @click="s.color = ''">↺</button>
+      </span>
       <input class="ti se-label" v-model="s.label" placeholder="Status name (e.g. Approved)" @input="onLabel(s)" />
       <div class="se-to">
         <span class="se-arrow" title="Can transition to">→</span>
@@ -22,7 +25,7 @@
         >{{ o.label || o.key }}</button>
         <span v-if="!others(i).length" class="se-empty">add more statuses to set transitions</span>
       </div>
-      <button class="se-x" @click="remove(i)" title="Remove status">×</button>
+      <button v-if="statuses.length > 1" class="se-x" @click="remove(i)" title="Remove status">×</button>
     </div>
 
     <button class="link se-add" @click="add">+ Status</button>
@@ -35,7 +38,7 @@
 </template>
 
 <script setup>
-import { STATUS_TONES, toneColor, DEFAULT_STATUSES } from '../stores/useAppStore.js'
+import { STATUS_TONES, toneColor, statusColor, DEFAULT_STATUSES } from '../stores/useAppStore.js'
 
 const props = defineProps({ statuses: { type: Array, required: true } })
 
@@ -65,16 +68,13 @@ function makeStart(i) {
   props.statuses.unshift(s)
 }
 function add() {
-  props.statuses.push({ _uid: uid(), key: uniqueKey('status'), label: '', tone: 'neutral', to: [], _keyTouched: false })
+  props.statuses.push({ _uid: uid(), key: uniqueKey('status'), label: '', tone: 'neutral', color: '', to: [], _keyTouched: false })
 }
 function enable() {
-  for (const s of DEFAULT_STATUSES) props.statuses.push({ key: s.key, label: s.label, tone: s.tone, to: [...s.to], _uid: uid(), _keyTouched: true })
-}
-function disable() {
-  if (!confirm('Turn off statuses for this type? Its status settings will be removed.')) return
-  props.statuses.splice(0, props.statuses.length)
+  for (const s of DEFAULT_STATUSES) props.statuses.push({ key: s.key, label: s.label, tone: s.tone, color: s.color || '', to: [...s.to], _uid: uid(), _keyTouched: true })
 }
 function remove(i) {
+  if (props.statuses.length <= 1) return // a workflow must keep at least one status
   const removed = props.statuses[i]
   props.statuses.splice(i, 1)
   for (const s of props.statuses) if (Array.isArray(s.to)) s.to = s.to.filter(k => k !== removed.key)
@@ -89,6 +89,10 @@ function remove(i) {
 .ti { border: 1px solid var(--clr-border); border-radius: var(--r-sm); padding: 6px 9px; font-size: 13px; color: var(--clr-text); background: var(--clr-bg); }
 .ti:focus { outline: none; border-color: var(--clr-accent); }
 .se-tone { width: 124px; flex-shrink: 0; }
+.se-colorwrap { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.se-color { width: 30px; height: 30px; padding: 0; border: 1px solid var(--clr-border); border-radius: var(--r-sm); background: none; cursor: pointer; }
+.se-color-x { width: 22px; height: 26px; font-size: 13px; color: var(--clr-text-3); background: none; border-radius: var(--r-sm); }
+.se-color-x:hover { color: var(--clr-text); background: var(--clr-surface-2); }
 .se-label { flex: 1; min-width: 130px; }
 .se-start { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--clr-text-3);
   border: 1px solid var(--clr-border); border-radius: 100px; padding: 4px 9px; background: var(--clr-bg); flex-shrink: 0; }

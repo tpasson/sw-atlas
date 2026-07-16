@@ -99,10 +99,7 @@ function changeRows(cr) {
   push('Date', dateOf(cur), dateOf(p))
   push('Progress', pct(cur.progress), pct(p.progress))
   push('Maturity', maturity(cur.maturity), maturity(p.maturity))
-  push('Who', memberName(cur.assigneeId), memberName(p.assigneeId))
-  push('What', cur.what, p.what)
-  push('Why', cur.why, p.why)
-  push('Where', cur.how, p.how)
+  push('Assigned to', memberName(cur.assigneeId), memberName(p.assigneeId))
   const t = itemTypeByKey(p.typeKey || p.kind)
   for (const f of (t?.fields || [])) push(f.label || f.key, cur.data?.[f.key], p.data?.[f.key])
   return rows

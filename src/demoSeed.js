@@ -4,8 +4,10 @@ const YEAR = new Date().getFullYear()
 const d = (m, day) => `${YEAR}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 
 export function demoSeed() {
+  // Description prose lives in data now (what/why/how); "who" is retired.
+  const desc = (what, why, how) => { const d = {}; if (what) d.what = what; if (why) d.why = why; if (how) d.how = how; return d }
   const ms = (id, swimlaneId, subLaneId, month, title, what, why, how, who, when) => ({
-    id, swimlaneId, subLaneId, year: YEAR, month, title, what, why, how, who, when,
+    id, swimlaneId, subLaneId, year: YEAR, month, title, when, data: desc(what, why, how),
     kind: 'milestone', marker: 'l:Diamond', startDate: null, endDate: null,
     maturity: ((month - 1) % 4) + 1,
     progress: (((month - 1) % 4) + 1) * 25 - 10,
@@ -14,8 +16,7 @@ export function demoSeed() {
 
   // Event (bar) helper. marker defaults to null (no marker on the bar).
   const ev = (id, swimlaneId, subLaneId, title, startDate, endDate, who = '', marker = null) => ({
-    id, swimlaneId, subLaneId, year: YEAR, month: Number(startDate.slice(5, 7)), title,
-    what: '', why: '', how: '', who,
+    id, swimlaneId, subLaneId, year: YEAR, month: Number(startDate.slice(5, 7)), title, data: {},
     kind: 'event', marker, startDate, endDate, when: startDate,
     color: null, scmUrl: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
   })
@@ -68,7 +69,7 @@ export function demoSeed() {
     ms('m-release', 'rm', 'rm-de', 12, 'Annual Release', 'Production release', 'Deliver the annual features', 'Deployment + hypercare', 'Release Manager', d(12, 31)),
     {
       id: 'm-summit-week', swimlaneId: 'ev', subLaneId: 'ev-summit', year: YEAR, month: 9,
-      title: 'Summit Week', what: 'On-site exhibition week', why: 'Customer meetings', how: 'Conference venue', who: 'Whole team',
+      title: 'Summit Week', data: desc('On-site exhibition week', 'Customer meetings', 'Conference venue'),
       kind: 'event', marker: 'bar', startDate: d(9, 8), endDate: d(9, 14), when: d(9, 8),
       color: null, scmUrl: null, sourceSystem: null, externalId: null, externalUrl: null, lastSyncedAt: null,
     },

@@ -3,8 +3,7 @@
     <div class="app-shell">
     <ActivityRail
       @manage="openManage"
-      @settings="generalOpen = true"
-      @admin="adminOpen = true"
+      @settings="openGeneralSettings()"
       @about="aboutOpen = true"
       @login="loginOpen = true"
       @logout="onLogout"
@@ -69,6 +68,8 @@
         v-else-if="store.view === 'cr'"
         @propose-new="openProposeNew"
       />
+      <SettingsView v-else-if="store.view === 'project-settings'" key="ps" scope="project" />
+      <SettingsView v-else-if="store.view === 'settings'" key="gs" scope="general" />
       <MilestoneTable
         v-else
         :zoom="zoom"
@@ -103,17 +104,6 @@
       />
     </Transition>
 
-    <Transition name="modal">
-      <ManageModal v-if="manageOpen" :initial-tab="manageTab" @close="manageOpen = false" />
-    </Transition>
-
-    <Transition name="modal">
-      <GeneralSettingsModal v-if="generalOpen" @close="generalOpen = false" />
-    </Transition>
-
-    <Transition name="modal">
-      <AdminModal v-if="adminOpen" @close="adminOpen = false" />
-    </Transition>
 
     <Transition name="modal">
       <LoginModal v-if="loginOpen" @close="loginOpen = false" />
@@ -129,7 +119,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted } from 'vue'
-import { useAppStore, store, session, workspace, baselines, initApp, canEditWorkspace } from './stores/useAppStore.js'
+import { useAppStore, store, session, workspace, baselines, initApp, canEditWorkspace, openSettings, openProjectSettings, openGeneralSettings } from './stores/useAppStore.js'
 import TheHeader from './components/TheHeader.vue'
 import ActivityRail from './components/ActivityRail.vue'
 import MilestoneTable from './components/MilestoneTable.vue'
@@ -137,9 +127,7 @@ import ExplorerView from './components/ExplorerView.vue'
 import SourceControlView from './components/SourceControlView.vue'
 import ChangeRequestsView from './components/ChangeRequestsView.vue'
 import MilestoneModal from './components/MilestoneModal.vue'
-import ManageModal from './components/ManageModal.vue'
-import GeneralSettingsModal from './components/GeneralSettingsModal.vue'
-import AdminModal from './components/AdminModal.vue'
+import SettingsView from './components/SettingsView.vue'
 import LoginModal from './components/LoginModal.vue'
 import GroupLegend from './components/GroupLegend.vue'
 import FacetFilter from './components/FacetFilter.vue'
@@ -149,15 +137,11 @@ import UserProfilePopover from './components/UserProfilePopover.vue'
 
 const { prevYear, nextYear, logout } = useAppStore()
 
-const manageOpen = ref(false)
-const manageTab = ref('areas')
-const generalOpen = ref(false)
-const adminOpen = ref(false)
-// Settings can be opened straight onto a specific tab (e.g. "Members" from the
-// project switcher's "Invite people…").
+// The rail's "Project settings" gear (no arg) reopens the last project section;
+// callers passing a specific tab (e.g. "Invite people…" → members) jump there.
 function openManage(tab) {
-  manageTab.value = typeof tab === 'string' ? tab : 'areas'
-  manageOpen.value = true
+  if (typeof tab === 'string') openSettings(tab)
+  else openProjectSettings()
 }
 const loginOpen = ref(false)
 const aboutOpen = ref(false)
@@ -175,7 +159,6 @@ async function retry() {
 }
 
 async function onLogout() {
-  manageOpen.value = false
   await logout()
 }
 

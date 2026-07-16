@@ -97,7 +97,7 @@ async function ghFetch(cfg, path) {
 function ghItem(extId, sub, title, dt, marker, scmUrl, what, who, progress, maturity, color) {
   return {
     _extId: extId, _sub: sub, title, year: dt.year, month: dt.month, when: dt.when,
-    kind: 'milestone', marker, scmUrl, what: what || '', why: '', how: '', who: who || '',
+    kind: 'milestone', marker, scmUrl, data: what ? { what } : {}, // body → data.what; author (who) retired
     startDate: null, endDate: null, progress: progress ?? null, maturity: maturity ?? null, color: color ?? null,
   }
 }
@@ -106,12 +106,41 @@ const DEFAULT_GIT_COLORS = { releaseStable: '', releasePre: '#FF9F0A', tag: '', 
 const gc = () => ({ ...DEFAULT_GIT_COLORS, ...(db.gitColors || {}) })
 const gcv = (v) => v || null
 
+// Standard prose fields every type ships with (mirrors DescriptionFields()).
+const DESC_FIELDS = [
+  { key: 'what', label: 'What', type: 'textarea' },
+  { key: 'why', label: 'Why', type: 'textarea' },
+  { key: 'how', label: 'Where', type: 'textarea' },
+]
 // Item-type registry (demo): built-ins + any locally-saved custom types.
 const BUILTIN_ITEM_TYPES = [
-  { key: 'milestone', label: 'Milestone', family: 'timeline-point', icon: 'l:Diamond', color: '', fields: [], builtin: true },
-  { key: 'event', label: 'Event', family: 'timeline-range', icon: 'l:Flag', color: '', fields: [], builtin: true },
+  { key: 'milestone', label: 'Milestone', family: 'timeline-point', icon: 'l:Diamond', color: '', fields: [...DESC_FIELDS], workflowKey: 'standard', builtin: true },
+  { key: 'event', label: 'Event', family: 'timeline-range', icon: 'l:Flag', color: '', fields: [...DESC_FIELDS], workflowKey: 'standard', builtin: true },
 ]
 const BUILTIN_TYPE_KEYS = new Set(['milestone', 'event'])
+
+// Shipped default workflows (mirrors the server's DefaultWorkflows). "standard"
+// carries a hand-arranged status-flow layout so the diagram looks right at once.
+const DEFAULT_WORKFLOWS = [{
+  key: 'standard', label: 'Standard', builtin: true,
+  statuses: [
+    { key: 'todo', label: 'To Do', tone: 'neutral', to: ['in-progress', 'cancelled'] },
+    { key: 'in-progress', label: 'In Progress', tone: 'progress', to: ['blocked', 'done', 'cancelled'] },
+    { key: 'blocked', label: 'Blocked', tone: 'warning', to: ['in-progress', 'cancelled'] },
+    { key: 'done', label: 'Done', tone: 'positive', to: ['in-progress'] },
+    { key: 'cancelled', label: 'Cancelled', tone: 'negative', to: ['todo'] },
+  ],
+  layout: { nodes: { todo: { x: 49, y: 28 }, 'in-progress': { x: 270, y: 27 }, blocked: { x: 270, y: 127 }, done: { x: 270, y: -76 }, cancelled: { x: 653, y: 31 } }, edges: { 'todo|cancelled': { x: 352, y: -147, a: 'T', b: 'T' }, 'in-progress|done': { a: 'T', b: 'B' }, 'in-progress|cancelled': { b: 'L' }, 'blocked|cancelled': { x: 526, y: 128, a: 'R', b: 'B' } } },
+}]
+// Built-in defaults, overridden by a stored workflow of the same key, then custom.
+function allWorkflows() {
+  const stored = db.workflows || []
+  const byKey = Object.fromEntries(stored.map(w => [w.key, w]))
+  const isDefault = new Set(DEFAULT_WORKFLOWS.map(d => d.key))
+  const out = DEFAULT_WORKFLOWS.map(d => (byKey[d.key] ? { ...byKey[d.key], builtin: true } : d))
+  for (const w of stored) if (!isDefault.has(w.key)) out.push({ ...w, builtin: false })
+  return out
+}
 const itemTypeCatalog = () => {
   const stored = db.itemTypes || []
   const overrides = {}
@@ -119,21 +148,24 @@ const itemTypeCatalog = () => {
   for (const t of stored) {
     if (!t.key) continue
     if (BUILTIN_TYPE_KEYS.has(t.key)) overrides[t.key] = t
-    else custom.push({ ...t, builtin: false, fields: t.fields || [] })
+    else custom.push({ ...t, builtin: false, fields: t.fields || [], workflowKey: t.workflowKey || 'standard' })
   }
   const builtins = BUILTIN_ITEM_TYPES.map(d => {
     const ov = overrides[d.key]
     if (!ov) return d
-    return { ...d, label: ov.label || d.label, icon: ov.icon || d.icon, color: ov.color || '', fill: ov.fill, fields: ov.fields || d.fields, workflowKey: ov.workflowKey, statuses: ov.statuses, layout: ov.layout, builtin: true }
+    return { ...d, label: ov.label || d.label, icon: ov.icon || d.icon, color: ov.color || '', fill: ov.fill, fields: ov.fields || d.fields, workflowKey: ov.workflowKey || 'standard', statuses: ov.statuses, layout: ov.layout, builtin: true }
   })
   const out = [...builtins, ...custom]
+  // Every type gains the standard description fields if missing (mirrors the
+  // 00034 migration): prepended, deduped by key.
+  for (const t of out) {
+    const have = new Set((t.fields || []).map(f => f.key))
+    t.fields = [...DESC_FIELDS.filter(d => !have.has(d.key)), ...(t.fields || [])]
+  }
   // Resolve shared-workflow references (mirrors the server).
-  const wfs = db.workflows || []
-  if (wfs.length) {
-    const byKey = Object.fromEntries(wfs.map(w => [w.key, w]))
-    for (const t of out) {
-      if (t.workflowKey && byKey[t.workflowKey]) { t.statuses = byKey[t.workflowKey].statuses; t.layout = byKey[t.workflowKey].layout }
-    }
+  const byKey = Object.fromEntries(allWorkflows().map(w => [w.key, w]))
+  for (const t of out) {
+    if (t.workflowKey && byKey[t.workflowKey]) { t.statuses = byKey[t.workflowKey].statuses; t.layout = byKey[t.workflowKey].layout }
   }
   return out
 }
@@ -329,7 +361,7 @@ export const demoApi = {
     save()
     return ok(itemTypeCatalog())
   },
-  workflows: () => ok(db.workflows || []),
+  workflows: () => ok(allWorkflows()),
   setWorkflows: (wfs) => {
     db.workflows = (wfs || []).filter(w => w.key).map(w => ({ ...w, statuses: w.statuses || [] }))
     save()
