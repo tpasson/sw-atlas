@@ -20,7 +20,7 @@
         <ClipboardCheck :size="20" />
         <span v-if="pendingCRCount" class="rail-badge">{{ pendingCRCount > 9 ? '9+' : pendingCRCount }}</span>
       </button>
-      <button v-if="canEdit" class="rail-btn" title="Project settings" @click="$emit('manage')">
+      <button v-if="canEdit" class="rail-btn" :class="{ on: inProject }" title="Project settings" @click="$emit('manage')">
         <SlidersHorizontal :size="20" />
       </button>
     </div>
@@ -31,12 +31,8 @@
         <Moon v-else :size="19" />
       </button>
 
-      <button v-if="session.authenticated" class="rail-btn" title="Settings" @click="$emit('settings')">
+      <button v-if="session.authenticated" class="rail-btn" :class="{ on: inGeneral }" title="Settings" @click="$emit('settings')">
         <Settings :size="19" />
-      </button>
-
-      <button v-if="session.role === 'admin'" class="rail-btn" title="Admin" @click="$emit('admin')">
-        <ServerCog :size="19" />
       </button>
 
       <div v-if="session.authenticated" class="rail-user" ref="userRef">
@@ -56,7 +52,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Home, CalendarDays, LayoutGrid, GitPullRequest, ClipboardCheck, Sun, Moon, Settings, SlidersHorizontal, ServerCog, KeyRound } from 'lucide-vue-next'
+import { Home, CalendarDays, LayoutGrid, GitPullRequest, ClipboardCheck, Sun, Moon, Settings, SlidersHorizontal, KeyRound } from 'lucide-vue-next'
 import { store, session, settings, workspace, toggleTheme, useAppStore, canEditWorkspace, pendingCRCount, goHomeView } from '../stores/useAppStore.js'
 
 defineEmits(['manage', 'settings', 'admin', 'login', 'logout', 'about'])
@@ -67,6 +63,9 @@ const { setView } = useAppStore()
 function goHome() { goHomeView() }
 const canEdit = computed(() => canEditWorkspace())
 const inPlan = computed(() => workspace.mode === 'plan')
+// The two settings entries are now separate views.
+const inProject = computed(() => store.view === 'project-settings')
+const inGeneral = computed(() => store.view === 'settings')
 const initials = computed(() => (session.username || '?').trim().charAt(0).toUpperCase() || '?')
 
 const userOpen = ref(false)

@@ -45,6 +45,7 @@ type ItemStatus struct {
 	Key   string   `json:"key"`
 	Label string   `json:"label"`
 	Tone  string   `json:"tone"`
+	Color string   `json:"color,omitempty"` // optional hex override of the tone's colour
 	To    []string `json:"to,omitempty"`
 }
 
@@ -66,12 +67,23 @@ func validFamily(f string) bool {
 	return false
 }
 
+// DescriptionFields are the standard prose fields every type ships with by
+// default (the former What/Why/Where "W-questions"). They are ordinary type
+// fields now — editable and removable per type like any other field.
+func DescriptionFields() []ItemField {
+	return []ItemField{
+		{Key: "what", Label: "What", Type: "textarea"},
+		{Key: "why", Label: "Why", Type: "textarea"},
+		{Key: "how", Label: "Where", Type: "textarea"},
+	}
+}
+
 // DefaultItemTypes are the seeded built-ins. Their keys equal the legacy item
 // kinds (milestone/event/point) so existing items map 1:1 — see migration 00019.
 func DefaultItemTypes() []ItemType {
 	return []ItemType{
-		{Key: "milestone", Label: "Milestone", Family: FamilyTimelinePoint, Icon: "l:Diamond", Fields: []ItemField{}, Builtin: true},
-		{Key: "event", Label: "Event", Family: FamilyTimelineRange, Icon: "l:Flag", Fields: []ItemField{}, Builtin: true},
+		{Key: "milestone", Label: "Milestone", Family: FamilyTimelinePoint, Icon: "l:Diamond", Fields: DescriptionFields(), WorkflowKey: "standard", Builtin: true},
+		{Key: "event", Label: "Event", Family: FamilyTimelineRange, Icon: "l:Flag", Fields: DescriptionFields(), WorkflowKey: "standard", Builtin: true},
 	}
 }
 
@@ -142,6 +154,14 @@ func (s *Store) ListItemTypes(ctx context.Context, ws string) ([]ItemType, error
 		out = append(out, d)
 	}
 	out = append(out, custom...)
+	// Every type must reference a workflow — default any without one (including
+	// stored overrides that predate this rule) to the built-in "standard", so all
+	// items get statuses (empty-status items then resolve to the start status).
+	for i := range out {
+		if out[i].WorkflowKey == "" {
+			out[i].WorkflowKey = "standard"
+		}
+	}
 	// Resolve shared-workflow references: a type with a WorkflowKey inherits that
 	// workflow's statuses + layout (single source of truth for reused flows).
 	if wfs, werr := s.GetWorkflows(ctx, ws); werr == nil && len(wfs) > 0 {
@@ -191,11 +211,12 @@ func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) e
 			if fields == nil {
 				fields = []ItemField{}
 			}
-			bt := ItemType{Key: d.Key, Label: label, Family: d.Family, Icon: icon, Color: t.Color, Fill: t.Fill, Fields: fields, WorkflowKey: t.WorkflowKey, Statuses: t.Statuses, Layout: t.Layout, Builtin: true}
-			if bt.WorkflowKey != "" { // referencing a shared workflow → don't persist a stale inline copy
-				bt.Statuses = nil
-				bt.Layout = nil
+			wfKey := t.WorkflowKey
+			if wfKey == "" { // every type must reference a workflow — default to the built-in "standard"
+				wfKey = "standard"
 			}
+			// Referencing a shared workflow → don't persist a stale inline copy.
+			bt := ItemType{Key: d.Key, Label: label, Family: d.Family, Icon: icon, Color: t.Color, Fill: t.Fill, Fields: fields, WorkflowKey: wfKey, Builtin: true}
 			clean = append(clean, bt)
 			continue
 		}
@@ -206,10 +227,11 @@ func (s *Store) SetItemTypes(ctx context.Context, ws string, types []ItemType) e
 		if t.Fields == nil {
 			t.Fields = []ItemField{}
 		}
-		if t.WorkflowKey != "" { // referencing a shared workflow → don't persist a stale inline copy
-			t.Statuses = nil
-			t.Layout = nil
+		if t.WorkflowKey == "" { // every type must reference a workflow — default to the built-in "standard"
+			t.WorkflowKey = "standard"
 		}
+		t.Statuses = nil // types don't carry inline statuses — the workflow supplies them
+		t.Layout = nil
 		clean = append(clean, t)
 	}
 	b, _ := json.Marshal(clean)

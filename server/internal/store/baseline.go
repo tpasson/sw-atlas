@@ -43,7 +43,6 @@ func (s *Store) CreateBaseline(ctx context.Context, ws, id, name, note string) (
 		        jsonb_build_object(
 		          'id', id, 'swimlaneId', swimlane_id, 'subLaneId', sub_lane_id,
 		          'year', year, 'month', month, 'title', title,
-		          'what', what, 'why', why, 'how', how, 'who', who,
 		          'when', to_char(when_date, 'YYYY-MM-DD'),
 		          'kind', kind, 'typeKey', type_key, 'marker', marker,
 		          'startDate', to_char(start_date, 'YYYY-MM-DD'),

@@ -74,6 +74,29 @@ func (s *Store) ListWorkspacesForUser(ctx context.Context, userID string) ([]Use
 	return out, rows.Err()
 }
 
+// ListAllWorkspaces returns every workspace (for site admins). Role is the admin's
+// own membership role where they have one, otherwise empty (read-only access).
+func (s *Store) ListAllWorkspaces(ctx context.Context, adminUserID string) ([]UserWorkspace, error) {
+	out := []UserWorkspace{}
+	rows, err := s.pool.Query(ctx,
+		`SELECT w.slug, w.name, COALESCE(m.role, ''), w.visibility
+		   FROM workspace w
+		   LEFT JOIN workspace_member m ON m.workspace_id = w.id AND m.user_id = $1
+		  ORDER BY w.name`, adminUserID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uw UserWorkspace
+		if err := rows.Scan(&uw.Slug, &uw.Name, &uw.Role, &uw.Visibility); err != nil {
+			return out, err
+		}
+		out = append(out, uw)
+	}
+	return out, rows.Err()
+}
+
 var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
 func slugify(name string) string {

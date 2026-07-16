@@ -358,7 +358,8 @@ func (s *Store) ResolveScopePlan(ctx context.Context, ws, scopeID, detailLevel s
 			return p, err
 		}
 		if detailLevel != "full" {
-			it.What, it.Why, it.How, it.Who, it.When = "", "", "", "", nil
+			it.When = nil
+			it.Data = stripDescriptions(it.Data)
 		}
 		it.SourceSystem, it.ExternalID, it.ExternalURL, it.LastSyncedAt = nil, nil, nil, nil
 		included[it.ID] = true

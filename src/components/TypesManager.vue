@@ -1,6 +1,6 @@
 <template>
   <div class="card-stack">
-    <div class="card">
+    <div v-if="only !== 'workflows'" class="card">
       <span class="section-label">Item types</span>
       <p class="card-hint">
         Every timeline item is a type — its <strong>icon &amp; colour come from the type</strong>, and the legend
@@ -51,6 +51,7 @@
             <select class="ti tm-ftype" v-model="f.type" :disabled="f._persisted"
               :title="f._persisted ? 'Field type is locked once saved — to change it, remove this field and add a new one' : 'Field type'">
               <option value="text">Text</option>
+              <option value="textarea">Long text</option>
               <option value="number">Number</option>
               <option value="select">Select (one)</option>
               <option value="multiselect">Multi-select</option>
@@ -82,13 +83,10 @@
         <div class="tm-wfrow">
           <span class="tm-wflabel">Workflow</span>
           <select class="ti tm-wfsel" v-model="t._wf">
-            <option value="">None</option>
-            <option v-for="w in workflowOptions" :key="w.key" :value="w.key">Shared · {{ w.label || w.key }}</option>
-            <option value="__custom">Custom (own statuses)</option>
+            <option v-for="w in workflowOptions" :key="w.key" :value="w.key">{{ w.label || w.key }}</option>
           </select>
-          <span v-if="t._wf && t._wf !== '__custom'" class="tm-wfnote">→ edit “{{ wfLabel(t._wf) }}” under Shared workflows below</span>
+          <span class="tm-wfnote">→ edit “{{ wfLabel(t._wf) }}” in the Workflows section</span>
         </div>
-        <StatusEditor v-if="t._wf === '__custom'" :statuses="t.statuses" />
       </div>
 
       <button class="link" @click="addType">+ Add type</button>
@@ -96,23 +94,31 @@
       <p v-if="msg" class="data-msg" :class="{ ok: okMsg, err: !okMsg }">{{ msg }}</p>
     </div>
 
-    <div class="card">
+    <div v-if="only !== 'types'" class="card">
       <span class="section-label">Shared workflows</span>
       <p class="card-hint">
         Define a status flow <strong>once</strong> and point many types at it — editing the workflow updates
-        every type that uses it, and its status-flow diagram is arranged just once, for all of them.
+        every type that uses it. Use <strong>Arrange diagram</strong> to lay out its status-flow graph (shared by
+        all its types); the arrangement is stored when you save these settings. Opening the flow from an item is
+        view-only — you can switch status there, but not move the graph.
       </p>
-      <div v-for="(w, wi) in workflowDrafts" :key="w._uid" class="tm-type">
+      <div v-for="(w, wi) in workflowDrafts" :key="w._uid" class="tm-type" :class="{ 'tm-builtin': w.builtin }">
         <div class="tm-head">
           <input class="ti tm-grow" v-model="w.label" placeholder="Workflow name (e.g. Standard)" @input="onWfLabel(w)" />
           <label class="tm-key">key<input class="tm-keyin" v-model="w.key" :disabled="w._persisted"
             :title="w._persisted ? 'Workflow key is locked once saved — types reference it' : 'Auto-filled from the name'" /></label>
-          <button class="link danger" @click="removeWorkflow(wi)">Remove</button>
+          <button type="button" class="link" :disabled="!w.statuses.length" title="Arrange the status-flow diagram — the arrangement is shared by every type using this workflow" @click="arrangeWf = w">Arrange diagram</button>
+          <span v-if="w.builtin" class="tm-tag" title="Shipped default — always available">built-in</span>
+          <button v-else class="link danger" @click="removeWorkflow(wi)">Remove</button>
         </div>
         <StatusEditor :statuses="w.statuses" />
       </div>
       <button class="link" @click="addWorkflow">+ Add workflow</button>
     </div>
+
+    <StatusFlow v-if="arrangeWf" :key="arrangeWf._uid" :statuses="arrangeWf.statuses" current=""
+      :read-only="true" :arrangeable="true" :layout="arrangeWf.layout || null"
+      @save-layout="onWfArrangeSave" @reset-layout="onWfArrangeReset" @close="arrangeWf = null" />
   </div>
 </template>
 
@@ -121,29 +127,42 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { itemTypes, saveItemTypes, workflows, saveWorkflows, DEFAULT_STATUSES, MARKER_LIBRARY, store } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import StatusEditor from './StatusEditor.vue'
+import StatusFlow from './StatusFlow.vue'
+
+// Show only the Types card, only the Workflows card, or both ('' = both). Lets the
+// settings view expose Types and Workflows as separate menu items over one editor.
+defineProps({ only: { type: String, default: '' } })
 
 let uid = 0
 const nextUid = () => `t${uid++}`
+// Every type must reference a workflow (no "None"). The default is the built-in
+// "standard" (always present), falling back to whatever workflow exists.
+const defaultWf = workflows.list.find(w => w.key === 'standard')?.key || workflows.list[0]?.key || 'standard'
 // One unified list. Built-ins are editable (label/icon/colour/fill/fields) but
 // keep their key + behaviour; only custom types are removable / re-keyed.
-// _wf drives the workflow choice: '' = none, '__custom' = own inline statuses,
-// otherwise a shared workflow key.
+// _wf is the workflow choice (a shared workflow key); types carry no inline
+// statuses of their own — a special flow is just a shared workflow.
 const types = ref(itemTypes.list.map(t => ({
   _uid: nextUid(), builtin: !!t.builtin, _persisted: true, _keyTouched: true,
   key: t.key, label: t.label, family: t.family, icon: t.icon, color: t.color || '', fill: t.fill !== false,
-  _wf: t.workflowKey ? t.workflowKey : ((t.statuses || []).length ? '__custom' : ''),
+  _wf: t.workflowKey || defaultWf,
   fields: (t.fields || []).map(f => ({ key: f.key, label: f.label, type: f.type, _persisted: true, _hadRefType: !!f.refType, options: [...(f.options || [])], required: !!f.required, refType: f.refType || '', refMulti: !!f.refMulti, _keyTouched: true })),
-  statuses: (t.statuses || []).map(s => ({ key: s.key, label: s.label, tone: s.tone || 'neutral', to: [...(s.to || [])], _keyTouched: true })),
 })))
 
 // Editable drafts of the shared workflows (mirrors workflows.list). Its saved
 // layout rides along untouched through the round-trip.
 const workflowDrafts = ref(workflows.list.map(w => ({
-  _uid: nextUid(), _persisted: true, _keyTouched: true, key: w.key, label: w.label, layout: w.layout,
-  statuses: (w.statuses || []).map(s => ({ key: s.key, label: s.label, tone: s.tone || 'neutral', to: [...(s.to || [])], _keyTouched: true })),
+  _uid: nextUid(), _persisted: true, _keyTouched: true, builtin: !!w.builtin, key: w.key, label: w.label, layout: w.layout,
+  statuses: (w.statuses || []).map(s => ({ key: s.key, label: s.label, tone: s.tone || 'neutral', color: s.color || '', to: [...(s.to || [])], _keyTouched: true })),
 })))
 const workflowOptions = computed(() => workflowDrafts.value.filter(w => w.key))
 function wfLabel(key) { return workflowDrafts.value.find(w => w.key === key)?.label || key }
+
+// Arrange a workflow's status-flow diagram (the one place layout is editable).
+// Writes to the draft; persisted when the settings are saved.
+const arrangeWf = ref(null)
+function onWfArrangeSave(layout) { if (arrangeWf.value) arrangeWf.value.layout = layout }
+function onWfArrangeReset() { if (arrangeWf.value) arrangeWf.value.layout = undefined }
 
 // Types a reference field can point at (any defined type).
 const refTypeOptions = computed(() => types.value.filter(x => x.key).map(x => ({ key: x.key, label: x.label || x.key })))
@@ -176,7 +195,13 @@ function onFieldLabel(t, f) {
   f.key = uniqueKey(slugify(f.label), taken)
 }
 function addType() {
-  types.value.push({ _uid: nextUid(), builtin: false, _persisted: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, fields: [], statuses: [] })
+  // New types ship with the standard What/Why/Where description fields (removable).
+  const desc = [
+    { key: 'what', label: 'What', type: 'textarea', _persisted: false, _hadRefType: false, options: [], required: false, refType: '', refMulti: false, _keyTouched: true },
+    { key: 'why', label: 'Why', type: 'textarea', _persisted: false, _hadRefType: false, options: [], required: false, refType: '', refMulti: false, _keyTouched: true },
+    { key: 'how', label: 'Where', type: 'textarea', _persisted: false, _hadRefType: false, options: [], required: false, refType: '', refMulti: false, _keyTouched: true },
+  ]
+  types.value.push({ _uid: nextUid(), builtin: false, _persisted: false, _keyTouched: false, key: '', label: '', family: 'timeline-point', icon: 'l:Diamond', color: '', fill: true, _wf: defaultWf, fields: desc, statuses: [] })
 }
 function addField(t) {
   // A brand-new field: its type/target stay editable until the first save locks them.
@@ -192,14 +217,14 @@ function onWfLabel(w) {
 function addWorkflow() {
   workflowDrafts.value.push({
     _uid: nextUid(), _persisted: false, _keyTouched: false, key: '', label: '', layout: undefined,
-    statuses: DEFAULT_STATUSES.map(s => ({ key: s.key, label: s.label, tone: s.tone, to: [...s.to], _keyTouched: true })),
+    statuses: DEFAULT_STATUSES.map(s => ({ key: s.key, label: s.label, tone: s.tone, color: s.color || '', to: [...s.to], _keyTouched: true })),
   })
 }
 function removeWorkflow(wi) {
   const w = workflowDrafts.value[wi]
   const users = types.value.filter(t => t._wf === w.key)
-  if (users.length && !confirm(`Remove the “${w.label || w.key}” workflow?\n\n${users.length} type${users.length > 1 ? 's' : ''} use it and will fall back to no statuses until you pick another.`)) return
-  for (const t of types.value) if (t._wf === w.key) t._wf = ''
+  if (users.length && !confirm(`Remove the “${w.label || w.key}” workflow?\n\n${users.length} type${users.length > 1 ? 's' : ''} use it and will fall back to “${wfLabel(defaultWf)}” until you pick another.`)) return
+  for (const t of types.value) if (t._wf === w.key) t._wf = defaultWf
   workflowDrafts.value.splice(wi, 1)
 }
 
@@ -273,7 +298,9 @@ function cleanStatuses(statuses) {
     if (!s.label && !s.key) continue
     const k = uniqueKey(s.key || slugify(s.label), keys)
     keys.add(k)
-    out.push({ key: k, label: s.label || k, tone: s.tone || 'neutral', to: [...(s.to || [])] })
+    const o = { key: k, label: s.label || k, tone: s.tone || 'neutral', to: [...(s.to || [])] }
+    if (s.color) o.color = s.color
+    out.push(o)
   }
   const valid = new Set(out.map(s => s.key))
   for (const s of out) s.to = s.to.filter(k => valid.has(k) && k !== s.key)
@@ -299,17 +326,16 @@ async function save() {
   const typeKeys = new Set(types.value.filter(t => t.builtin).map(t => t.key))
   const payload = []
   for (const t of types.value) {
-    // Map the workflow choice: shared key, own inline statuses, or none.
-    const wfKey = (t._wf && t._wf !== '__custom' && validWf.has(t._wf)) ? t._wf : ''
-    const statuses = t._wf === '__custom' ? cleanStatuses(t.statuses) : []
+    // Types reference a shared workflow (or none) — never their own statuses.
+    const wfKey = (t._wf && validWf.has(t._wf)) ? t._wf : defaultWf // every type must have a workflow — never empty
     if (t.builtin) {
-      payload.push({ key: t.key, label: t.label || t.key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), workflowKey: wfKey, statuses })
+      payload.push({ key: t.key, label: t.label || t.key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), workflowKey: wfKey, statuses: [] })
       continue
     }
     if (!t.label && !t.key && !t.fields.length) continue
     const key = uniqueKey(t.key || slugify(t.label), typeKeys)
     typeKeys.add(key)
-    payload.push({ key, label: t.label || key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), workflowKey: wfKey, statuses })
+    payload.push({ key, label: t.label || key, family: t.family, icon: t.icon || 'l:Diamond', color: t.color || '', fill: t.fill, fields: cleanFields(t.fields), workflowKey: wfKey, statuses: [] })
   }
   try {
     // Workflows first so the keys types reference already exist server-side.

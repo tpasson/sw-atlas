@@ -126,13 +126,13 @@
                   class="mk-item"
                   :data-item-id="it.m.id"
                   :class="chipState(it.m)"
-                  :style="{ left: (it.x - 9 - settings.items.padding) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: g.row.swimlane.color }"
+                  :style="{ left: (it.x - 9 - settings.items.padding - dotExtra(it.m)) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: g.row.swimlane.color }"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @click.stop="onChipClick($event, it.m, g.row.swimlane.color)"
                   @dblclick.stop="onEdit(it.m)"
                 >
-                  <MarkerIcon :shape="markerOf(it.m)" :color="g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
+                  <span v-if="statusDotColor(it.m)" class="mk-dot" :style="{ background: statusDotColor(it.m), width: dotSize + 'px', height: dotSize + 'px' }"></span><MarkerIcon :shape="markerOf(it.m)" :color="g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
                   <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
 
@@ -160,6 +160,7 @@
                 >
                   <span v-if="it.continuesLeft" class="bar-arrow">◀</span>
                   <span class="bar-title" :class="{ 'bar-title-out': it.labelOutside }">
+                    <span v-if="statusDotColor(it.m)" class="mk-dot" :style="{ background: statusDotColor(it.m), width: dotSize + 'px', height: dotSize + 'px' }"></span>
                     <MarkerIcon
                       :shape="markerOf(it.m)"
                       :fill="markerFillFor(it.m)"
@@ -222,17 +223,17 @@
             <span class="tf-label">Who</span>
             <button type="button" class="tf-val tf-who" title="View profile" @click.stop="openProfile(memberById(tooltip.ms.assigneeId), $event)">{{ memberName(tooltip.ms.assigneeId) }}</button>
           </div>
-          <div v-if="tooltip.ms.what" class="tooltip-field">
+          <div v-if="tooltip.ms.data?.what" class="tooltip-field">
             <span class="tf-label">What</span>
-            <span class="tf-val tf-clamp">{{ tooltip.ms.sourceSystem ? stripMarkdown(tooltip.ms.what) : tooltip.ms.what }}</span>
+            <span class="tf-val tf-clamp">{{ tooltip.ms.sourceSystem ? stripMarkdown(tooltip.ms.data.what) : tooltip.ms.data.what }}</span>
           </div>
-          <div v-if="tooltip.ms.why" class="tooltip-field">
+          <div v-if="tooltip.ms.data?.why" class="tooltip-field">
             <span class="tf-label">Why</span>
-            <span class="tf-val">{{ tooltip.ms.why }}</span>
+            <span class="tf-val">{{ tooltip.ms.data.why }}</span>
           </div>
-          <div v-if="tooltip.ms.how" class="tooltip-field">
+          <div v-if="tooltip.ms.data?.how" class="tooltip-field">
             <span class="tf-label">Where</span>
-            <span class="tf-val">{{ tooltip.ms.how }}</span>
+            <span class="tf-val">{{ tooltip.ms.data.how }}</span>
           </div>
           <div v-if="tooltip.ms.when" class="tooltip-field">
             <span class="tf-label">When</span>
@@ -356,7 +357,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey, itemStatus, statusColor } from '../stores/useAppStore.js'
 import { AlertTriangle, Clock, Lock, User, Pencil, History } from 'lucide-vue-next'
 import MarkerIcon from './MarkerIcon.vue'
 import MaturityGlyph from './MaturityGlyph.vue'
@@ -369,6 +370,13 @@ function maturityTitle(level) {
 // icons, so every item icon stays visually consistent. Cell ≈ markerSize / 2.3 →
 // the 2×2 grid matches the marker's height.
 const matSize = computed(() => Math.max(3, Math.round(settings.items.markerSize * 0.42)))
+// Status dot before the marker (same colour logic as the Explorer / detail dot).
+const dotSize = computed(() => Math.max(4, Math.round(settings.items.markerSize * 0.5)))
+function statusDotColor(m) { const st = itemStatus(m); return st ? statusColor(st) : null }
+// Horizontal footprint the status dot adds before the marker: the dot itself + its
+// margin + the flex gap to the icon + a comfortable buffer (so bars widen enough
+// before the label wraps out).
+function dotExtra(m) { return statusDotColor(m) ? dotSize.value + settings.items.iconGap + 10 : 0 }
 
 // Fixed geometry — months are a fixed width so date math is exact regardless of
 // label length (labels overflow freely to the right).
@@ -611,7 +619,7 @@ function rowItems(row) {
       const labelW = estTextW(m.title)
       const hasMarker = true // the type's icon always renders at the bar start now
       // Account for the icon AND the bar padding it needs around it.
-      const iconW = hasMarker ? (settings.items.markerSize + settings.items.iconGap + settings.items.padding + 8) : 0
+      const iconW = hasMarker ? (settings.items.markerSize + settings.items.iconGap + settings.items.padding + 8 + dotExtra(m)) : 0
       // Badges that trail the title and also need room: the maturity glyph (a 2×2
       // grid, ≈2.3× its cell size) and the risk warning triangle. Without these the
       // glyph could overflow a bar the title only just fit into.
@@ -640,7 +648,7 @@ function rowItems(row) {
         + (lateIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
       items.push({
         key: m.id, m, type: 'point', x,
-        x0: x - 6 - pad,
+        x0: x - 6 - pad - dotExtra(m),
         x1: x + 16 + labelW + trailW + pad,
       })
     }
@@ -1353,10 +1361,13 @@ thead th {
   -webkit-user-select: none;
   border-radius: var(--it-radius, 6px);
   z-index: 2;                 /* keep markers/labels above the "+" add hint */
-  transition: filter 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease;
+  /* No filter transition: animating grayscale/brightness re-rasterises the inline
+     content (marker + status dot + badges) each frame → sub-pixel "wiggle". */
+  transition: opacity 0.18s ease, box-shadow 0.18s ease;
 }
 .mk-item:hover { filter: brightness(0.9); }
 .mk-icon { flex-shrink: 0; }
+.mk-dot { display: inline-block; border-radius: 50%; flex-shrink: 0; margin-right: 5px; vertical-align: middle; }
 .mk-label, .bar-title {
   text-box-trim: trim-both;
   text-box-edge: cap alphabetic;
@@ -1385,7 +1396,7 @@ thead th {
   z-index: 3;
   user-select: none;
   -webkit-user-select: none;
-  transition: filter 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+  transition: box-shadow 0.18s ease, opacity 0.18s ease;
 }
 .event-bar:hover { filter: brightness(0.97); }
 .bar-title { display: inline-flex; align-items: center; gap: var(--it-gap, 4px); overflow: visible; flex-shrink: 0; position: relative; top: var(--it-label-y, 1px); }

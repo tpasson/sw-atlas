@@ -48,15 +48,8 @@
             </div>
             <template v-else>—</template>
           </dd>
-          <dd v-else :class="{ 'id-empty': !f.v }">{{ f.v || '—' }}</dd>
+          <dd v-else :class="{ 'id-empty': !f.v, 'id-prose': f.prose }">{{ f.v || '—' }}</dd>
         </template>
-      </dl>
-    </section>
-
-    <section class="id-block">
-      <h2 class="id-h2">Details</h2>
-      <dl class="id-meta">
-        <template v-for="d in details" :key="d.k"><dt>{{ d.k }}</dt><dd :class="{ 'id-empty': !d.v }">{{ d.v || '—' }}</dd></template>
       </dl>
     </section>
 
@@ -86,20 +79,20 @@
       <ItemHistory :key="item.id" :item-id="item.id" />
     </section>
 
-    <StatusFlow v-if="showFlow" :statuses="type?.statuses || []" :current="status?.key || ''" :read-only="!canAdvance" :layout="type?.layout || null"
-      @advance="onAdvance" @save-layout="onSaveLayout" @reset-layout="onResetLayout" @close="showFlow = false" />
+    <StatusFlow v-if="showFlow" :statuses="type?.statuses || []" :current="status?.key || ''" :version="item.version || 1" :read-only="!canAdvance" :layout="type?.layout || null"
+      @advance="onAdvance" @close="showFlow = false" />
   </article>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
 import { History } from 'lucide-vue-next'
-import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, toneColor, groups, RELATIONSHIP_TYPES, itemLink, parseRef, ui, isSchedulableItem, pushNav, useAppStore, saveItemTypes, workflows, workflowByKey, saveWorkflows } from '../stores/useAppStore.js'
+import { itemTypes, MATURITY_STAGES, store, MONTHS, memberName, memberInitials, memberById, openProfile, itemStatus, statusColor, groups, RELATIONSHIP_TYPES, itemLink, parseRef, ui, isSchedulableItem, pushNav, useAppStore } from '../stores/useAppStore.js'
 
 const status = computed(() => itemStatus(props.item))
 const statusStyle = computed(() => {
   if (!status.value) return {}
-  const c = toneColor(status.value.tone)
+  const c = statusColor(status.value)
   return { color: c, background: c + '22', borderColor: c + '66', '--tone-glow': c + '80' }
 })
 import MarkerIcon from './MarkerIcon.vue'
@@ -118,40 +111,11 @@ const statusReady = computed(() => {
   return !!s && (s.tone === 'positive' || !((s.to || []).length))
 })
 function onAdvance(key) {
+  // Keep the flow open: the item updates, and StatusFlow re-prompts + logs the move.
   updateMilestone(props.item.id, { status: key })
-  showFlow.value = false
 }
-// Persist a dragged status-flow layout on the item's type (shared per workspace).
-function typeForItem() {
-  const key = props.item.typeKey || props.item.kind || 'milestone'
-  return itemTypes.list.find(tt => tt.key === key) || null
-}
-function onSaveLayout(layout) {
-  const t = typeForItem()
-  if (!t) return
-  if (t.workflowKey) {                 // shared workflow → arrange once, for all its types
-    const wf = workflowByKey(t.workflowKey)
-    if (!wf) return
-    wf.layout = layout
-    saveWorkflows(workflows.list)
-  } else {
-    t.layout = layout
-    saveItemTypes(itemTypes.list)
-  }
-}
-function onResetLayout() {
-  const t = typeForItem()
-  if (!t) return
-  if (t.workflowKey) {
-    const wf = workflowByKey(t.workflowKey)
-    if (!wf) return
-    delete wf.layout
-    saveWorkflows(workflows.list)
-  } else {
-    delete t.layout
-    saveItemTypes(itemTypes.list)
-  }
-}
+// Note: the status-flow diagram opened from an item is view/advance only — the
+// layout is arranged in the workflow settings, never from here.
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -187,12 +151,6 @@ const metaRows = computed(() => {
   return rows
 })
 
-// Details, dependencies and groups — always shown, so the detail view is complete.
-const details = computed(() => [
-  { k: 'What', v: props.item.what },
-  { k: 'Why', v: props.item.why },
-  { k: 'How', v: props.item.how },
-])
 const dependencies = computed(() => {
   const id = props.item.id
   const byId = new Map(store.milestones.map(m => [m.id, m]))
@@ -248,7 +206,7 @@ function itemPill(id) {
     icon: t?.icon || 'l:Diamond',
     fill: t?.fill !== false,
     color: t?.color || '#8a8a8e',                       // type colour → icon + text + tint
-    dot: st ? toneColor(st.tone) : (lane || '#8a8a8e'), // status dot — same logic as the Explorer tree
+    dot: st ? statusColor(st) : (lane || '#8a8a8e'), // status dot — same logic as the Explorer tree
   }
 }
 function fieldValue(f) {
@@ -263,7 +221,7 @@ function fieldValue(f) {
 // plain text. Pinned references carry their version so the click opens that revision.
 const fieldRows = computed(() =>
   (type.value?.fields || []).map(f => {
-    if (f.type !== 'reference') return { k: f.label || f.key, v: fieldValue(f) }
+    if (f.type !== 'reference') return { k: f.label || f.key, v: fieldValue(f), prose: f.type === 'textarea' }
     const v = props.item.data?.[f.key]
     const ids = Array.isArray(v) ? v : (v ? [v] : [])
     const refs = ids.map(entry => {
@@ -320,11 +278,6 @@ const exportObj = computed(() => {
   const fields = {}
   for (const f of (type.value?.fields || [])) fields[f.label || f.key] = exportFieldValue(f)
   if (Object.keys(fields).length) o.fields = fields
-  const det = {}
-  if (it.what) det.what = it.what
-  if (it.why) det.why = it.why
-  if (it.how) det.how = it.how
-  if (Object.keys(det).length) o.details = det
   return o
 })
 
@@ -426,6 +379,7 @@ async function copy(kind) {
 .id-meta dt { font-size: 12px; color: var(--clr-text-3); font-weight: 600; }
 .id-meta dd { font-size: 13px; color: var(--clr-text); }
 .id-meta dd.id-empty { color: var(--clr-text-3); }
+.id-meta dd.id-prose { white-space: pre-wrap; line-height: 1.5; }
 
 .id-block { margin-top: 20px; }
 .id-h2 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); margin-bottom: 7px; }

@@ -563,6 +563,9 @@ func (s *Server) requireReadAccess(next http.Handler) http.Handler {
 				return
 			}
 			allowed = role != "" // any member reads, even a private workspace
+			if sess.Role == store.RoleAdmin {
+				allowed = true // site admins can read every workspace's plan
+			}
 		}
 		if !allowed {
 			public, err := s.store.GetPublicRead(r.Context(), target)
@@ -821,10 +824,17 @@ func (s *Server) getGitColors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
-// listProjects returns the workspaces the caller belongs to (for the switcher).
+// listProjects returns the workspaces for the switcher: the caller's own, or —
+// for a site admin — every workspace (so admins can see all projects and plans).
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	sess, _ := s.auth.SessionFromRequest(r)
-	list, err := s.store.ListWorkspacesForUser(r.Context(), sess.UserID)
+	var list []store.UserWorkspace
+	var err error
+	if sess.Role == store.RoleAdmin {
+		list, err = s.store.ListAllWorkspaces(r.Context(), sess.UserID)
+	} else {
+		list, err = s.store.ListWorkspacesForUser(r.Context(), sess.UserID)
+	}
 	if err != nil {
 		s.fail(w, err)
 		return

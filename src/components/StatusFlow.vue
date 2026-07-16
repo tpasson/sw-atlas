@@ -11,7 +11,7 @@
       </div>
 
       <div class="sf-canvas">
-        <svg ref="svgEl" class="sf-svg" :class="{ editing: canEdit }" :viewBox="vb" preserveAspectRatio="xMidYMid meet">
+        <svg ref="svgEl" class="sf-svg" :class="{ editing: canArrange }" :viewBox="vb" preserveAspectRatio="xMidYMid meet">
           <defs>
             <marker id="sf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" :fill="mutedColor" />
@@ -23,7 +23,7 @@
           <path v-for="(e, i) in edges" :key="'e' + i" class="sf-link" :class="{ on: e.on }" :d="e.d"
             :marker-start="e.arrowStart ? (e.on ? 'url(#sf-arrow-on)' : 'url(#sf-arrow)') : null"
             :marker-end="e.arrowEnd ? (e.on ? 'url(#sf-arrow-on)' : 'url(#sf-arrow)') : null" />
-          <template v-if="canEdit">
+          <template v-if="canArrange">
             <!-- Invisible grab targets: the line body bends the curve; each end
                  snaps its dock to the nearest box side. No visible dots. -->
             <path v-for="e in edges" :key="'hl' + e.id" class="sf-hit-line" :d="e.d" @mousedown.stop="onLineDown(e, $event)" />
@@ -31,7 +31,7 @@
             <circle v-for="e in edges" :key="'eb' + e.id" class="sf-hit-end" :cx="e.endB.x" :cy="e.endB.y" r="11" @mousedown.stop="onEndDown(e, 'b', $event)" />
           </template>
           <g v-for="n in nodes" :key="n.key" class="sf-node"
-            :class="{ current: n.key === current, reachable: reachable.has(n.key), muted: n.key !== current && !reachable.has(n.key), draggable: canEdit }"
+            :class="{ current: n.key === current, reachable: reachable.has(n.key), muted: n.key !== current && !reachable.has(n.key), draggable: canArrange }"
             :transform="`translate(${pos[n.key].x},${pos[n.key].y})`"
             @mousedown="onDown(n, $event)" @click="onClick(n)">
             <rect :x="-n.w / 2" :y="-n.h / 2" :width="n.w" :height="n.h" :rx="n.h / 2" :style="nodeStyle(n)" />
@@ -41,12 +41,11 @@
       </div>
 
       <div class="sf-foot">
-        <p class="sf-hint">
-          <template v-if="!canEdit">↔ = transition both ways.</template>
-          <template v-else-if="reachable.size">Click a <strong>highlighted</strong> status to move there · drag nodes, lines or arrow ends to arrange · ↔ = both ways.</template>
-          <template v-else>End state — no transitions · drag nodes, lines or arrow ends to arrange.</template>
-        </p>
-        <div v-if="canEdit" class="sf-actions">
+        <div ref="consoleEl" class="sf-console" :class="{ tall: !canArrange }">
+          <div v-for="(m, i) in moveLog" :key="'m' + i" class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ m.time }}]</span><span class="sf-gt">&gt;</span><span class="sf-move">{{ m.text }}</span></div>
+          <div class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ clock }}]</span><span class="sf-gt">&gt;</span><span class="sf-linetext"><template v-for="(t, i) in visibleTokens" :key="i"><button v-if="t.key" type="button" class="sf-cmd" :style="{ color: t.color }" @click="advance({ key: t.key })">{{ t.text }}</button><span v-else>{{ t.text }}</span></template><span class="sf-cursor" :class="{ steady: typing }">▋</span></span></div>
+        </div>
+        <div v-if="canArrange" class="sf-actions">
           <button v-if="mode === 'custom' || hasSaved" type="button" class="sf-btn" @click="onReset">Reset to auto</button>
           <button type="button" class="sf-btn primary" :disabled="!dirty" @click="onSave">Save arrangement</button>
         </div>
@@ -56,26 +55,33 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import dagre from '@dagrejs/dagre'
-import { toneColor } from '../stores/useAppStore.js'
+import { statusColor } from '../stores/useAppStore.js'
 
 const props = defineProps({
   statuses: { type: Array, required: true },
   current: { type: String, default: '' },
-  readOnly: { type: Boolean, default: false },
-  layout: { type: Object, default: null }, // saved { key: {x,y} } or null
+  version: { type: Number, default: 0 },          // item version — logged when advancing
+  readOnly: { type: Boolean, default: false },    // can't advance the status (view only)
+  arrangeable: { type: Boolean, default: false }, // can drag/save the layout — workflow settings only
+  layout: { type: Object, default: null },        // saved { nodes, edges } or null
 })
 const emit = defineEmits(['advance', 'close', 'saveLayout', 'resetLayout'])
-const canEdit = computed(() => !props.readOnly)
+// Two independent capabilities: advancing (from an item, gated by !readOnly) and
+// arranging the diagram (only in workflow settings, gated by arrangeable). An
+// item view never arranges, so you can't nudge the graph while switching status.
+const canArrange = computed(() => props.arrangeable)
 
 const rootStyle = getComputedStyle(document.documentElement)
 const accentColor = rootStyle.getPropertyValue('--clr-accent').trim() || '#0071E3'
 const mutedColor = rootStyle.getPropertyValue('--clr-text-3').trim() || '#8a8a8e'
 
 const keys = new Set(props.statuses.map(s => s.key))
-const cur = props.statuses.find(s => s.key === props.current)
-const reachable = new Set((cur?.to || []).filter(k => keys.has(k)))
+// Reactive on props.current so advancing (window stays open) re-highlights the
+// current node + reachable options live.
+const cur = computed(() => props.statuses.find(s => s.key === props.current))
+const reachable = computed(() => new Set((cur.value?.to || []).filter(k => keys.has(k))))
 
 // Merge each connected pair into one edge (both directions → double arrow). In
 // status-list order every edge points forward → the graph is a DAG.
@@ -92,7 +98,7 @@ for (let i = 0; i < props.statuses.length; i++) {
 const NODE_H = 32
 const nodes = props.statuses.map(s => {
   const label = s.label || s.key
-  return { key: s.key, label, tone: s.tone || 'neutral', w: Math.max(74, label.length * 8 + 30), h: NODE_H }
+  return { key: s.key, label, tone: s.tone || 'neutral', color: statusColor(s), w: Math.max(74, label.length * 8 + 30), h: NODE_H }
 })
 const nodeByKey = new Map(nodes.map(n => [n.key, n]))
 
@@ -220,14 +226,15 @@ refit()
 
 // ── Node visuals ─────────────────────────────────────────────────────────────
 function nodeStyle(n) {
-  const c = toneColor(n.tone)
+  const c = n.color
   if (n.key === props.current) return { fill: c, stroke: c, strokeWidth: '2.5' }
-  if (reachable.has(n.key)) return { fill: c + '22', stroke: c, strokeWidth: '1.5' }
+  // Arrange mode has no current/reachable → show every node in its colour.
+  if (canArrange.value || reachable.value.has(n.key)) return { fill: c + '22', stroke: c, strokeWidth: '1.5' }
   return { fill: 'var(--clr-surface-2)', stroke: 'var(--clr-border)', strokeWidth: '1' }
 }
 function nodeText(n) {
   if (n.key === props.current) return '#fff'
-  if (reachable.has(n.key)) return toneColor(n.tone)
+  if (canArrange.value || reachable.value.has(n.key)) return n.color
   return 'var(--clr-text-3)'
 }
 
@@ -245,18 +252,18 @@ function startDrag(e) {
   e.preventDefault()
 }
 function onDown(n, e) {
-  if (!canEdit.value) return
+  if (!canArrange.value) return
   const p = svgPt(e)
   drag = { kind: 'node', key: n.key, moved: false, ox: p.x - pos[n.key].x, oy: p.y - pos[n.key].y }
   startDrag(e)
 }
 function onLineDown(ed, e) {
-  if (!canEdit.value) return
+  if (!canArrange.value) return
   drag = { kind: 'line', id: ed.id, moved: false }
   startDrag(e)
 }
 function onEndDown(ed, end, e) {
-  if (!canEdit.value) return
+  if (!canArrange.value) return
   drag = { kind: 'end', id: ed.id, end, nodeKey: end === 'a' ? ed.endA.nodeKey : ed.endB.nodeKey, moved: false }
   startDrag(e)
 }
@@ -286,12 +293,74 @@ function onUp() {
   window.removeEventListener('mousemove', onMove)
   window.removeEventListener('mouseup', onUp)
   const d = drag; drag = null
-  if (!d) return
-  if (d.moved) refit()                                    // re-fit the frozen viewBox once the drag ends
-  else if (d.kind === 'node') advance(nodeByKey.get(d.key)) // press without drag = click
+  if (d && d.moved) refit() // re-fit the frozen viewBox once the drag ends (no advance while arranging)
 }
-function onClick(n) { if (!canEdit.value) advance(n) } // editors advance via onUp (drag path)
-function advance(n) { if (!props.readOnly && reachable.has(n.key)) emit('advance', n.key) }
+// Advancing happens only outside arrange mode: there onDown is a no-op, so the
+// plain click lands here. In arrange mode a click never advances (drag-only).
+function onClick(n) { if (!canArrange.value) advance(n) }
+// Advancing keeps the window open: log the move, emit, and let the current-status
+// prop update re-prompt. Reachable is live so the new options appear at once.
+function advance(n) {
+  if (props.readOnly || !reachable.value.has(n.key)) return
+  const toLabel = nodeByKey.get(n.key)?.label || n.key
+  const fromVer = props.version || 1
+  moveLog.value.push({ time: stamp(), text: `you picked ${toLabel} — version v${fromVer} → v${fromVer + 1}` })
+  emit('advance', n.key)
+  scrollConsoleSoon()
+}
+
+// ── Console: a live terminal log. The prompt line reflects the current status;
+// its options are clickable. Double-arrow needs no legend — options are words. ──
+const moveLog = ref([])                                       // frozen history: { time, text }
+const consoleEl = ref(null)
+function stamp() { const d = new Date(); return d.toTimeString().slice(0, 8) } // HH:MM:SS
+const clock = ref(stamp())                                   // live prompt clock — ticks every second
+let clockTimer = setInterval(() => { clock.value = stamp() }, 1000)
+function scrollConsoleSoon() { nextTick(() => { const el = consoleEl.value; if (el) el.scrollTop = el.scrollHeight }) }
+const consoleTokens = computed(() => {
+  if (canArrange.value) return [{ text: 'arrange — drag nodes · bend lines · snap arrow ends' }]
+  const curLabel = cur.value?.label || props.current || 'unknown'
+  if (props.readOnly) return [{ text: `this item is in status "${curLabel}" — read-only` }]
+  const rs = [...reachable.value].map(k => nodeByKey.get(k)).filter(Boolean)
+  if (!rs.length) return [{ text: `this item is in status "${curLabel}" — final state, nothing to advance` }]
+  const out = [{ text: `this item is in status "${curLabel}" — you can move to ` }]
+  rs.forEach((n, i) => {
+    out.push({ text: n.label, key: n.key, tone: n.tone, color: n.color })
+    if (i < rs.length - 2) out.push({ text: ', ' })
+    else if (i === rs.length - 2) out.push({ text: ' or ' })
+  })
+  out.push({ text: ' — click one' })
+  return out
+})
+const totalLen = computed(() => consoleTokens.value.reduce((s, t) => s + t.text.length, 0))
+const typed = ref(0)
+const typing = ref(true)
+let typeTimer = null
+// Reveal characters across the token stream; a partly-typed clickable name is
+// still clickable (its key is known).
+const visibleTokens = computed(() => {
+  let rem = typed.value
+  const out = []
+  for (const t of consoleTokens.value) {
+    if (rem <= 0) break
+    out.push({ text: t.text.slice(0, rem), key: t.key, tone: t.tone, color: t.color })
+    rem -= t.text.length
+  }
+  return out
+})
+function startTypewriter() {
+  clearInterval(typeTimer)
+  typed.value = 0
+  typing.value = true
+  typeTimer = setInterval(() => {
+    typed.value++
+    scrollConsoleSoon() // the line grows (and may wrap) as it types — keep it pinned to the bottom
+    if (typed.value >= totalLen.value) { typing.value = false; clearInterval(typeTimer) }
+  }, 20)
+}
+startTypewriter()
+// Re-type the prompt (and scroll) whenever the current status → options change.
+watch(consoleTokens, () => { startTypewriter(); scrollConsoleSoon() })
 
 function onSave() {
   const nodesOut = {}, edgesOut = {}
@@ -319,11 +388,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('mousemove', onMove)
   window.removeEventListener('mouseup', onUp)
+  clearInterval(typeTimer)
+  clearInterval(clockTimer)
 })
 </script>
 
 <style scoped>
-.sf-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.32); }
+.sf-overlay { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.32); }
 .sf-pop { width: 640px; max-width: calc(100vw - 32px); background: var(--clr-surface); border: 1px solid var(--clr-border-light); border-radius: var(--r-lg); box-shadow: var(--sh-modal); overflow: hidden; }
 .sf-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--clr-border-light); }
 .sf-title { font-size: 13px; font-weight: 700; color: var(--clr-text); }
@@ -347,15 +418,25 @@ onBeforeUnmount(() => {
 .sf-node.reachable rect { transition: filter 0.12s; }
 .sf-node.reachable:hover rect { filter: brightness(1.12); }
 .sf-node.current rect { animation: sf-currentpulse 2s ease-in-out infinite; }
-.sf-foot { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--clr-border-light); }
-.sf-hint { margin: 0; flex: 1; font-size: 12px; color: var(--clr-text-3); }
-.sf-hint strong { color: var(--clr-text-2); font-weight: 600; }
+.sf-foot { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #0d1117; border-top: 1px solid #30363d; }
+.sf-console { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; color: #c9d1d9; }
+.sf-console.tall { height: 168px; overflow-y: auto; } /* ~6-line window +50px; scrolls as moves pile up */
+.sf-logline { white-space: pre-wrap; word-break: break-word; }
+.sf-move { color: #8b949e; } /* dimmer history content */
+.sf-prompt { color: #3fb950; user-select: none; }
+.sf-time { color: #6e7681; margin: 0 4px; user-select: none; }
+.sf-gt { color: #3fb950; margin-right: 7px; user-select: none; }
+.sf-cmd { display: inline; padding: 0; margin: 0; border: none; background: none; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.sf-cmd:hover { filter: brightness(1.3); }
+.sf-cursor { display: inline-block; margin-left: 1px; color: #c9d1d9; animation: sf-blink 1s step-end infinite; }
+.sf-cursor.steady { animation: none; }
 .sf-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
-.sf-btn { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: var(--r-md); padding: 6px 12px; }
-.sf-btn:hover { background: var(--clr-surface); color: var(--clr-text); }
+.sf-btn { font-size: 12px; font-weight: 600; color: #c9d1d9; background: #21262d; border-radius: var(--r-md); padding: 6px 12px; }
+.sf-btn:hover { background: #2d333b; color: #fff; }
 .sf-btn.primary { color: #fff; background: var(--clr-accent); }
 .sf-btn.primary:hover { background: var(--clr-accent-hover); }
-.sf-btn:disabled { opacity: 0.5; cursor: default; }
+.sf-btn:disabled { opacity: 0.45; cursor: default; }
 .sf-btn.primary:disabled { background: var(--clr-accent); }
+@keyframes sf-blink { 50% { opacity: 0; } }
 @keyframes sf-currentpulse { 0%, 100% { filter: brightness(1.04); } 50% { filter: brightness(1.16); } }
 </style>

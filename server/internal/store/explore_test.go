@@ -36,7 +36,7 @@ func TestExploreDirectory(t *testing.T) {
 	}
 
 	must("bootstrap", s.EnsureBootstrapAdmin(ctx, "editor", "h")) // default workspace, public
-	alice, err := s.CreateUser(ctx, "alice", "h", RoleUser)     // private by default
+	alice, err := s.CreateUser(ctx, "alice", "h", RoleUser)       // private by default
 	must("alice", err)
 	_, err = s.CreateUser(ctx, "bob", "h", RoleUser) // stays private
 	must("bob", err)

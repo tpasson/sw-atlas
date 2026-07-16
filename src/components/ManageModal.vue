@@ -1,11 +1,11 @@
 <template>
-  <Teleport to="body">
+  <Teleport to="body" :disabled="embedded">
     <Transition name="modal">
-      <div class="backdrop">
+      <div class="backdrop" :class="{ embedded }">
         <Transition name="modal-panel" appear>
-          <div class="panel">
-            <!-- Header -->
-            <div class="panel-header">
+          <div class="panel" :class="{ embedded }">
+            <!-- Header (modal only; the page view supplies its own) -->
+            <div v-if="!embedded" class="panel-header">
               <h2 class="panel-title">Settings</h2>
               <button class="btn-close" @click="$emit('close')">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -14,11 +14,12 @@
               </button>
             </div>
 
-            <!-- Tabs -->
-            <div class="tabs" role="tablist">
+            <!-- Tabs (modal only; the page view uses the sidebar instead) -->
+            <div v-if="!embedded" class="tabs" role="tablist">
               <button class="tab" :class="{ active: tab === 'areas' }" @click="tab = 'areas'">Areas</button>
               <button class="tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
               <button v-if="canAdmin" class="tab" :class="{ active: tab === 'types' }" @click="tab = 'types'">Types</button>
+              <button v-if="canAdmin" class="tab" :class="{ active: tab === 'workflows' }" @click="tab = 'workflows'">Workflows</button>
               <button class="tab" :class="{ active: tab === 'baselines' }" @click="tab = 'baselines'">Baselines</button>
               <button class="tab" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
               <button v-if="!isDemo && canAdmin" class="tab" :class="{ active: tab === 'sharing' }" @click="tab = 'sharing'">Sharing</button>
@@ -213,8 +214,8 @@
 
 
               <!-- ───────────────── ITEM TYPES ───────────────── -->
-              <section v-if="tab === 'types'" class="tab-pane">
-                <TypesManager ref="typesMgr" />
+              <section v-if="tab === 'types' || tab === 'workflows'" class="tab-pane">
+                <TypesManager ref="typesMgr" :only="tab" />
               </section>
 
               <!-- ───────────────── GROUPS ───────────────── -->
@@ -286,9 +287,9 @@
               </section>
             </div>
 
-            <div class="panel-footer">
-              <template v-if="tab === 'types'">
-                <button class="reset-btn" @click="$emit('close')">Discard changes</button>
+            <div v-if="!embedded || tab === 'types' || tab === 'workflows'" class="panel-footer">
+              <template v-if="tab === 'types' || tab === 'workflows'">
+                <button v-if="!embedded" class="reset-btn" @click="$emit('close')">Discard changes</button>
                 <button class="btn-primary" :disabled="savingTypes" @click="saveTypesAndClose">{{ savingTypes ? 'Saving…' : 'Save changes' }}</button>
               </template>
               <button v-else class="btn-primary" @click="$emit('close')">Done</button>
@@ -301,7 +302,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 import { useAppStore, PRESET_COLORS, swatchColors, palette, baselines, store, session, settings, resetSettings, MARKER_LIBRARY, exportPlanToFile, importPlanFromFile, workspace, canAdminWorkspace } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import ShareManager from './ShareManager.vue'
@@ -340,7 +341,10 @@ function removeMarker(i) {
   if (settings.markers.length > 1) settings.markers.splice(i, 1)
 }
 
-const props = defineProps({ initialTab: { type: String, default: 'areas' } })
+const props = defineProps({
+  initialTab: { type: String, default: 'areas' },
+  embedded: { type: Boolean, default: false }, // rendered inside the full-page Settings view (no modal chrome)
+})
 const emit = defineEmits(['close'])
 
 // The Item Types tab edits a local copy; the modal's "Done" persists it (and
@@ -352,7 +356,7 @@ async function saveTypesAndClose() {
   savingTypes.value = true
   try {
     const ok = await typesMgr.value?.save()
-    if (ok !== false) emit('close')
+    if (ok !== false && !props.embedded) emit('close') // in the page view, save and stay
   } finally {
     savingTypes.value = false
   }
@@ -361,8 +365,10 @@ async function saveTypesAndClose() {
 const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 
 // Open on a requested tab when it's available to this user; fall back to Areas.
-const ALLOWED_INITIAL = ['areas', 'groups', 'types', 'baselines', 'data', 'sharing', 'members']
+const ALLOWED_INITIAL = ['areas', 'groups', 'types', 'workflows', 'baselines', 'data', 'sharing', 'members']
 const tab = ref(ALLOWED_INITIAL.includes(props.initialTab) ? props.initialTab : 'areas')
+// In the full-page settings view the sidebar drives the active tab via initialTab.
+watch(() => props.initialTab, (v) => { if (ALLOWED_INITIAL.includes(v)) tab.value = v })
 
 // Label a mirrored lane by what it's synced from (GitHub/Gitea/… or a subscription).
 const SOURCE_LABELS = { github: 'GitHub', gitea: 'Gitea', gitlab: 'GitLab', bitbucket: 'Bitbucket', subscription: 'Subscribed' }
@@ -526,6 +532,26 @@ function cancelEdit() {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Embedded in the full-page Settings view: no scrim/centering, panel fills the pane. */
+.backdrop.embedded {
+  position: static;
+  inset: auto;
+  background: none;
+  z-index: auto;
+  display: block;
+  padding: 0;
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+}
+.panel.embedded {
+  max-width: none;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
 }
 
 .panel-header {

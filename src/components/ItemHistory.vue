@@ -82,24 +82,17 @@ const snapFields = computed(() => {
     { k: 'Date', v: date },
     { k: 'Maturity', v: s.maturity ? MATURITY_STAGES[s.maturity - 1] : '' },
     { k: 'Progress', v: s.progress != null ? s.progress + '%' : '' },
-    { k: 'Assignee', v: s.assigneeId ? memberName(s.assigneeId) : '' },
+    { k: 'Assigned to', v: s.assigneeId ? memberName(s.assigneeId) : '' },
   ]
   for (const f of (snapType.value?.fields || [])) {
-    const val = s.data?.[f.key]
+    // Fall back to a top-level value for revisions captured before the fields
+    // were generalized (old snapshots stored what/why/how at the top level).
+    const val = s.data?.[f.key] ?? s[f.key]
     if (val != null && String(val).trim() !== '') rows.push({ k: f.label || f.key, v: val })
   }
   return rows.filter(r => r.v != null && String(r.v).trim() !== '')
 })
-const snapDescriptions = computed(() => {
-  const s = snapshot.value
-  if (!s) return []
-  return [
-    { k: 'what', label: 'What', v: s.what },
-    { k: 'why', label: 'Why', v: s.why },
-    { k: 'how', label: 'Where', v: s.how },
-    { k: 'who', label: 'Who', v: s.who },
-  ].filter(d => d.v && String(d.v).trim())
-})
+const snapDescriptions = computed(() => [])
 </script>
 
 <style scoped>
