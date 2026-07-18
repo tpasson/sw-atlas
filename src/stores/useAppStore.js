@@ -142,13 +142,14 @@ export async function loadWorkspaceMembers() {
 
 // Can the current user edit CONTENT in the viewed workspace (owner or editor)?
 export function canEditWorkspace() {
-  return session.authenticated && (workspace.role === 'owner' || workspace.role === 'editor')
+  // Site admins are superusers: they can edit any workspace, not just their own.
+  return session.authenticated && (session.role === 'admin' || workspace.role === 'owner' || workspace.role === 'editor')
 }
 
 // Can the current user administer the workspace CONFIGURATION (types, display,
-// sources, sharing, change-request decisions)? Owner only.
+// sources, sharing, change-request decisions, members)? Owner — or a site admin.
 export function canAdminWorkspace() {
-  return session.authenticated && workspace.role === 'owner'
+  return session.authenticated && (session.role === 'admin' || workspace.role === 'owner')
 }
 
 // Appearance settings are stored per-workspace on the server (so a plan looks the
@@ -440,7 +441,20 @@ export const groups = reactive({ list: [] })
 // focusItemId/focusVersion: transient "jump to this item on the timeline" signal.
 // explorerItemId/explorerItemVersion: the Explorer's currently open item — kept in
 // the URL (?item=&v=) so browser back/forward restores it.
-export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, explorerItemId: null, explorerItemVersion: null, highlightIds: null, settingsSection: initialSettingsSection() })
+// Explorer view mode (Tree / Table / Board) — shared so the switcher can live in
+// the top header while ExplorerView reads it. Persisted per browser.
+export const EXPLORER_MODES = [{ key: 'folders', label: 'Tree' }, { key: 'table', label: 'Table' }, { key: 'board', label: 'Board' }]
+const EXPLORER_MODE_KEY = 'atlas-explorer-mode'
+function initialExplorerMode() {
+  const v = localStorage.getItem(EXPLORER_MODE_KEY)
+  return ['folders', 'table', 'board'].includes(v) ? v : 'folders'
+}
+export function setExplorerMode(k) {
+  ui.explorerMode = k
+  try { localStorage.setItem(EXPLORER_MODE_KEY, k) } catch { /* ignore */ }
+}
+
+export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, explorerItemId: null, explorerItemVersion: null, highlightIds: null, settingsSection: initialSettingsSection(), focusCrId: null, explorerMode: initialExplorerMode() })
 
 // A reference-field value can pin a specific version of its target, encoded as
 // "<id>@v<n>". parseRef splits that back into { id, version } (version = null when
@@ -453,12 +467,13 @@ export function parseRef(v) {
 // itemLink builds the stable deep-link for an item (optionally pinned to a
 // version): {origin}/{slug}?item={id}[&v={n}]. Opening it lands on the item in
 // the Explorer's web layout (see openDeepLinkTarget + ExplorerView).
-export function itemLink(id, version) {
+export function itemLink(id, version, fmt) {
   const origin = (typeof window !== 'undefined') ? window.location.origin : ''
   const slug = workspace.slug || ''
   const base = origin + '/' + (slug ? encodeURIComponent(slug) : '')
   const q = new URLSearchParams({ item: id })
   if (version) q.set('v', String(version))
+  if (fmt && fmt !== 'form') q.set('fmt', fmt)
   return base + '?' + q.toString()
 }
 
@@ -745,16 +760,16 @@ function applyNav() {
 // browser history, so back/forward steps through views and items. Called from user
 // gestures (view switch, item click). programmatic/popstate updates use applyNav
 // and never push.
-export function pushNav({ view, item, version, section } = {}, replace = false) {
+export function pushNav({ view, item, version, section, fmt } = {}, replace = false) {
   if (typeof window === 'undefined') return
   const v = view || store.view
   let url
   try {
     url = new URL(window.location.href)
-    url.searchParams.delete('view'); url.searchParams.delete('item'); url.searchParams.delete('v'); url.searchParams.delete('section')
+    url.searchParams.delete('view'); url.searchParams.delete('item'); url.searchParams.delete('v'); url.searchParams.delete('section'); url.searchParams.delete('fmt')
     if (v && v !== 'timeline') url.searchParams.set('view', v)
     if (v === 'settings' || v === 'project-settings') { const s = section || ui.settingsSection; if (s) url.searchParams.set('section', s) }
-    if (item) { url.searchParams.set('item', item); if (version) url.searchParams.set('v', String(version)) }
+    if (item) { url.searchParams.set('item', item); if (version) url.searchParams.set('v', String(version)); if (fmt && fmt !== 'form') url.searchParams.set('fmt', fmt) }
   } catch { return }
   const href = url.pathname + url.search
   const state = { atlasNav: true, view: v, item: item || null, version: version || null }
@@ -790,6 +805,14 @@ export function openGeneralSettings() {
 }
 // Open straight onto an explicit project section (e.g. "Invite people…" → Members).
 export function openSettings(section) { openProjectSettings(section) }
+
+// Open the Change Requests view focused on a specific CR (from the Explorer).
+export function openChangeRequest(id) {
+  ui.focusCrId = id
+  store.view = 'cr'
+  try { localStorage.setItem(VIEW_KEY, 'cr') } catch { /* ignore */ }
+  pushNav({ view: 'cr' })
+}
 // setSettingsSection changes the active section from the sidebar (within a view).
 export function setSettingsSection(key) {
   rememberSection(key)

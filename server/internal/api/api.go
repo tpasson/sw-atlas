@@ -411,7 +411,7 @@ func (s *Server) requireEditor(next http.Handler) http.Handler {
 			s.internalError(w, err)
 			return
 		}
-		if role != store.WSRoleOwner && role != store.WSRoleEditor {
+		if sess.Role != store.RoleAdmin && role != store.WSRoleOwner && role != store.WSRoleEditor {
 			writeErr(w, http.StatusForbidden, "you don't have edit access to this plan")
 			return
 		}
@@ -443,7 +443,7 @@ func (s *Server) requireWorkspaceOwner(next http.Handler) http.Handler {
 			s.internalError(w, err)
 			return
 		}
-		if role != store.WSRoleOwner {
+		if sess.Role != store.RoleAdmin && role != store.WSRoleOwner {
 			writeErr(w, http.StatusForbidden, "only the project owner can change this")
 			return
 		}
@@ -474,7 +474,7 @@ func (s *Server) requireMember(next http.Handler) http.Handler {
 			s.internalError(w, err)
 			return
 		}
-		if role == "" {
+		if role == "" && sess.Role != store.RoleAdmin {
 			writeErr(w, http.StatusForbidden, "you are not a member of this project")
 			return
 		}
@@ -517,7 +517,7 @@ func (s *Server) requireWorkspaceOwnerByPath(next http.Handler) http.Handler {
 			s.internalError(w, err)
 			return
 		}
-		if role != store.WSRoleOwner {
+		if sess.Role != store.RoleAdmin && role != store.WSRoleOwner {
 			writeErr(w, http.StatusForbidden, "only the project owner can manage members")
 			return
 		}

@@ -55,6 +55,9 @@
             </svg>
           </button>
         </div>
+        <div v-if="store.view === 'explorer'" class="ev-modes-hdr">
+          <button v-for="m in EXPLORER_MODES" :key="m.key" type="button" class="ev-mode-hdr" :class="{ on: ui.explorerMode === m.key }" @click="setExplorerMode(m.key)">{{ m.label }}</button>
+        </div>
       </div>
 
       <div class="header-center">
@@ -169,7 +172,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Sun, Moon, AlertTriangle, Clock, Settings, Bookmark } from 'lucide-vue-next'
-import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, ui, session, workspace, canEditWorkspace } from '../stores/useAppStore.js'
+import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, ui, session, workspace, canEditWorkspace, EXPLORER_MODES, setExplorerMode } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 import PlanSwitcher from './PlanSwitcher.vue'
 
@@ -442,6 +445,12 @@ async function onSaveBaseline() {
   padding: 0 3px;
   flex-shrink: 0;
 }
+
+/* Explorer Tree/Table/Board switcher — lives in the header (no dedicated row). */
+.ev-modes-hdr { display: inline-flex; align-items: center; gap: 2px; height: 32px; box-sizing: border-box; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 100px; padding: 2px 3px; flex-shrink: 0; }
+.ev-mode-hdr { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.6); background: transparent; border-radius: 100px; padding: 4px 13px; transition: background 0.12s, color 0.12s; }
+.ev-mode-hdr.on { background: rgba(255,255,255,0.16); color: #fff; }
+.ev-mode-hdr:hover:not(.on) { color: #fff; }
 
 .year-btn {
   width: 26px;

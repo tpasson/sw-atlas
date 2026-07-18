@@ -52,7 +52,6 @@
               :style="{ '--lane': g.row.swimlane.color }"
             >
               <div class="area-label">
-                <span class="area-dot" :style="{ background: g.row.swimlane.color }"></span>
                 <span class="area-name" :title="g.row.swimlane.name">{{ g.row.swimlane.name }}</span>
               </div>
             </td>
@@ -112,7 +111,7 @@
                   class="rail-dot"
                   :data-item-id="it.m.id"
                   :class="chipState(it.m)"
-                  :style="{ left: (it.x - 5) + 'px', top: (it.lane * g.laneH + (g.laneH - 10) / 2) + 'px', background: g.row.swimlane.color }"
+                  :style="{ left: (it.x - 5) + 'px', top: (it.lane * g.laneH + (g.laneH - 10) / 2) + 'px', background: itemColor(it.m) }"
                   :title="it.m.title"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
@@ -126,14 +125,14 @@
                   class="mk-item"
                   :data-item-id="it.m.id"
                   :class="chipState(it.m)"
-                  :style="{ left: (it.x - 9 - settings.items.padding - dotExtra(it.m)) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: g.row.swimlane.color }"
+                  :style="{ left: (it.x - 9 - settings.items.padding - dotExtra(it.m)) + 'px', top: (it.lane * g.laneH + g.vOffset) + 'px', color: 'var(--clr-text)', '--it-status': itemColor(it.m) }"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @click.stop="onChipClick($event, it.m, g.row.swimlane.color)"
                   @dblclick.stop="onEdit(it.m)"
                 >
-                  <span v-if="statusDotColor(it.m)" class="mk-dot" :style="{ background: statusDotColor(it.m), width: dotSize + 'px', height: dotSize + 'px' }"></span><MarkerIcon :shape="markerOf(it.m)" :color="g.row.swimlane.color" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
-                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                  <MarkerIcon :shape="markerOf(it.m)" :color="itemColor(it.m)" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
+                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="'var(--clr-text-2)'" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
 
                 <!-- Cluster: collapsed overflow markers; click to expand the list -->
@@ -151,7 +150,7 @@
                   class="event-bar"
                   :data-item-id="it.m.id"
                   :class="[chipState(it.m), { draggable: !props.readOnly && !it.m.sourceSystem }]"
-                  :style="barStyleFull(it, g.row.swimlane.color, g.laneH, g.vOffset)"
+                  :style="barStyleFull(it, itemColor(it.m), g.laneH, g.vOffset)"
                   @mouseenter="hoveredMs = it.m"
                   @mouseleave="hoveredMs = null"
                   @pointerdown="startDrag($event, it, 'move')"
@@ -160,16 +159,15 @@
                 >
                   <span v-if="it.continuesLeft" class="bar-arrow">◀</span>
                   <span class="bar-title" :class="{ 'bar-title-out': it.labelOutside }">
-                    <span v-if="statusDotColor(it.m)" class="mk-dot" :style="{ background: statusDotColor(it.m), width: dotSize + 'px', height: dotSize + 'px' }"></span>
                     <MarkerIcon
                       :shape="markerOf(it.m)"
                       :fill="markerFillFor(it.m)"
-                      :color="g.row.swimlane.color"
+                      :color="itemColor(it.m)"
                       :size="settings.items.markerSize"
                       :stroke-width="settings.items.markerStroke"
                       class="bar-marker"
                     />
-                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="g.row.swimlane.color" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="'var(--clr-text-2)'" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                   </span>
                   <span v-if="it.continuesRight" class="bar-arrow">▶</span>
                   <template v-if="!props.readOnly && !it.m.sourceSystem">
@@ -215,8 +213,9 @@
         @click.stop
       >
         <div class="tooltip-header">
-          <span class="tooltip-dot" :style="{ background: tooltip.color }"></span>
+          <MarkerIcon :shape="markerOf(tooltip.ms)" :color="itemColor(tooltip.ms)" :size="14" :fill="markerFillFor(tooltip.ms)" class="tooltip-ico" />
           <span class="tooltip-title">{{ tooltip.ms.title }}</span>
+          <button v-if="!props.readOnly && !tooltip.ms.sourceSystem" type="button" class="tooltip-edit" @click.stop="onEdit(tooltip.ms)">Edit</button>
         </div>
         <div class="tooltip-fields">
           <div v-if="tooltip.ms.assigneeId && memberName(tooltip.ms.assigneeId)" class="tooltip-field">
@@ -235,13 +234,17 @@
             <span class="tf-label">Where</span>
             <span class="tf-val">{{ tooltip.ms.data.how }}</span>
           </div>
-          <div v-if="tooltip.ms.when" class="tooltip-field">
+          <div v-if="tooltip.ms.kind === 'event'" class="tooltip-field tooltip-field-dates">
+            <span class="tf-label">Start</span>
+            <span class="tf-val">{{ formatDate(tooltip.ms.startDate || tooltip.ms.when) }}</span>
+            <template v-if="tooltip.ms.endDate">
+              <span class="tf-label tfd-end-label">End</span>
+              <span class="tf-val">{{ formatDate(tooltip.ms.endDate) }}</span>
+            </template>
+          </div>
+          <div v-else-if="tooltip.ms.when" class="tooltip-field">
             <span class="tf-label">When</span>
             <span class="tf-val">{{ formatDate(tooltip.ms.when) }}</span>
-          </div>
-          <div v-if="tooltip.ms.endDate" class="tooltip-field">
-            <span class="tf-label">End</span>
-            <span class="tf-val">{{ formatDate(tooltip.ms.endDate) }}</span>
           </div>
         </div>
         <div v-if="tooltip.ms.progress != null" class="tooltip-progress">
@@ -256,9 +259,10 @@
         <div v-if="linkedMilestones.length > 0" class="tooltip-links">
           <span class="tl-label">Blocked by</span>
           <div class="tl-items">
-            <div v-for="lm in linkedMilestones.slice(0, 10)" :key="lm.id" class="tl-item" @click.stop="selectFromTooltip(lm, $event)">
-              <span class="tl-dot" :style="{ background: swimlaneColor(lm.swimlaneId) }"></span>
+            <div v-for="lm in linkedMilestones.slice(0, 10)" :key="lm.id" class="tl-item" :class="{ 'tl-late': lateBlockerIds.has(lm.id) }" @click.stop="selectFromTooltip(lm, $event)">
+              <MarkerIcon :shape="markerOf(lm)" :color="itemColor(lm)" :size="12" :fill="markerFillFor(lm)" class="tl-ico" />
               <span class="tl-title">{{ lm.title }}</span>
+              <AlertTriangle v-if="lateBlockerIds.has(lm.id)" class="tl-late-mark" :size="12" :stroke-width="2.5" title="Late — still blocking past its date" />
               <span v-if="lm.when || lm.startDate" class="tl-date">{{ formatDate(lm.when || lm.startDate) }}</span>
             </div>
             <div v-if="linkedMilestones.length > 10" class="tl-more">
@@ -271,7 +275,7 @@
           <span class="tl-label">Blocks</span>
           <div class="tl-items">
             <div v-for="pm in parentMilestones.slice(0, 10)" :key="pm.id" class="tl-item" @click.stop="selectFromTooltip(pm, $event)">
-              <span class="tl-dot" :style="{ background: swimlaneColor(pm.swimlaneId) }"></span>
+              <MarkerIcon :shape="markerOf(pm)" :color="itemColor(pm)" :size="12" :fill="markerFillFor(pm)" class="tl-ico" />
               <span class="tl-title">{{ pm.title }}</span>
               <span v-if="pm.when || pm.startDate" class="tl-date">{{ formatDate(pm.when || pm.startDate) }}</span>
             </div>
@@ -284,7 +288,7 @@
           <span class="tl-label">Uses</span>
           <div class="tl-items">
             <div v-for="um in usesMilestones.slice(0, 10)" :key="um.id" class="tl-item" @click.stop="openRelated(um, $event)">
-              <span class="tl-dot" :style="{ background: backlogDot(um) }"></span>
+              <MarkerIcon :shape="markerOf(um)" :color="itemColor(um)" :size="12" :fill="markerFillFor(um)" class="tl-ico" />
               <span class="tl-title">{{ um.title }}<span v-if="um._pinV" class="tl-ver">· v{{ um._pinV }}</span></span>
               <span class="tl-date">{{ backlogMeta(um) }}</span>
             </div>
@@ -296,7 +300,7 @@
           <span class="tl-label">Used by</span>
           <div class="tl-items">
             <div v-for="ub in usedByMilestones.slice(0, 10)" :key="ub.id" class="tl-item" @click.stop="openRelated(ub, $event)">
-              <span class="tl-dot" :style="{ background: backlogDot(ub) }"></span>
+              <MarkerIcon :shape="markerOf(ub)" :color="itemColor(ub)" :size="12" :fill="markerFillFor(ub)" class="tl-ico" />
               <span class="tl-title">{{ ub.title }}<span v-if="ub._pinV" class="tl-ver">· v{{ ub._pinV }}</span></span>
               <span class="tl-date">{{ backlogMeta(ub) }}</span>
             </div>
@@ -304,16 +308,6 @@
           </div>
         </div>
 
-        <div v-if="riskByItem[tooltip.ms.id] && riskByItem[tooltip.ms.id].length" class="tooltip-risk">
-          <div class="tr-label"><AlertTriangle :size="12" :stroke-width="2.2" /><span>Late blockers</span></div>
-          <div class="tr-items">
-            <div v-for="p in riskByItem[tooltip.ms.id]" :key="p.id" class="tl-item" @click.stop="selectFromTooltip(p, $event)">
-              <span class="tl-dot" :style="{ background: swimlaneColor(p.swimlaneId) }"></span>
-              <span class="tl-title">{{ p.title }}</span>
-              <span v-if="p.when || p.startDate" class="tl-date">{{ formatDate(p.when || p.startDate) }}</span>
-            </div>
-          </div>
-        </div>
         <div v-if="!tooltip.ms.sourceSystem" class="tooltip-meta">
           <div v-if="tooltip.ms.createdBy" class="tm-row"><User :size="12" :stroke-width="2.2" /><span>Added by {{ whoName(tooltip.ms.createdBy) }}<span v-if="tooltip.ms.createdAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.createdAt) }}</span></span></div>
           <div v-if="tooltip.ms.updatedBy && (tooltip.ms.version || 1) > 1" class="tm-row"><Pencil :size="12" :stroke-width="2.2" /><span>Edited by {{ whoName(tooltip.ms.updatedBy) }}<span v-if="tooltip.ms.updatedAt" class="tm-when"> · {{ fmtStamp(tooltip.ms.updatedAt) }}</span></span></div>
@@ -357,7 +351,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey, itemStatus, statusColor } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey, itemStatus, statusColor, toneColor } from '../stores/useAppStore.js'
 import { AlertTriangle, Clock, Lock, User, Pencil, History } from 'lucide-vue-next'
 import MarkerIcon from './MarkerIcon.vue'
 import MaturityGlyph from './MaturityGlyph.vue'
@@ -370,13 +364,14 @@ function maturityTitle(level) {
 // icons, so every item icon stays visually consistent. Cell ≈ markerSize / 2.3 →
 // the 2×2 grid matches the marker's height.
 const matSize = computed(() => Math.max(3, Math.round(settings.items.markerSize * 0.42)))
-// Status dot before the marker (same colour logic as the Explorer / detail dot).
-const dotSize = computed(() => Math.max(4, Math.round(settings.items.markerSize * 0.5)))
-function statusDotColor(m) { const st = itemStatus(m); return st ? statusColor(st) : null }
-// Horizontal footprint the status dot adds before the marker: the dot itself + its
-// margin + the flex gap to the icon + a comfortable buffer (so bars widen enough
-// before the label wraps out).
-function dotExtra(m) { return statusDotColor(m) ? dotSize.value + settings.items.iconGap + 10 : 0 }
+// Colour on the timeline encodes STATUS — the marker carries its status colour,
+// To Do included (the neutral status colour, not the lane colour). Area comes from
+// the row, type from the icon shape, so colour means exactly one thing: the state.
+function itemColor(m) {
+  const st = itemStatus(m)
+  return st ? statusColor(st) : toneColor('neutral')
+}
+function dotExtra() { return 0 } // status dot removed; kept as a no-op for the geometry calls
 
 // Fixed geometry — months are a fixed width so date math is exact regardless of
 // label length (labels overflow freely to the right).
@@ -431,7 +426,11 @@ const columns = computed(() =>
     : MONTHS)
 const trackColspan = computed(() => unitCount.value + 1) // columns + right gutter
 
-const baseColW = computed(() => Math.max(minColW.value, (wrapW.value - AREA_W.value - SUB_W.value) / unitCount.value))
+// At 100% zoom the months fill only ~90% of the available width (not 100%), so there
+// is a bit of breathing room to the right of DEC by default. The zoom control scales
+// up from there. Effectively what used to be "90%" is now the "100%" baseline.
+const FILL_FACTOR = 0.9
+const baseColW = computed(() => Math.max(minColW.value, FILL_FACTOR * (wrapW.value - AREA_W.value - SUB_W.value) / unitCount.value))
 const COL_W = computed(() => baseColW.value * props.zoom)
 // Total width of the time track (kept named MONTHS_W; it is the column area width
 // in both granularities).
@@ -893,7 +892,8 @@ function barStyle(it, color, laneH, vOffset = ITEM_AIR) {
     width: it.width + 'px',
     background: hexAlpha(color, settings.items.eventOpacity),
     borderColor: hexAlpha(color, Math.min(1, settings.items.eventOpacity * 2.5)),
-    color,
+    color: 'var(--clr-text)', // title stays off-white; the status colour lives in the bar fill/border
+    '--it-status': color,     // the active outline (border mode / selection) uses the status colour
   }
 }
 
@@ -1074,11 +1074,14 @@ const tooltip = reactive({ visible: false, ms: null, x: 0, chipTop: 0, chipBotto
 function openHistory(m) { emit('show-history', m); tooltip.visible = false }
 const tooltipStyle = computed(() => {
   const margin = 12
-  const tipW = 360
-  const estimatedHeight = 340
+  const tipW = 400
   const left = Math.min(tooltip.x, window.innerWidth - tipW - margin)
-  const spaceBelow = window.innerHeight - tooltip.chipBottom
-  const openUp = spaceBelow < estimatedHeight + margin
+  const spaceBelow = window.innerHeight - tooltip.chipBottom - margin
+  const spaceAbove = tooltip.chipTop - margin
+  // Open toward the side with more room when below is tight; cap the height to the
+  // available space and scroll, so the tooltip is never cut off on a small screen.
+  const openUp = spaceBelow < 340 && spaceAbove > spaceBelow
+  const maxH = Math.max(180, (openUp ? spaceAbove : spaceBelow) - 8)
   return {
     position: 'fixed',
     ...(openUp
@@ -1086,9 +1089,19 @@ const tooltipStyle = computed(() => {
       : { top: `${tooltip.chipBottom + 8}px`, bottom: 'auto' }),
     left: `${Math.max(margin, left)}px`,
     width: `${tipW}px`,
+    maxHeight: `${maxH}px`,
+    overflowY: 'auto',
     zIndex: 9999,
   }
 })
+// Which of this item's blockers are themselves late — marked inline (⚠) in the
+// "Blocked by" list instead of a separate section.
+const lateBlockerIds = computed(() => {
+  const id = tooltip.ms?.id
+  const list = (id && riskByItem.value[id]) ? riskByItem.value[id] : []
+  return new Set(list.map(p => p.id))
+})
+
 function onEdit(m) {
   // Opening the editor: dismiss the info tooltip (the dblclick's .stop would
   // otherwise leave it open behind/beside the modal).
@@ -1286,8 +1299,7 @@ thead th {
   vertical-align: middle;
   user-select: none; -webkit-user-select: none;
 }
-.area-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.area-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.area-label { display: flex; align-items: center; min-width: 0; }
 .area-name { font-size: 13px; font-weight: 600; color: var(--clr-text); letter-spacing: -0.1px;
   min-width: 0; overflow-wrap: anywhere; }
 
@@ -1362,12 +1374,11 @@ thead th {
   border-radius: var(--it-radius, 6px);
   z-index: 2;                 /* keep markers/labels above the "+" add hint */
   /* No filter transition: animating grayscale/brightness re-rasterises the inline
-     content (marker + status dot + badges) each frame → sub-pixel "wiggle". */
+     content (marker + badges) each frame → sub-pixel "wiggle". */
   transition: opacity 0.18s ease, box-shadow 0.18s ease;
 }
 .mk-item:hover { filter: brightness(0.9); }
 .mk-icon { flex-shrink: 0; }
-.mk-dot { display: inline-block; border-radius: 50%; flex-shrink: 0; margin-right: 5px; vertical-align: middle; }
 .mk-label, .bar-title {
   text-box-trim: trim-both;
   text-box-edge: cap alphabetic;
@@ -1426,13 +1437,13 @@ thead th {
 
 /* --- Dependency states --- */
 .chip-active {
-  box-shadow: 0 0 0 var(--it-ring, 2px) currentColor, 0 2px 10px rgba(0,0,0,0.14);
+  box-shadow: 0 0 0 var(--it-ring, 2px) var(--it-status, currentColor), 0 2px 10px rgba(0,0,0,0.14);
   filter: brightness(1.05);
   border-radius: var(--it-radius, 6px);
   z-index: 5;
 }
 .chip-related {
-  box-shadow: 0 0 0 var(--it-ring, 2px) currentColor;
+  box-shadow: 0 0 0 var(--it-ring, 2px) var(--it-status, currentColor);
   filter: brightness(1.03);
   opacity: 1 !important;
   border-radius: var(--it-radius, 6px);
@@ -1440,8 +1451,8 @@ thead th {
 .chip-dimmed { opacity: 0.32 !important; filter: grayscale(0.3) !important; }
 
 /* --- Item border mode: always / on-hover / off (width = --it-ring) --- */
-/* Milestones (ring drawn in the item colour) */
-.bm-always .mk-item { box-shadow: 0 0 0 var(--it-ring, 2px) currentColor; }
+/* Milestones (ring drawn in the item's STATUS colour) */
+.bm-always .mk-item { box-shadow: 0 0 0 var(--it-ring, 2px) var(--it-status, currentColor); }
 .bm-off .mk-item,
 .bm-off .mk-item.chip-active,
 .bm-off .mk-item.chip-related { box-shadow: none !important; }
@@ -1450,7 +1461,7 @@ thead th {
 .bm-off .event-bar { border-color: transparent !important; }
 .bm-hover .event-bar:hover,
 .bm-hover .event-bar.chip-active,
-.bm-hover .event-bar.chip-related { border-color: currentColor !important; }
+.bm-hover .event-bar.chip-related { border-color: var(--it-status, currentColor) !important; }
 
 /* --- Empty state --- */
 .empty-state { text-align: center; padding: 80px 20px; color: var(--clr-text-3); font-size: 14px; }
@@ -1491,9 +1502,16 @@ thead th {
   border-bottom: 1px solid var(--clr-border-light);
 }
 .tooltip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.tooltip-title { font-size: 13px; font-weight: 600; color: var(--clr-text); letter-spacing: -0.1px; }
+.tooltip-title { font-size: 13px; font-weight: 600; color: var(--clr-text); letter-spacing: -0.1px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tooltip-edit { margin-left: auto; flex-shrink: 0; font-size: 12px; font-weight: 600; color: #fff; background: var(--clr-accent); border-radius: var(--r-md); padding: 4px 13px; transition: background 0.14s; }
+.tooltip-edit:hover { background: var(--clr-accent-hover); }
 .tooltip-fields { padding: 10px 14px 8px; display: flex; flex-direction: column; gap: 7px; }
 .tooltip-field { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: baseline; }
+/* Event dates: Start on the left, End right-aligned to the tooltip edge — both
+   labels sit right next to their date (equal gap). */
+.tooltip-field-dates { display: flex; align-items: baseline; gap: 8px; }
+.tooltip-field-dates > .tf-label { flex-shrink: 0; }
+.tfd-end-label { margin-left: auto; }
 .tf-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-text-3); }
 .tf-val { font-size: 12.5px; color: var(--clr-text); line-height: 1.45; }
 .tf-who { background: none; border: none; padding: 0; cursor: pointer; text-align: left; font: inherit; }
@@ -1543,9 +1561,13 @@ thead th {
 .tl-item { display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; padding: 2px 4px; margin: 0 -4px; border-radius: 5px; transition: background 0.1s; }
 .tl-item:hover { background: var(--clr-surface-2); }
 .tl-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tl-ico, .tooltip-ico { flex-shrink: 0; }
 .tl-title { font-size: 12.5px; color: var(--clr-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-ver { color: var(--clr-text-3); font-variant-numeric: tabular-nums; }
 .tl-date { font-size: 11px; color: var(--clr-text-3); white-space: nowrap; margin-left: auto; padding-left: 8px; flex-shrink: 0; }
+/* A late blocker is flagged inline with a ⚠ (no separate section). */
+.tl-late-mark { flex-shrink: 0; color: var(--clr-danger, #FF3B30); }
+.tl-item.tl-late .tl-title { color: var(--clr-danger, #FF3B30); }
 .tl-more { font-size: 11px; color: var(--clr-text-3); padding-left: 12px; }
 
 /* Dependency-risk badge + tooltip section */
@@ -1553,10 +1575,6 @@ thead th {
 .tooltip-late { display: flex; align-items: center; gap: 6px; padding: 8px 14px 10px;
   font-size: 10px; font-weight: 700; color: #FF3B30; text-transform: uppercase; letter-spacing: 0.5px; }
 .mk-mat { margin-left: 5px; }
-.tooltip-risk { padding: 8px 14px 10px; border-top: 1px solid var(--clr-border-light); }
-.tr-label { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--clr-danger); margin-bottom: 6px; }
-.tr-label svg { flex-shrink: 0; }
-.tr-items { display: flex; flex-direction: column; gap: 4px; }
 .tr-item { font-size: 12.5px; color: var(--clr-text); }
 
 /* --- Drag/resize live preview --- */

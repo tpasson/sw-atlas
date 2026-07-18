@@ -118,7 +118,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted, watch } from 'vue'
 import { useAppStore, store, session, workspace, baselines, initApp, canEditWorkspace, openSettings, openProjectSettings, openGeneralSettings } from './stores/useAppStore.js'
 import TheHeader from './components/TheHeader.vue'
 import ActivityRail from './components/ActivityRail.vue'
@@ -145,7 +145,10 @@ function openManage(tab) {
 }
 const loginOpen = ref(false)
 const aboutOpen = ref(false)
-const zoom = ref(1)
+// Zoom level persists across reloads (clamped to the same 0.6–2 range the +/- use).
+const ZOOM_KEY = 'atlas-zoom'
+const zoom = ref((() => { const v = parseFloat(localStorage.getItem(ZOOM_KEY)); return v >= 0.6 && v <= 2 ? v : 1 })())
+watch(zoom, (v) => { try { localStorage.setItem(ZOOM_KEY, String(v)) } catch { /* ignore */ } })
 
 // Editing is unlocked only when an authenticated user is viewing their OWN
 // workspace — never on someone else's plan, and never while viewing a saved
