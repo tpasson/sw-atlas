@@ -1,11 +1,11 @@
 <template>
   <!-- Bottom-right legend: auto-derived from the timeline item TYPES actually in
-       use (point types → their icon, range types → the bar) plus maturity stages.
-       No manual marker palette anymore — icons live on the types. -->
+       use. Each type shows its own SYMBOL (the flag for events, the diamond for
+       milestones, …) in neutral grey — on the timeline colour means status, not
+       type, so the legend stays a pure shape key. Plus the maturity stages. -->
   <div class="legend-dock">
     <span v-for="t in legendTypes" :key="t.key" class="legend-item">
-      <span v-if="t.family === 'timeline-range'" class="legend-bar" :style="{ background: barFill(t.color), borderColor: barBorder(t.color) }"></span>
-      <MarkerIcon v-else :shape="t.icon || 'l:Diamond'" :color="t.color || '#8a8a8e'" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="t.fill !== false" />
+      <MarkerIcon :shape="t.icon || 'l:Diamond'" color="#8a8a8e" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="t.fill !== false" />
       {{ t.label }}
     </span>
     <span v-if="legendTypes.length" class="legend-sep"></span>
@@ -34,17 +34,6 @@ const legendTypes = computed(() => {
     (t.family === 'timeline-point' || t.family === 'timeline-range') && present.has(t.key))
 })
 
-function hexA(hex, a) {
-  const h = (hex || '').replace('#', '')
-  if (h.length === 3 || h.length === 6) {
-    const n = h.length === 3 ? h.split('').map(x => x + x).join('') : h
-    const r = parseInt(n.slice(0, 2), 16), g = parseInt(n.slice(2, 4), 16), b = parseInt(n.slice(4, 6), 16)
-    return `rgba(${r},${g},${b},${a})`
-  }
-  return hex || `rgba(120,120,128,${a})`
-}
-function barFill(c) { return c ? hexA(c, 0.3) : 'rgba(120,120,128,0.3)' }
-function barBorder(c) { return c ? hexA(c, 0.6) : 'rgba(120,120,128,0.55)' }
 </script>
 
 <style scoped>
@@ -65,5 +54,4 @@ function barBorder(c) { return c ? hexA(c, 0.6) : 'rgba(120,120,128,0.55)' }
 }
 .legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .legend-sep { width: 1px; height: 18px; background: var(--clr-border); flex-shrink: 0; }
-.legend-bar { width: 18px; height: 10px; border-radius: 3px; background: rgba(120,120,128,0.3); border: 1px solid rgba(120,120,128,0.55); flex-shrink: 0; }
 </style>

@@ -1,13 +1,7 @@
 <template>
   <div class="explorer">
-    <div class="ev-bar">
-      <div class="ev-modes">
-        <button v-for="m in MODES" :key="m.key" class="ev-mode" :class="{ on: mode === m.key }" @click="setMode(m.key)">{{ m.label }}</button>
-      </div>
-    </div>
-
-    <div v-if="mode === 'table'" class="ev-page"><TableView @edit="$emit('edit', $event)" /></div>
-    <div v-else-if="mode === 'board'" class="ev-page"><BoardView :read-only="readOnly" @edit="$emit('edit', $event)" /></div>
+    <div v-if="ui.explorerMode === 'table'" class="ev-page"><TableView @edit="$emit('edit', $event)" /></div>
+    <div v-else-if="ui.explorerMode === 'board'" class="ev-page"><BoardView :read-only="readOnly" @edit="$emit('edit', $event)" /></div>
 
     <!-- VS-Code layout: type tree on the left, the selected item's content in the centre. -->
     <div v-else class="ev-split">
@@ -87,20 +81,53 @@
           </div>
         </div>
 
-        <div v-if="!folders.length && !scmRepos.length" class="ev-tree-blank">No artifacts yet.</div>
+        <!-- Change Requests: proposals about items — their own branch, by status. -->
+        <div v-if="crGroups.length" class="ex-node">
+          <div class="ex-row" @click="toggle('cr')">
+            <svg class="ex-chev" :class="{ open: isOpen('cr') }" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5L6.5 5L3 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <ClipboardCheck :size="14" />
+            <span class="ex-row-label">Change Requests</span>
+            <span class="ex-row-count">{{ crCount }}</span>
+          </div>
+          <div v-if="isOpen('cr')" class="ex-children">
+            <div v-for="grp in crGroups" :key="grp.key" class="ex-node">
+              <div class="ex-row" @click="toggle('cr:' + grp.key)">
+                <svg class="ex-chev" :class="{ open: isOpen('cr:' + grp.key) }" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5L6.5 5L3 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="ex-leaf-dot" :style="{ background: grp.color }"></span>
+                <span class="ex-row-label">{{ grp.label }}</span>
+                <span class="ex-row-count">{{ grp.items.length }}</span>
+              </div>
+              <div v-if="isOpen('cr:' + grp.key)" class="ex-children">
+                <button
+                  v-for="cr in grp.items"
+                  :key="cr.id"
+                  class="ex-leaf"
+                  :class="{ on: ui.focusCrId === cr.id }"
+                  @click="openChangeRequest(cr.id)"
+                >
+                  <span class="ex-leaf-dot" :style="{ background: grp.color }"></span>
+                  <span class="ex-leaf-title"><span class="ex-cr-kind">{{ cr.kind === 'create' ? '＋' : '↻' }}</span>{{ crTitle(cr) }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!folders.length && !scmRepos.length && !crGroups.length" class="ev-tree-blank">No artifacts yet.</div>
       </aside>
 
       <div class="ev-resizer" :class="{ dragging: resizing }" title="Drag to resize · double-click to reset" @mousedown.prevent="startResize" @dblclick="resetWidth"></div>
 
-      <section class="ev-detail">
-        <template v-if="pinned">
-          <div class="ev-pin">
-            <span class="ev-pin-txt">Viewing <strong>v{{ pinned.version }}</strong> — not the latest (v{{ pinned.headVersion }}).</span>
-            <button class="ev-pin-latest" @click="clearPin">View latest</button>
-          </div>
-          <ItemDetail :item="pinned.item" :read-only="true" :pinned-version="pinned.version" />
-        </template>
-        <ItemDetail v-else-if="selected" :item="selected" :read-only="readOnly" @edit="$emit('edit', selected)" />
+      <section class="ev-detail" :class="{ embedded: !!selected }">
+        <MilestoneModal
+          v-if="selected"
+          :key="selected.id"
+          embedded
+          mode="edit"
+          :milestone="selected"
+          :swimlane="editSwimlane"
+          :sub-lane="editSubLane"
+        />
         <div v-else class="ev-detail-empty">
           <p>Select an item in the tree to see its content.</p>
         </div>
@@ -111,21 +138,16 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { GitPullRequest, ArrowDownAZ, ArrowDownZA, Clock, ArrowDown10, ArrowDown01 } from 'lucide-vue-next'
-import { store, itemTypes, itemStatus, statusColor, ui, pushNav, workspace } from '../stores/useAppStore.js'
-import { api } from '../api.js'
+import { GitPullRequest, ClipboardCheck, ArrowDownAZ, ArrowDownZA, Clock, ArrowDown10, ArrowDown01 } from 'lucide-vue-next'
+import { store, itemTypes, itemStatus, statusColor, ui, pushNav, workspace, changeRequests, openChangeRequest, setExplorerMode } from '../stores/useAppStore.js'
 import MarkerIcon from './MarkerIcon.vue'
 import TableView from './TableView.vue'
 import BoardView from './BoardView.vue'
-import ItemDetail from './ItemDetail.vue'
+import MilestoneModal from './MilestoneModal.vue'
 
 defineProps({ readOnly: { type: Boolean, default: false } })
 defineEmits(['edit', 'add'])
 
-const MODES = [{ key: 'folders', label: 'Tree' }, { key: 'table', label: 'Table' }, { key: 'board', label: 'Board' }]
-const MODE_KEY = 'atlas-explorer-mode'
-const mode = ref(['folders', 'table', 'board'].includes(localStorage.getItem(MODE_KEY)) ? localStorage.getItem(MODE_KEY) : 'folders')
-function setMode(k) { mode.value = k; try { localStorage.setItem(MODE_KEY, k) } catch { /* ignore */ } }
 
 // Item ordering within each folder — stable (so nothing jumps when you add one).
 const SORT_KEY = 'atlas-explorer-sort'
@@ -212,6 +234,19 @@ const scmRepos = computed(() =>
     .filter(r => r.count > 0))
 const scmCount = computed(() => scmRepos.value.reduce((n, r) => n + r.count, 0))
 
+// Change Requests: their own Explorer branch, grouped by status (not artifacts).
+const CR_STATUS = [
+  { key: 'pending', label: 'Pending', color: '#FF9F0A' },
+  { key: 'approved', label: 'Approved', color: '#30D158' },
+  { key: 'rejected', label: 'Rejected', color: '#FF3B30' },
+]
+const crGroups = computed(() =>
+  CR_STATUS
+    .map(s => ({ ...s, items: changeRequests.list.filter(c => c.status === s.key) }))
+    .filter(g => g.items.length))
+const crCount = computed(() => changeRequests.list.length)
+function crTitle(cr) { return cr.targetTitle || (cr.payload && cr.payload.title) || 'Untitled' }
+
 function laneColor(m) { return store.swimlanes.find(s => s.id === m.swimlaneId)?.color }
 // Leaf dot: the item's status tone (a quick at-a-glance state), else its area colour.
 function dotColor(m) {
@@ -226,6 +261,9 @@ function loadCollapsed() {
   try { const a = JSON.parse(localStorage.getItem(collapseKey()) || '[]'); return new Set(Array.isArray(a) ? a : []) } catch { return new Set() }
 }
 const collapsed = ref(loadCollapsed())
+// The workspace slug loads async, so the initial ref may have read the "default"
+// key. Re-load once the real slug arrives so a saved collapse state is restored.
+watch(() => workspace.slug, () => { collapsed.value = loadCollapsed() })
 function isOpen(key) { return !collapsed.value.has(key) }
 function toggle(key) {
   const s = new Set(collapsed.value)
@@ -241,51 +279,28 @@ function toggle(key) {
 const selectedId = computed({ get: () => ui.explorerItemId, set: (v) => { ui.explorerItemId = v } })
 const selected = computed(() => store.milestones.find(m => m.id === selectedId.value) || null)
 
-// A pinned-version view: when the URL carries ?v={n} older than head, we show that
-// revision's immutable snapshot (with a banner) instead of the live item.
-const pinned = ref(null) // { item, version, headVersion } | null
+// The Explorer detail pane IS the item form (embedded): it opens in read mode and
+// flips to edit in place — one consistent layout. These feed the form its context.
+const editSwimlane = computed(() => store.swimlanes.find(s => s.id === selected.value?.swimlaneId) || null)
+const editSubLane = computed(() => editSwimlane.value?.subLanes?.find(s => s.id === selected.value?.subLaneId) || null)
 
-// Clicking an item in the tree opens its live/head content and pushes a history
-// entry (so Back returns to the previously viewed item).
+// Clicking an item in the tree opens its live/head content (drops any version view)
+// and pushes a history entry (so Back returns to the previously viewed item).
 function selectLeaf(id) {
-  pinned.value = null
   ui.explorerItemVersion = null
   ui.explorerItemId = id
   pushNav({ view: 'explorer', item: id })
 }
 
-// Leave the pinned snapshot and jump to the item's latest revision.
-function clearPin() {
-  const id = selectedId.value
-  pinned.value = null
-  ui.explorerItemVersion = null
-  if (id) pushNav({ view: 'explorer', item: id }, true)
-}
-
-// Load a specific revision's snapshot for the pinned-version view. If the request
-// is at (or past) head, fall back to the live item — no snapshot needed.
-async function loadPinned(id, version) {
-  const head = store.milestones.find(m => m.id === id)
-  const headVersion = head?.version || version
-  if (!version || version >= headVersion) { pinned.value = null; return }
-  try {
-    const rev = await api.getRevision(id, version)
-    const snap = typeof rev.snapshot === 'string' ? JSON.parse(rev.snapshot) : rev.snapshot
-    pinned.value = { item: snap, version, headVersion }
-  } catch { pinned.value = null }
-}
-
 // React to the open item changing (tree click, deep-link, back/forward, cross-view
-// jump): switch to the tree layout, expand its folder, and load a pinned snapshot
-// if a version is requested.
-watch([() => ui.explorerItemId, () => ui.explorerItemVersion], ([id, version]) => {
-  if (!id) { pinned.value = null; return }
-  mode.value = 'folders'
+// jump): switch to the tree layout and expand its folder. The embedded item form
+// itself reads ?v={n} and shows that revision — no separate pinned view.
+watch([() => ui.explorerItemId, () => ui.explorerItemVersion], ([id]) => {
+  if (!id) return
+  setExplorerMode('folders')
   const m = store.milestones.find(x => x.id === id)
   const key = m ? (m.typeKey || m.kind || 'milestone') : null
   if (key && collapsed.value.has(key)) { const s = new Set(collapsed.value); s.delete(key); collapsed.value = s }
-  if (version) loadPinned(id, version)
-  else pinned.value = null
 }, { immediate: true })
 
 // Draggable divider: resize the tree column (persisted; double-click resets).
@@ -321,11 +336,6 @@ function resetWidth() {
 <style scoped>
 .explorer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-.ev-bar { display: flex; align-items: center; gap: 12px; height: 56px; box-sizing: border-box; padding: 0 24px; border-bottom: 1px solid var(--clr-border-light); flex-shrink: 0; }
-.ev-modes { display: inline-flex; gap: 2px; margin-left: auto; background: var(--clr-surface-2); border-radius: 100px; padding: 2px; }
-.ev-mode { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: transparent; border-radius: 100px; padding: 5px 14px; transition: background 0.12s, color 0.12s; }
-.ev-mode.on { background: var(--clr-surface); color: var(--clr-text); box-shadow: var(--sh-sm); }
-.ev-mode:hover:not(.on) { color: var(--clr-text); }
 
 .ev-page { flex: 1; min-height: 0; overflow: auto; }
 
@@ -365,6 +375,7 @@ function resetWidth() {
 .ex-leaf.on::before { content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--clr-accent); }
 .ex-leaf-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .ex-leaf-title { flex: 1; min-width: 0; font-size: 13px; color: var(--clr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-cr-kind { display: inline-block; width: 13px; margin-right: 3px; color: var(--clr-text-3); font-weight: 700; }
 .ex-leaf-ver { flex-shrink: 0; font-size: 11px; color: var(--clr-text-3); font-variant-numeric: tabular-nums; }
 .ex-leaf-empty { padding: 4px 12px 6px 31px; font-size: 12px; color: var(--clr-text-3); }
 
@@ -375,12 +386,8 @@ function resetWidth() {
 .scm-leaf { padding-left: 61px; }
 
 .ev-detail { flex: 1; min-width: 0; overflow-y: auto; }
+/* When showing the embedded item form (read or edit), it manages its own scroll +
+   console dock, so the pane is a fixed-height flex host. */
+.ev-detail.embedded { overflow: hidden; display: flex; }
 .ev-detail-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--clr-text-3); font-size: 14px; }
-.ev-pin { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 32px 0; padding: 9px 14px;
-  background: rgba(255,159,10,0.1); border: 1px solid rgba(255,159,10,0.4); border-radius: var(--r-md); }
-.ev-pin-txt { font-size: 13px; color: var(--clr-text-2); }
-.ev-pin-txt strong { color: var(--clr-text); font-weight: 700; }
-.ev-pin-latest { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--clr-accent);
-  background: var(--clr-surface); border: 1px solid var(--clr-border); border-radius: 100px; padding: 4px 12px; }
-.ev-pin-latest:hover { background: var(--clr-surface-2); }
 </style>

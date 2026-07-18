@@ -3,9 +3,9 @@
        headed line (→ the graph is a DAG). Auto layout = dagre columns with bowed
        arcs; drag any node to make a custom layout, then Save it (shared per type).
        Current is highlighted; reachable ones advance on click. -->
-  <div class="sf-overlay" @click.self="$emit('close')">
-    <div class="sf-pop">
-      <div class="sf-head">
+  <div :class="inline ? 'sf-inline' : 'sf-overlay'" @click.self="!inline && $emit('close')">
+    <div class="sf-pop" :class="{ 'sf-pop-inline': inline }">
+      <div v-if="!inline" class="sf-head">
         <span class="sf-title">Status flow</span>
         <button type="button" class="sf-x" title="Close" @click="$emit('close')">×</button>
       </div>
@@ -40,16 +40,21 @@
         </svg>
       </div>
 
-      <div class="sf-foot">
+      <!-- Inline (in the item modal): the console teleports to the modal's always-
+           visible footer dock, so it stays on screen across tabs and the diagram gets
+           the whole tab. In overlay mode it stays in place. -->
+      <Teleport to="#modal-console-dock" defer :disabled="!inline">
+      <div class="sf-foot" :class="{ 'sf-foot-docked': inline }">
         <div ref="consoleEl" class="sf-console" :class="{ tall: !canArrange }">
           <div v-for="(m, i) in moveLog" :key="'m' + i" class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ m.time }}]</span><span class="sf-gt">&gt;</span><span class="sf-move">{{ m.text }}</span></div>
-          <div class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ clock }}]</span><span class="sf-gt">&gt;</span><span class="sf-linetext"><template v-for="(t, i) in visibleTokens" :key="i"><button v-if="t.key" type="button" class="sf-cmd" :style="{ color: t.color }" @click="advance({ key: t.key })">{{ t.text }}</button><span v-else>{{ t.text }}</span></template><span class="sf-cursor" :class="{ steady: typing }">▋</span></span></div>
+          <div class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ clock }}]</span><span class="sf-gt">&gt;</span><span class="sf-linetext"><template v-for="(t, i) in visibleTokens" :key="i"><button v-if="t.key || t.action" type="button" class="sf-cmd" :style="{ color: t.color }" @click="t.action ? onAction(t.action) : advance({ key: t.key })">{{ t.text }}</button><span v-else>{{ t.text }}</span></template><span class="sf-cursor" :class="{ steady: typing }">▋</span></span></div>
         </div>
         <div v-if="canArrange" class="sf-actions">
           <button v-if="mode === 'custom' || hasSaved" type="button" class="sf-btn" @click="onReset">Reset to auto</button>
           <button type="button" class="sf-btn primary" :disabled="!dirty" @click="onSave">Save arrangement</button>
         </div>
       </div>
+      </Teleport>
     </div>
   </div>
 </template>
@@ -64,10 +69,14 @@ const props = defineProps({
   current: { type: String, default: '' },
   version: { type: Number, default: 0 },          // item version — logged when advancing
   readOnly: { type: Boolean, default: false },    // can't advance the status (view only)
+  readOnlyNote: { type: String, default: '' },    // why it's read-only (shown in the console)
+  viewingVersion: { type: Number, default: 0 },   // >0 = previewing an old version (console offers "the latest")
   arrangeable: { type: Boolean, default: false }, // can drag/save the layout — workflow settings only
+  inline: { type: Boolean, default: false },      // embed in a panel (no overlay/backdrop/header)
   layout: { type: Object, default: null },        // saved { nodes, edges } or null
 })
-const emit = defineEmits(['advance', 'close', 'saveLayout', 'resetLayout'])
+const emit = defineEmits(['advance', 'close', 'saveLayout', 'resetLayout', 'backToLatest'])
+function onAction(a) { if (a === 'latest') emit('backToLatest') }
 // Two independent capabilities: advancing (from an item, gated by !readOnly) and
 // arranging the diagram (only in workflow settings, gated by arrangeable). An
 // item view never arranges, so you can't nudge the graph while switching status.
@@ -320,7 +329,14 @@ function scrollConsoleSoon() { nextTick(() => { const el = consoleEl.value; if (
 const consoleTokens = computed(() => {
   if (canArrange.value) return [{ text: 'arrange — drag nodes · bend lines · snap arrow ends' }]
   const curLabel = cur.value?.label || props.current || 'unknown'
-  if (props.readOnly) return [{ text: `this item is in status "${curLabel}" — read-only` }]
+  if (props.readOnly) {
+    if (props.viewingVersion) return [
+      { text: `viewing version ${props.viewingVersion} — read-only. switch to ` },
+      { text: `the latest (v${props.version})`, action: 'latest', color: accentColor },
+      { text: ' to edit' },
+    ]
+    return [{ text: `this item is in status "${curLabel}" — ${props.readOnlyNote || 'read-only'}` }]
+  }
   const rs = [...reachable.value].map(k => nodeByKey.get(k)).filter(Boolean)
   if (!rs.length) return [{ text: `this item is in status "${curLabel}" — final state, nothing to advance` }]
   const out = [{ text: `this item is in status "${curLabel}" — you can move to ` }]
@@ -329,7 +345,6 @@ const consoleTokens = computed(() => {
     if (i < rs.length - 2) out.push({ text: ', ' })
     else if (i === rs.length - 2) out.push({ text: ' or ' })
   })
-  out.push({ text: ' — click one' })
   return out
 })
 const totalLen = computed(() => consoleTokens.value.reduce((s, t) => s + t.text.length, 0))
@@ -343,7 +358,7 @@ const visibleTokens = computed(() => {
   const out = []
   for (const t of consoleTokens.value) {
     if (rem <= 0) break
-    out.push({ text: t.text.slice(0, rem), key: t.key, tone: t.tone, color: t.color })
+    out.push({ text: t.text.slice(0, rem), key: t.key, action: t.action, tone: t.tone, color: t.color })
     rem -= t.text.length
   }
   return out
@@ -396,6 +411,15 @@ onBeforeUnmount(() => {
 <style scoped>
 .sf-overlay { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.32); }
 .sf-pop { width: 640px; max-width: calc(100vw - 32px); background: var(--clr-surface); border: 1px solid var(--clr-border-light); border-radius: var(--r-lg); box-shadow: var(--sh-modal); overflow: hidden; }
+/* Inline (embedded in a tab): drop the popup chrome; the console is teleported out
+   to the modal footer, so the diagram gets the whole tab width and can be big. */
+.sf-inline { display: block; }
+.sf-pop-inline { width: 100%; max-width: none; border: 1px solid var(--clr-border-light); border-radius: var(--r-md); box-shadow: none; }
+.sf-pop-inline .sf-canvas { padding: 22px; }
+.sf-pop-inline .sf-svg { max-height: 300px; }
+/* The console once docked in the modal footer: a slim full-width terminal strip. */
+.sf-foot-docked { border-top: none; padding: 8px 18px; }
+.sf-foot-docked .sf-console.tall { height: 116px; max-height: 116px; }
 .sf-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--clr-border-light); }
 .sf-title { font-size: 13px; font-weight: 700; color: var(--clr-text); }
 .sf-x { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; color: var(--clr-text-3); border-radius: var(--r-sm); background: none; }
@@ -418,21 +442,23 @@ onBeforeUnmount(() => {
 .sf-node.reachable rect { transition: filter 0.12s; }
 .sf-node.reachable:hover rect { filter: brightness(1.12); }
 .sf-node.current rect { animation: sf-currentpulse 2s ease-in-out infinite; }
-.sf-foot { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #0d1117; border-top: 1px solid #30363d; }
-.sf-console { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; color: #c9d1d9; }
+/* Console adapts to the theme: near-black in dark mode, light in light mode
+   (--clr-bg is #0F0F11 dark / #F2F2F7 light). */
+.sf-foot { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--clr-bg); border-top: 1px solid var(--clr-border); }
+.sf-console { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; color: var(--clr-text); }
 .sf-console.tall { height: 168px; overflow-y: auto; } /* ~6-line window +50px; scrolls as moves pile up */
 .sf-logline { white-space: pre-wrap; word-break: break-word; }
-.sf-move { color: #8b949e; } /* dimmer history content */
-.sf-prompt { color: #3fb950; user-select: none; }
-.sf-time { color: #6e7681; margin: 0 4px; user-select: none; }
-.sf-gt { color: #3fb950; margin-right: 7px; user-select: none; }
+.sf-move { color: var(--clr-text-3); } /* dimmer history content */
+.sf-prompt { color: #2e9e4f; user-select: none; }
+.sf-time { color: var(--clr-text-3); margin: 0 4px; user-select: none; }
+.sf-gt { color: #2e9e4f; margin-right: 7px; user-select: none; }
 .sf-cmd { display: inline; padding: 0; margin: 0; border: none; background: none; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .sf-cmd:hover { filter: brightness(1.3); }
-.sf-cursor { display: inline-block; margin-left: 1px; color: #c9d1d9; animation: sf-blink 1s step-end infinite; }
+.sf-cursor { display: inline-block; margin-left: 1px; color: var(--clr-text-2); animation: sf-blink 1s step-end infinite; }
 .sf-cursor.steady { animation: none; }
 .sf-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
-.sf-btn { font-size: 12px; font-weight: 600; color: #c9d1d9; background: #21262d; border-radius: var(--r-md); padding: 6px 12px; }
-.sf-btn:hover { background: #2d333b; color: #fff; }
+.sf-btn { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: var(--r-md); padding: 6px 12px; }
+.sf-btn:hover { background: var(--clr-border-light); color: var(--clr-text); }
 .sf-btn.primary { color: #fff; background: var(--clr-accent); }
 .sf-btn.primary:hover { background: var(--clr-accent-hover); }
 .sf-btn:disabled { opacity: 0.45; cursor: default; }

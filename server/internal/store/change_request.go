@@ -127,6 +127,7 @@ func (s *Store) ApproveChangeRequest(ctx context.Context, ws, id, deciderID, not
 	if cr.AuthorID != nil {
 		actor = *cr.AuthorID
 	}
+	itemID := it.ID
 	if cr.Kind == "create" {
 		if _, err := s.CreateItemAs(ctx, ws, actor, it); err != nil {
 			return cr, err
@@ -135,8 +136,32 @@ func (s *Store) ApproveChangeRequest(ctx context.Context, ws, id, deciderID, not
 		if cr.TargetItemID == nil {
 			return cr, errors.New("edit request has no target item")
 		}
+		itemID = *cr.TargetItemID
 		if err := s.UpdateItemAs(ctx, ws, *cr.TargetItemID, actor, it); err != nil {
 			return cr, err
+		}
+	}
+	// Apply the proposed dependencies. The payload carries the item's full desired
+	// link set (both directions) under "links"; a missing key means the proposal
+	// predates link support, so we leave existing links untouched. When present we
+	// replace the item's links wholesale so additions AND removals both take effect.
+	var lp struct {
+		Links *[]struct {
+			A       string `json:"a"`
+			B       string `json:"b"`
+			Rel     string `json:"rel"`
+			Version *int   `json:"version"`
+		} `json:"links"`
+	}
+	if err := json.Unmarshal(cr.Payload, &lp); err == nil && lp.Links != nil && itemID != "" {
+		if _, err := s.pool.Exec(ctx,
+			`DELETE FROM link WHERE workspace_id=$1 AND (a_item_id=$2 OR b_item_id=$2)`, ws, itemID); err != nil {
+			return cr, err
+		}
+		for _, l := range *lp.Links {
+			if err := s.AddLink(ctx, ws, l.A, l.B, l.Rel, l.Version); err != nil {
+				return cr, err
+			}
 		}
 	}
 	if _, err := s.pool.Exec(ctx,

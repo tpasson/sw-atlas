@@ -1,33 +1,40 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div class="backdrop">
-        <Transition name="modal-panel" appear>
-          <div class="panel">
+  <Teleport to="body" :disabled="embedded">
+    <Transition :name="embedded ? 'none' : 'modal'">
+      <div :class="embedded ? 'embed-host' : 'backdrop'">
+        <Transition :name="embedded ? 'none' : 'modal-panel'" :appear="!embedded">
+          <div class="panel" :class="{ embedded }">
             <!-- Header -->
             <div class="panel-header">
               <div class="panel-meta">
-                <span v-if="swimlane" class="panel-badge" :style="{ background: swimlane.color }">
-                  {{ swimlane.name }}
-                </span>
-                <span v-if="subLane" class="panel-sub">{{ subLane.name }}</span>
+                <button v-if="typeStatuses.length" type="button" class="ms-status-chip ms-status-chip-sm" :style="{ '--chip': currentStatusColor }" :title="formLocked ? 'View the status flow' : 'Open the status flow to change status'" @click="tab = 'flow'">
+                  <MarkerIcon :shape="currentType?.icon || 'l:Diamond'" :color="currentStatusColor" :size="14" :fill="currentType?.fill !== false" class="ms-status-ico" />
+                  <span class="ms-status-lbl">{{ currentStatusLabel }}</span>
+                  <Workflow :size="12" class="ms-status-flowico" />
+                </button>
                 <span v-if="mode === 'add'" class="panel-month">{{ displayMonth }}</span>
                 <button v-if="mode === 'edit' && milestone && !milestone.sourceSystem" type="button" class="panel-ver" :class="{ on: tab === 'history' }" title="View version history" @click="tab = 'history'">v{{ milestone.version || 1 }} <History :size="11" /></button>
                 <span v-if="readOnly" class="ro-badge"><Lock :size="11" :stroke-width="2.5" /> Read-only</span>
+                <span v-if="mode === 'edit' && milestone && !milestone.sourceSystem" class="panel-attrib-inline">
+                  <template v-if="milestone.updatedBy && (milestone.version || 1) > 1">Last edit by <strong>{{ who(milestone.updatedBy) }}</strong><span v-if="milestone.updatedAt"> · {{ fmtStamp(milestone.updatedAt) }}</span></template>
+                  <template v-else-if="milestone.createdBy">Added by <strong>{{ who(milestone.createdBy) }}</strong><span v-if="milestone.createdAt"> · {{ fmtStamp(milestone.createdAt) }}</span></template>
+                </span>
               </div>
               <div class="panel-actions-top">
-                <button v-if="canPropose && !proposing" type="button" class="propose-act" @click="proposing = true">{{ mode === 'add' ? 'Propose new item' : 'Propose change' }}</button>
-                <button v-if="mode === 'edit' && !readOnly" type="button" class="icon-act danger" title="Delete milestone" @click="remove">
+                <template v-if="mode === 'edit' && milestone">
+                  <button type="button" class="icon-act" :class="{ done: copied === 'link' }" :title="copied === 'link' ? 'Copied' : 'Copy link to this view'" @click="copy('link')"><Check v-if="copied === 'link'" :size="15" :stroke-width="2.5" /><Link2 v-else :size="15" /></button>
+                  <button type="button" class="icon-act" :class="{ on: viewFormat === 'form' }" title="Normal view" @click="setFormat('form')"><AlignLeft :size="15" /></button>
+                  <button type="button" class="icon-act" :class="{ on: viewFormat === 'json' }" title="View as JSON" @click="setFormat('json')"><Braces :size="15" /></button>
+                  <button type="button" class="icon-act" :class="{ on: viewFormat === 'yaml' }" title="View as YAML" @click="setFormat('yaml')"><FileText :size="15" /></button>
+                </template>
+                <button v-if="mode === 'edit' && !readOnly && editable && viewVersion == null" type="button" class="icon-act danger" title="Delete" @click="remove">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>
                   </svg>
                 </button>
-                <button v-if="!readOnly || proposing" type="button" class="icon-act primary" :title="proposing ? 'Submit proposal' : (mode === 'edit' ? 'Save' : 'Create')" @click="submit">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-                <button type="button" class="icon-act" title="Close" @click="$emit('close')">
+                <button v-if="embedded && !editable && !readOnly && viewVersion == null" type="button" class="icon-act primary" title="Edit" @click="setFormat('form'); editing = true"><Pencil :size="15" /></button>
+                <button v-if="editable && viewVersion == null" type="button" class="icon-act primary" :class="{ saved: justSaved }" :title="proposing ? 'Submit proposal' : (mode === 'edit' ? 'Save' : 'Create')" @click="onSave"><Check :size="16" :stroke-width="2.5" /></button>
+                <button v-if="!embedded" type="button" class="icon-act" title="Close" @click="$emit('close')">
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                     <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
                   </svg>
@@ -35,20 +42,23 @@
               </div>
             </div>
 
-            <div v-if="mode === 'edit' && milestone && !milestone.sourceSystem" class="panel-attrib">
-              <span v-if="milestone.createdBy">Added by <strong>{{ who(milestone.createdBy) }}</strong><span v-if="milestone.createdAt"> · {{ fmtStamp(milestone.createdAt) }}</span></span>
-              <span v-if="milestone.updatedBy && (milestone.version || 1) > 1">Last edit by <strong>{{ who(milestone.updatedBy) }}</strong><span v-if="milestone.updatedAt"> · {{ fmtStamp(milestone.updatedAt) }}</span></span>
-            </div>
-
             <div v-if="proposing" class="propose-banner">
               <span class="pb-text">{{ mode === 'add' ? 'Proposing a new item' : 'Proposing a change' }} — the owner must approve it before it goes live.</span>
               <input v-model="proposeNote" class="pb-note" placeholder="Reason (optional)" />
             </div>
 
+            <div v-if="viewVersion != null" class="version-banner">
+              <span class="vb-text"><History :size="13" /> Viewing <strong>version {{ viewVersion }}</strong> — a read-only snapshot.</span>
+              <button type="button" class="vb-back" @click="backToLatest">Back to latest (v{{ headVersion }})</button>
+            </div>
+
             <!-- Form -->
-            <form class="panel-form" @submit.prevent="submit">
-              <fieldset class="ms-group" :disabled="formLocked">
-              <div class="field">
+            <form class="panel-form" :class="{ 'read-mode': formLocked }" @submit.prevent="submit">
+              <!-- JSON / YAML view replaces the FIELDS block; the tabs (flow, console…)
+                   below stay visible. -->
+              <div v-if="viewFormat !== 'form'" class="ms-code-view"><pre class="ms-code">{{ formattedText }}</pre></div>
+              <fieldset v-else class="ms-group" :disabled="formLocked">
+              <div class="field span2">
                 <label class="field-label">Title <span class="req">*</span></label>
                 <input
                   v-model="form.title"
@@ -60,7 +70,7 @@
                 />
               </div>
 
-              <div v-if="isTimelineType" class="field">
+              <div v-if="isTimelineType" class="field span2">
                 <label class="field-label">Area</label>
                 <select class="field-input" :disabled="formLocked" v-model="form.swimlaneId">
                   <option value="">— No area (off-timeline) —</option>
@@ -80,28 +90,30 @@
                 <label class="field-label">Type</label>
                 <div class="type-row">
                   <span class="type-ico"><MarkerIcon :shape="currentType?.icon || 'l:Diamond'" :color="currentType?.color || swimlane?.color || '#8a8a8e'" :size="18" :fill="currentType?.fill !== false" /></span>
-                  <select class="field-input" :value="form.typeKey" :disabled="formLocked || mode === 'edit'" :title="mode === 'edit' ? 'The type is fixed once an item is created' : ''" @change="applyType($event.target.value)">
+                  <select v-if="mode === 'add' && !formLocked" class="field-input" :value="form.typeKey" @change="applyType($event.target.value)">
                     <option v-for="t in itemTypes.list" :key="t.key" :value="t.key">{{ t.label }}</option>
                   </select>
+                  <span v-else class="type-static">{{ currentType?.label || form.typeKey }}</span>
                 </div>
-                <p class="type-hint">{{ mode === 'edit' ? 'The type is fixed once an item is created.' : 'The icon comes from the type — set it under Settings → Types.' }}</p>
-              </div>
-
-              <!-- Workflow status: allowed values come from the type's status set. -->
-              <div v-if="typeStatuses.length" class="field">
-                <label class="field-label">Status</label>
-                <div class="ms-status">
-                  <span class="ms-status-dot" :style="{ background: currentStatusColor }"></span>
-                  <select class="field-input" :disabled="formLocked" v-model="form.status">
-                    <option v-for="s in selectableStatuses" :key="s.key" :value="s.key">{{ s.label }}</option>
-                  </select>
-                </div>
+                <p class="type-hint">{{ mode === 'add' && !formLocked ? 'The icon comes from the type — set it under Settings → Types.' : 'The type is fixed once an item is created.' }}</p>
               </div>
 
               <!-- Type-specific fields: schema comes from the selected item type. -->
-              <div v-if="currentTypeFields.length" class="field type-fields">
+              <div v-if="currentTypeFields.length" class="field type-fields span2">
                 <label class="field-label">Fields</label>
-                <div v-for="f in currentTypeFields" :key="f.key" class="tf-row">
+                <dl v-if="!editable" class="read-fields">
+                  <template v-for="f in readFieldRows" :key="f.key">
+                    <dt>{{ f.label }}</dt>
+                    <dd v-if="f.refs" :class="{ 'read-empty': !f.refs.length }">
+                      <span v-if="f.refs.length" class="read-refs">
+                        <span v-for="r in f.refs" :key="r.id + ':' + (r.version || '')" class="read-pill" :class="{ missing: !r.exists }" :style="{ color: r.color, background: r.color + '22' }" @click="r.exists && openRef(r)"><span class="read-pill-dot" :style="{ background: r.dot }"></span><MarkerIcon :shape="r.icon" :color="r.color" :size="12" :fill="r.fill" />{{ r.title }}<span v-if="r.version" class="read-pill-ver">v{{ r.version }}</span></span>
+                      </span>
+                      <template v-else>—</template>
+                    </dd>
+                    <dd v-else :class="{ 'read-empty': !f.v, 'read-prose': f.prose }">{{ f.v || '—' }}</dd>
+                  </template>
+                </dl>
+                <div v-for="f in (editable ? currentTypeFields : [])" :key="f.key" class="tf-row">
                   <label class="tf-label">{{ f.label || f.key }}<span v-if="f.required" class="tf-req" title="Required">*</span></label>
                   <select v-if="f.type === 'select'" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]">
                     <option value="">—</option>
@@ -136,7 +148,7 @@
                     </div>
                     <span v-if="!refItems(f).length" class="tf-empty">{{ refHint(f) }}</span>
                   </div>
-                  <textarea v-else-if="f.type === 'textarea'" class="field-textarea" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :rows="readOnly ? 8 : 3" :disabled="formLocked" v-model="form.data[f.key]"></textarea>
+                  <textarea v-else-if="f.type === 'textarea'" class="field-textarea" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :rows="readOnly ? 8 : 2" :disabled="formLocked" v-model="form.data[f.key]"></textarea>
                   <input v-else type="text" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]" />
                   <span v-if="f.type === 'reference' && !f.refMulti && !refItems(f).length" class="tf-refhint">{{ refHint(f) }}</span>
                   <div v-if="f.type === 'reference' && selectedRefs(f).length" class="tf-pins">
@@ -157,9 +169,10 @@
               <div class="field">
                 <label class="field-label">
                   Maturity
-                  <span v-if="form.maturity" class="mat-current">{{ MATURITY_STAGES[form.maturity - 1] }}</span>
+                  <span v-if="form.maturity && editable" class="mat-current">{{ MATURITY_STAGES[form.maturity - 1] }}</span>
                 </label>
-                <div class="maturity-row">
+                <span v-if="!editable" class="read-val">{{ form.maturity ? MATURITY_STAGES[form.maturity - 1] : '—' }}</span>
+                <div v-else class="maturity-row">
                   <button
                     type="button"
                     class="maturity-btn"
@@ -167,7 +180,7 @@
                     title="No maturity"
                     @click="form.maturity = null"
                   >
-                    <MaturityGlyph :level="0" variant="grid" :color="!form.maturity ? '#0A84FF' : '#9aa0a6'" />
+                    <MaturityGlyph :level="0" variant="grid" :color="!form.maturity ? 'var(--clr-text-2)' : '#9aa0a6'" />
                     <span class="maturity-lbl">None</span>
                   </button>
                   <button
@@ -179,7 +192,7 @@
                     :title="s"
                     @click="form.maturity = i + 1"
                   >
-                    <MaturityGlyph :level="i + 1" variant="grid" :color="form.maturity === i + 1 ? (form.color || swimlane?.color || '#0A84FF') : '#9aa0a6'" />
+                    <MaturityGlyph :level="i + 1" variant="grid" :color="form.maturity === i + 1 ? 'var(--clr-text-2)' : '#9aa0a6'" />
                     <span class="maturity-lbl">{{ s }}</span>
                   </button>
                 </div>
@@ -188,9 +201,10 @@
               <div class="field">
                 <label class="field-label">
                   Progress
-                  <span v-if="form.progress != null" class="mat-current">{{ form.progress }}%</span>
+                  <span v-if="form.progress != null && editable" class="mat-current">{{ form.progress }}%</span>
                 </label>
-                <div class="progress-row">
+                <span v-if="!editable" class="read-val">{{ form.progress != null ? form.progress + '%' : '—' }}</span>
+                <div v-else class="progress-row">
                   <button
                     type="button"
                     class="maturity-btn"
@@ -205,23 +219,8 @@
                   />
                 </div>
               </div>
-              </fieldset>
-
-              <div class="ms-tabs" role="tablist">
-                <button type="button" class="ms-tab" :class="{ active: tab === 'details' }" @click="tab = 'details'">Details</button>
-                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'">Dependencies</button>
-                <button type="button" class="ms-tab" :class="{ active: tab === 'uses' }" @click="tab = 'uses'">Uses</button>
-                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
-                <button v-if="mode === 'edit' && !milestone?.sourceSystem" type="button" class="ms-tab" :class="{ active: tab === 'history' }" @click="tab = 'history'">History</button>
-              </div>
-
-              <!-- The History tab is read-only display, so it's never form-disabled
-                   (you can browse versions even when the rest is read-only). -->
-              <fieldset class="ms-tab-body" :disabled="formLocked && tab !== 'history'">
-              <div v-show="tab === 'history'" class="ms-panel ms-history">
-                <ItemHistory v-if="milestone" :key="milestone.id" :item-id="milestone.id" />
-              </div>
-              <div v-show="tab === 'details'" class="ms-panel">
+              <!-- Assignment + scheduling live in the top block now; the tabs below
+                   are for relations, flow & history. -->
               <div class="field">
                 <label class="field-label">Assigned to</label>
                 <select class="field-input" :disabled="formLocked" v-model="form.assigneeId">
@@ -229,9 +228,8 @@
                   <option v-for="mb in workspace.members" :key="mb.userId" :value="mb.userId">{{ mb.username }}</option>
                 </select>
               </div>
-
               <template v-if="isTimelineType">
-                <div v-if="form.kind === 'event'" class="two-col">
+                <div v-if="form.kind === 'event'" class="span2 two-col">
                   <div class="field">
                     <label class="field-label">Start <span class="req">*</span></label>
                     <input v-model="form.startDate" type="date" class="field-input field-date" />
@@ -246,10 +244,40 @@
                   <input v-model="form.when" type="date" class="field-input field-date" />
                 </div>
               </template>
-              <p v-if="dateError" class="field-error">{{ dateError }}</p>
+              <p v-if="dateError" class="field-error span2">{{ dateError }}</p>
+              </fieldset>
+
+              <div class="ms-tabs" role="tablist">
+                <button v-if="typeStatuses.length" type="button" class="ms-tab" :class="{ active: tab === 'flow' }" @click="tab = 'flow'">Flow</button>
+                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'">Dependencies</button>
+                <button type="button" class="ms-tab" :class="{ active: tab === 'uses' }" @click="tab = 'uses'">Uses</button>
+                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
+                <button v-if="mode === 'edit' && !milestone?.sourceSystem" type="button" class="ms-tab" :class="{ active: tab === 'history' }" @click="tab = 'history'">History</button>
               </div>
 
-              <div v-show="tab === 'deps'" class="ms-panel">
+              <!-- The History tab is read-only display, so it's never form-disabled
+                   (you can browse versions even when the rest is read-only). -->
+              <fieldset class="ms-tab-body" :disabled="formLocked && tab !== 'history'">
+              <div v-show="tab === 'history'" class="ms-panel ms-history">
+                <ItemHistory v-if="milestone && tab === 'history'" :key="milestone.id" :item-id="milestone.id" :current-version="viewVersion || headVersion" @select="onSelectVersion" />
+              </div>
+              <div v-show="tab === 'flow'" class="ms-panel ms-flow">
+                <StatusFlow v-if="typeStatuses.length" inline :statuses="typeStatuses" :current="form.status" :version="milestone?.version || 1" :read-only="readOnly || viewVersion != null" :viewing-version="viewVersion || 0" :arrangeable="false" :layout="currentType?.layout" @advance="onFlowAdvance" @back-to-latest="backToLatest" />
+              </div>
+
+              <div v-show="tab === 'deps' && !editable" class="ms-panel">
+                <ul v-if="readDeps.length" class="read-deps">
+                  <li v-for="g in readDeps" :key="g.rel">
+                    <span class="read-dep-rel">{{ g.rel }}</span>
+                    <span class="read-refs">
+                      <span v-for="d in g.items" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span></span>
+                    </span>
+                  </li>
+                </ul>
+                <p v-else class="read-none">No dependencies.</p>
+              </div>
+
+              <div v-show="tab === 'deps' && editable" class="ms-panel">
               <div class="field">
                 <label class="field-label">Relationship</label>
                 <select v-model="relType" class="field-input" :disabled="formLocked">
@@ -373,7 +401,19 @@
               </div>
               </div>
 
-              <div v-show="tab === 'uses'" class="ms-panel">
+              <div v-show="tab === 'uses' && !editable" class="ms-panel">
+                <ul v-if="readUses.length" class="read-deps">
+                  <li v-for="g in readUses" :key="g.rel">
+                    <span class="read-dep-rel">{{ g.rel }}</span>
+                    <span class="read-refs">
+                      <span v-for="d in g.items" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span></span>
+                    </span>
+                  </li>
+                </ul>
+                <p v-else class="read-none">Uses nothing yet.</p>
+              </div>
+
+              <div v-show="tab === 'uses' && editable" class="ms-panel">
               <p class="uses-hint">Backlog items this one <strong>uses</strong> (components / sub-artifacts). Timeline items aren't selectable here.</p>
               <div class="two-col dep-cols">
               <div class="field">
@@ -441,7 +481,14 @@
               </div>
               </div>
 
-              <div v-show="tab === 'groups'" class="ms-panel">
+              <div v-show="tab === 'groups' && !editable" class="ms-panel">
+                <div v-if="readItemGroups.length" class="read-groups">
+                  <span v-for="g in readItemGroups" :key="g.id" class="read-group" :style="{ background: (g.color || '#888') + '22', color: g.color || '#888' }">{{ g.name }}</span>
+                </div>
+                <p v-else class="read-none">No groups.</p>
+              </div>
+
+              <div v-show="tab === 'groups' && editable" class="ms-panel">
               <!-- Group membership -->
               <div v-if="groups.list.length" class="field">
                 <label class="field-label">
@@ -467,6 +514,10 @@
               <!-- Enter-to-save (actions live in the header) -->
               <button type="submit" class="hidden-submit" tabindex="-1" aria-hidden="true"></button>
             </form>
+
+            <!-- Always-visible item console: the status flow teleports its terminal
+                 here, so it stays on screen across every tab. -->
+            <div v-if="typeStatuses.length" id="modal-console-dock" class="modal-console-dock"></div>
           </div>
         </Transition>
       </div>
@@ -476,7 +527,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, STATUS_TONES, toneColor, statusColor, parseRef } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, memberInitials, memberById, openProfile, STATUS_TONES, toneColor, statusColor, parseRef, itemLink, itemStatus, isSchedulableItem, ui, pushNav } from '../stores/useAppStore.js'
 
 function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
@@ -484,10 +535,12 @@ function fmtStamp(iso) {
   const d = new Date(iso)
   return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
+import { api } from '../api.js'
 import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
-import { Lock, History } from 'lucide-vue-next'
+import StatusFlow from './StatusFlow.vue'
+import { Lock, History, Workflow, Link2, Braces, FileText, Pencil, Check, AlignLeft } from 'lucide-vue-next'
 
 const props = defineProps({
   mode:      { type: String,  default: 'add' },
@@ -498,15 +551,16 @@ const props = defineProps({
   date:      { type: String,  default: null },
   milestone: { type: Object,  default: null },
   initialType: { type: String, default: '' }, // preselect a type (Explorer "+ New")
-  initialTab: { type: String, default: 'details' }, // open straight on a tab (e.g. "history")
+  initialTab: { type: String, default: 'flow' }, // open straight on a tab (e.g. "history")
   proposeMode: { type: Boolean, default: false }, // open straight in "propose a new item" mode
+  embedded: { type: Boolean, default: false }, // render inline (Explorer pane), not as a pop-up
 })
 
 const emit = defineEmits(['close'])
 const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, itemGroupIds, setItemGroups } = useAppStore()
 
-const TABS = ['details', 'deps', 'uses', 'groups', 'history']
-const tab = ref(props.mode === 'edit' && TABS.includes(props.initialTab) ? props.initialTab : 'details')
+const TABS = ['flow', 'deps', 'uses', 'groups', 'history']
+const tab = ref(props.mode === 'edit' && TABS.includes(props.initialTab) ? props.initialTab : 'flow')
 const invalidFields = ref([]) // keys of empty required fields, framed red
 const isFieldEmpty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0)
 
@@ -521,8 +575,17 @@ const proposeNote = ref('')
 const canPropose = computed(() =>
   (props.mode === 'edit' || props.mode === 'add') && session.authenticated && !!workspace.role &&
   !baselines.activeId && !props.milestone?.sourceSystem)
-// Effective lock for the form fields: read-only unless we're actively proposing.
-const formLocked = computed(() => readOnly.value && !proposing.value)
+// Previewing a historical version: the whole form shows that snapshot, read-only,
+// until "Back to latest". null = the live/head version.
+const viewVersion = ref(null)
+const headVersion = computed(() => props.milestone?.version || 1)
+// Read vs edit. The pop-up (timeline) always opens straight in edit; the embedded
+// (Explorer) view opens in READ and flips to edit via the pencil. Same layout in
+// both modes — only the fields switch between display and input.
+const editing = ref(!props.embedded)
+const editable = computed(() => proposing.value || (editing.value && !readOnly.value && viewVersion.value == null))
+// Effective lock for the form fields (read-mode = display, not inputs).
+const formLocked = computed(() => !editable.value)
 
 // Marker shapes offered in the picker = the active legend markers (+ the item's
 // own marker if it was removed from the active set, so it stays selectable).
@@ -563,6 +626,57 @@ const form = reactive({
   progress: props.milestone?.progress ?? null,
   scmUrl: props.milestone?.scmUrl ?? '',
 })
+
+// Load a snapshot (a history version, or the live item) into the form fields so the
+// whole item reflects it. Used by the History tab's version preview.
+function applyToForm(src) {
+  form.swimlaneId = src?.swimlaneId ?? ''
+  form.subLaneId = src?.subLaneId ?? null
+  form.title = src?.title ?? ''
+  form.kind = src?.kind ?? 'milestone'
+  form.typeKey = src?.typeKey ?? src?.kind ?? 'milestone'
+  form.data = { ...(src?.data || {}) }
+  form.assigneeId = src?.assigneeId ?? null
+  form.status = src?.status ?? ''
+  form.when = src?.when ?? ''
+  form.startDate = src?.startDate ?? ''
+  form.endDate = src?.endDate ?? ''
+  form.color = src?.color ?? null
+  form.maturity = src?.maturity ?? null
+  form.progress = src?.progress ?? null
+  form.scmUrl = src?.scmUrl ?? ''
+}
+function onSelectVersion(version, snapshot) {
+  if (version === headVersion.value || !snapshot) { backToLatest(); return }
+  viewVersion.value = version
+  applyToForm(snapshot)
+  // Reflect the viewed version in the URL + shared nav state so the link carries it
+  // and a fresh open lands right back here (handled by the watch below).
+  if (props.embedded && props.milestone) { ui.explorerItemVersion = version; pushNav({ view: 'explorer', item: props.milestone.id, version }) }
+}
+function backToLatest() {
+  viewVersion.value = null
+  applyToForm(props.milestone)
+  if (props.embedded && props.milestone) { ui.explorerItemVersion = null; pushNav({ view: 'explorer', item: props.milestone.id }) }
+}
+// Fetch a revision's snapshot and show it (used for URL / back-forward driven views).
+async function loadVersion(version) {
+  if (!props.milestone || !version || version >= headVersion.value) { viewVersion.value = null; applyToForm(props.milestone); return }
+  try {
+    const rev = await api.getRevision(props.milestone.id, version)
+    const snap = typeof rev.snapshot === 'string' ? JSON.parse(rev.snapshot) : rev.snapshot
+    viewVersion.value = version
+    applyToForm(snap)
+  } catch { /* ignore */ }
+}
+// The Explorer's version (from the URL / back-forward) drives which snapshot shows.
+// Clicks set it themselves (guarded here to avoid a redundant re-fetch).
+watch(() => ui.explorerItemVersion, (v) => {
+  if (!props.embedded) return
+  if ((v || null) === (viewVersion.value || null)) return
+  if (v && v < headVersion.value) loadVersion(v)
+  else { viewVersion.value = null; applyToForm(props.milestone) }
+}, { immediate: true })
 
 // Reference fields can pin a target to a specific version, stored as "id@vN".
 // Keep form.data on bare ids (so the pickers bind cleanly) and track pinned
@@ -606,17 +720,154 @@ const currentTypeLabel = computed(() => currentType.value?.label || 'Type')
 const typeStatuses = computed(() => currentType.value?.statuses || [])
 const currentStatusTone = computed(() => (typeStatuses.value.find(s => s.key === form.status)?.tone) || 'neutral')
 const currentStatusColor = computed(() => statusColor(typeStatuses.value.find(s => s.key === form.status)))
-// While editing, offer only the current status plus its allowed transitions
-// (empty transitions = any). Creating an item can start in any status.
-const selectableStatuses = computed(() => {
-  const all = typeStatuses.value
-  if (!all.length) return []
-  if (props.mode === 'add') return all
-  const cur = all.find(s => s.key === form.status)
-  if (!cur || !(cur.to && cur.to.length)) return all
-  const allowed = new Set([cur.key, ...cur.to])
-  return all.filter(s => allowed.has(s.key))
+const currentStatusLabel = computed(() => typeStatuses.value.find(s => s.key === form.status)?.label || form.status || 'Set status')
+// Advancing from the status flow updates the form and — for a live item — persists
+// the status right away, so a status change sticks without a manual save. (When
+// adding or proposing, the item isn't live yet, so it's just staged.)
+function onFlowAdvance(key) {
+  // Status is a live quick-action — allowed even in read mode (auto-saved), as long
+  // as the item isn't truly read-only (viewer / baseline / version preview).
+  if (readOnly.value || viewVersion.value != null) return
+  form.status = key
+  if (props.mode === 'edit' && props.milestone && !proposing.value) updateMilestone(props.milestone.id, { status: key })
+}
+
+// ── Read-mode displays (pills, groups) + Copy link / JSON / YAML export ───────
+// These mirror the old ItemDetail read view so the same layout serves both modes.
+function laneNameOf(id) { return store.swimlanes.find(s => s.id === id)?.name || '' }
+function dateStrOf(it) {
+  if (!it) return ''
+  if (it.startDate && it.endDate) return `${it.startDate} → ${it.endDate}`
+  return it.when || (it.year ? `${MONTHS[(it.month || 1) - 1]} ${it.year}` : '')
+}
+function initials(id) { return memberInitials(id) }
+function itemPill(id) {
+  const target = store.milestones.find(m => m.id === id)
+  const t = target ? itemTypeByKey(target.typeKey || target.kind || 'milestone') : null
+  const st = target ? itemStatus(target) : null
+  const lane = target ? store.swimlanes.find(s => s.id === target.swimlaneId)?.color : null
+  return {
+    title: target?.title || id, exists: !!target, head: target?.version,
+    icon: t?.icon || 'l:Diamond', fill: t?.fill !== false, color: t?.color || '#8a8a8e',
+    dot: st ? statusColor(st) : (lane || '#8a8a8e'),
+  }
+}
+function refDisplay(entry) {
+  const { id, version } = parseRef(entry)
+  const target = store.milestones.find(m => m.id === id)
+  const title = target?.title || id
+  if (!version) return title
+  const head = target?.version
+  return head && head > version ? `${title} · v${version} (latest v${head})` : `${title} · v${version}`
+}
+function openRef(r) {
+  if (!r || r.exists === false || !r.id) return
+  ui.explorerItemId = r.id
+  ui.explorerItemVersion = r.version || null
+  pushNav({ view: 'explorer', item: r.id, version: r.version || null })
+}
+// Field values as read-display: reference fields become clickable pills, the rest text.
+const readFieldRows = computed(() => (currentType.value?.fields || []).map(f => {
+  if (f.type !== 'reference') {
+    const v = form.data?.[f.key]
+    return { key: f.key, label: f.label || f.key, prose: f.type === 'textarea', v: Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v)) }
+  }
+  const v = form.data?.[f.key]
+  const ids = Array.isArray(v) ? v : (v ? [v] : [])
+  return { key: f.key, label: f.label || f.key, refs: ids.map(entry => { const { id, version } = parseRef(entry); return { id, version, ...itemPill(id) } }) }
+}))
+// All links touching this item, grouped by relationship (read-mode Dependencies).
+const readDependencyGroups = computed(() => {
+  const id = props.milestone?.id
+  if (!id) return []
+  const byId = new Map(store.milestones.map(m => [m.id, m]))
+  const relLabel = (rel, fwd) => { const r = RELATIONSHIP_TYPES.find(x => x.key === rel); return fwd ? (r?.label || rel) : (r?.inverse || rel) }
+  const out = []
+  for (const l of store.links) {
+    const relKey = l.rel || 'depends-on'
+    if (l.a === id && byId.has(l.b)) out.push({ relKey, rel: relLabel(l.rel, true), id: l.b, version: l.version ?? null, ...itemPill(l.b) })
+    else if (l.b === id && byId.has(l.a)) out.push({ relKey, rel: relLabel(l.rel, false), id: l.a, version: l.version ?? null, ...itemPill(l.a) })
+  }
+  const m = new Map()
+  for (const d of out) { if (!m.has(d.rel)) m.set(d.rel, { rel: d.rel, relKey: d.relKey, items: [] }); m.get(d.rel).items.push(d) }
+  return [...m.values()]
 })
+const readDeps = computed(() => readDependencyGroups.value.filter(g => g.relKey !== 'uses'))
+const readUses = computed(() => readDependencyGroups.value.filter(g => g.relKey === 'uses'))
+const readItemGroups = computed(() => groups.list.filter(g => (g.itemIds || []).includes(props.milestone?.id)))
+
+const rawStatusLabel = computed(() => typeStatuses.value.find(s => s.key === (props.milestone?.status))?.label || props.milestone?.status || '')
+// JSON/YAML view mode: the fields view (form), or the item rendered as JSON / YAML.
+// Reflected in the URL (?fmt=) so a shared link opens the same view.
+const viewFormat = ref('form') // 'form' | 'json' | 'yaml'
+function setFormat(f) {
+  viewFormat.value = f
+  if (props.embedded && props.milestone) pushNav({ view: 'explorer', item: props.milestone.id, version: viewVersion.value || null, fmt: f })
+}
+const linkUrl = computed(() => itemLink(props.milestone?.id, viewVersion.value || null, viewFormat.value))
+const formattedText = computed(() =>
+  viewFormat.value === 'json' ? JSON.stringify(exportObj.value, null, 2)
+  : viewFormat.value === 'yaml' ? toYaml(exportObj.value) : '')
+function exportFieldValue(f) {
+  const v = props.milestone?.data?.[f.key]
+  if (f.type === 'reference') {
+    const ids = Array.isArray(v) ? v : (v ? [v] : [])
+    const names = ids.map(refDisplay)
+    return f.refMulti ? names : (names[0] || '')
+  }
+  return Array.isArray(v) ? v : (v == null ? '' : v)
+}
+const exportObj = computed(() => {
+  const it = props.milestone || {}
+  const t = currentType.value
+  const o = { id: it.id, type: t?.label || it.typeKey || it.kind || 'item', title: it.title || '', status: rawStatusLabel.value, version: viewVersion.value || it.version || 1 }
+  const area = laneNameOf(it.swimlaneId); if (area) o.area = area
+  const d = dateStrOf(it); if (d) o.date = d
+  if (it.maturity) o.maturity = MATURITY_STAGES[it.maturity - 1]
+  if (it.progress != null) o.progress = it.progress
+  if (it.assigneeId) o.assignee = memberName(it.assigneeId) || it.assigneeId
+  const fields = {}
+  for (const f of (t?.fields || [])) fields[f.label || f.key] = exportFieldValue(f)
+  if (Object.keys(fields).length) o.fields = fields
+  return o
+})
+function yamlScalar(v) {
+  if (v == null) return '""'
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  const s = String(v)
+  const needsQuote = s === '' || /^[\s>|@`"'#%&*!?[\]{},-]/.test(s) || /:\s|\s#|[\n:]/.test(s) || /\s$/.test(s) || /^(true|false|null|yes|no|~)$/i.test(s) || /^-?\d/.test(s)
+  return needsQuote ? JSON.stringify(s) : s
+}
+function toYaml(obj, indent = 0) {
+  const pad = '  '.repeat(indent); const lines = []
+  for (const [k, v] of Object.entries(obj)) {
+    if (Array.isArray(v)) {
+      if (!v.length) { lines.push(`${pad}${k}: []`); continue }
+      lines.push(`${pad}${k}:`); for (const el of v) lines.push(`${pad}  - ${yamlScalar(el)}`)
+    } else if (v && typeof v === 'object') {
+      const entries = Object.entries(v)
+      if (!entries.length) { lines.push(`${pad}${k}: {}`); continue }
+      lines.push(`${pad}${k}:`); lines.push(toYaml(v, indent + 1))
+    } else lines.push(`${pad}${k}: ${yamlScalar(v)}`)
+  }
+  return lines.join('\n')
+}
+const copied = ref('')
+let copiedTimer = null
+async function copy(kind) {
+  const text = kind === 'link' ? linkUrl.value : kind === 'json' ? JSON.stringify(exportObj.value, null, 2) : toYaml(exportObj.value)
+  try { await navigator.clipboard.writeText(text) }
+  catch {
+    const ta = document.createElement('textarea')
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    try { document.execCommand('copy') } catch { /* ignore */ }
+    document.body.removeChild(ta)
+  }
+  copied.value = kind
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => { copied.value = '' }, 1400)
+}
 
 // Switching the item type derives its rendering kind, and (for custom types)
 // seeds the marker/colour and any new field slots.
@@ -747,7 +998,7 @@ watch(availableRelTypes, (types) => {
 // Backlog/container items don't sit in the timeline: the Dependencies (scheduling)
 // and Groups (timeline legend/highlight) tabs are hidden for them — their
 // relationships live in the Uses tab.
-watch(currentSchedulable, (ok) => { if (!ok && (tab.value === 'deps' || tab.value === 'groups')) tab.value = 'details' }, { immediate: true })
+watch(currentSchedulable, (ok) => { if (!ok && (tab.value === 'deps' || tab.value === 'groups')) tab.value = 'flow' }, { immediate: true })
 const SELF = props.milestone?.id || '__NEW__'
 const originalEdges = (props.milestone ? store.links.filter(l => l.a === SELF || l.b === SELF) : [])
   .map(l => ({ a: l.a, b: l.b, rel: l.rel || 'depends-on', version: l.version ?? null }))
@@ -868,20 +1119,29 @@ onMounted(() => {
   if (typeStatuses.value.length && !typeStatuses.value.some(s => s.key === form.status)) {
     form.status = typeStatuses.value[0].key
   }
+  // Open straight in the JSON/YAML view when the shared link asked for it.
+  if (props.embedded && typeof window !== 'undefined') {
+    const f = new URLSearchParams(window.location.search).get('fmt')
+    if (f === 'json' || f === 'yaml') viewFormat.value = f
+  }
   titleInput.value?.focus()
 })
 
-function syncLinks(msId) {
-  // Resolve the placeholder self-id, then diff the working edges against the
-  // originals (keyed a|b|rel). Outgoing "uses" links carry a pinned version.
-  const resolve = (e) => ({
+// Resolve the placeholder self-id to a real item id. Outgoing "uses" links carry
+// a pinned version. Shared by syncLinks (live save) and the change-request payload.
+function resolveLinks(msId) {
+  return edges.value.map(e => ({
     a: e.a === SELF ? msId : e.a,
     b: e.b === SELF ? msId : e.b,
     rel: e.rel,
     version: (e.rel === 'uses' && e.a === SELF && usesPins[e.b]) ? Number(usesPins[e.b]) : null,
-  })
+  }))
+}
+
+function syncLinks(msId) {
+  // Diff the resolved working edges against the originals (keyed a|b|rel).
   const key = (e) => `${e.a}|${e.b}|${e.rel}`
-  const want = new Map(edges.value.map(resolve).map(e => [key(e), e]))
+  const want = new Map(resolveLinks(msId).map(e => [key(e), e]))
   const orig = new Map(originalEdges.map(e => [key(e), e]))
   for (const [k, e] of want) {
     const o = orig.get(k)
@@ -890,14 +1150,19 @@ function syncLinks(msId) {
   for (const [k, e] of orig) if (!want.has(k)) removeLink(e.a, e.b, e.rel)
 }
 
-function submit() {
-  if (formLocked.value) return // view-only and not proposing
-  if (dateError.value) { tab.value = 'details'; return } // surface the date error
-  if (!form.title.trim()) return
+const justSaved = ref(false)
+let savedTimer = null
+function flashSaved() { justSaved.value = true; clearTimeout(savedTimer); savedTimer = setTimeout(() => { justSaved.value = false }, 1600) }
+
+function submit(keepOpen = false) {
+  if (formLocked.value) return false // view-only and not proposing
+  if (dateError.value) return false // the date field (with its error) lives in the always-visible top block
+  if (!form.title.trim()) return false
 
   // Enforce mandatory type fields: frame the empty ones in red instead of a message.
+  // (The type fields are always visible in the top block, so no tab switch needed.)
   invalidFields.value = currentTypeFields.value.filter(f => f.required && isFieldEmpty(form.data[f.key])).map(f => f.key)
-  if (invalidFields.value.length) { tab.value = 'details'; return }
+  if (invalidFields.value.length) return false
 
   const isEvent = form.kind === 'event'
   // Grid position derives from the start (event) or the date (milestone).
@@ -930,25 +1195,43 @@ function submit() {
     progress:   form.progress,
     scmUrl:     form.scmUrl.trim() || null,
   }
-  // Proposing → submit a change request instead of touching the live plan.
+  // Proposing → submit a change request instead of touching the live plan. The
+  // payload carries the item's full desired link set so dependencies edited in the
+  // proposal are applied when the owner approves it (resolved against the item id).
   if (proposing.value) {
-    const done = props.mode === 'add'
-      ? proposeCreate({ ...payload, id: crypto.randomUUID() }, proposeNote.value.trim())
-      : proposeChange(props.milestone.id, payload, proposeNote.value.trim())
+    let done
+    if (props.mode === 'add') {
+      const nid = crypto.randomUUID()
+      done = proposeCreate({ ...payload, id: nid, links: resolveLinks(nid) }, proposeNote.value.trim())
+    } else {
+      done = proposeChange(props.milestone.id, { ...payload, links: resolveLinks(props.milestone.id) }, proposeNote.value.trim())
+    }
     done.catch(e => alert(e?.message || 'Could not submit the proposal'))
-    emit('close')
-    return
+    if (!props.embedded) emit('close')
+    return true
   }
   if (props.mode === 'edit') {
     updateMilestone(props.milestone.id, payload)
     syncLinks(props.milestone.id)
     setItemGroups(props.milestone.id, [...localGroupIds.value])
+    if (keepOpen) { flashSaved(); return true } // saved in place — keep it open for more edits
   } else {
     const newMs = addMilestone(payload)
     syncLinks(newMs.id)
     setItemGroups(newMs.id, [...localGroupIds.value])
   }
-  emit('close')
+  if (!props.embedded) emit('close')
+  return true
+}
+
+// Header Save: pop-up saves (keeping edit open for edits / closing on create); the
+// embedded view saves and flips back to read.
+function onSave() {
+  if (props.embedded) {
+    if (submit(true)) { editing.value = false; proposing.value = false }
+  } else {
+    submit(props.mode === 'edit' && !proposing.value)
+  }
 }
 
 function remove() {
@@ -978,13 +1261,19 @@ function remove() {
   background: var(--clr-surface);
   border-radius: var(--r-xl);
   width: 100%;
-  max-width: 960px;
+  max-width: 1120px;
   max-height: 92vh;
   box-shadow: var(--sh-modal);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+
+/* Embedded (Explorer pane): fill the container instead of floating as a pop-up. */
+.embed-host { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.panel.embedded { max-width: none; max-height: none; height: 100%; border-radius: 0; box-shadow: none; background: transparent; }
+.embed-done { font-size: 13px; font-weight: 600; color: var(--clr-text); background: var(--clr-surface-2); border-radius: var(--r-md); padding: 7px 15px; transition: background 0.15s; }
+.embed-done:hover { background: var(--clr-border-light); }
 
 .panel-header {
   padding: 20px 20px 0;
@@ -996,9 +1285,9 @@ function remove() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
-  padding-right: 110px; /* keep clear of the top-right action icons */
+  padding-right: 300px; /* keep clear of the top-right action icons (copy/json/yaml + save) */
 }
 
 .panel-badge {
@@ -1014,6 +1303,8 @@ function remove() {
 .panel-month { font-size: 12px; color: var(--clr-text-3); }
 .panel-attrib { display: flex; flex-wrap: wrap; gap: 3px 18px; padding: 8px 20px 4px; font-size: 12px; color: var(--clr-text-3); }
 .panel-attrib strong { color: var(--clr-text-2); font-weight: 600; }
+.panel-attrib-inline { margin-left: 6px; font-size: 12px; color: var(--clr-text-3); white-space: nowrap; }
+.panel-attrib-inline strong { color: var(--clr-text-2); font-weight: 600; }
 .panel-ver { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: 100px; padding: 3px 10px; cursor: pointer; transition: background 0.12s, color 0.12s; }
 .panel-ver:hover, .panel-ver.on { background: rgba(0,113,227,0.12); color: var(--clr-accent); }
 
@@ -1033,13 +1324,24 @@ function remove() {
 .icon-act:hover { background: var(--clr-border-light); color: var(--clr-text); }
 .icon-act.primary { background: var(--clr-accent); color: #fff; }
 .icon-act.primary:hover { background: var(--clr-accent-hover); }
+.icon-act.saved { background: #30D158; color: #06310f; }
+.icon-act.done { background: #30D158; color: #06310f; }
+.icon-act.on { background: rgba(0,113,227,0.14); color: var(--clr-accent); }
 .propose-act { font-size: 12px; font-weight: 600; color: var(--clr-accent); background: rgba(0,113,227,0.08); border-radius: 100px; padding: 6px 13px; }
 .propose-act:hover { background: rgba(0,113,227,0.16); }
+.save-act { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: #fff; background: var(--clr-accent); border-radius: var(--r-md); padding: 7px 15px; transition: background 0.15s; }
+.save-act:hover { background: var(--clr-accent-hover); }
+.save-act.saved { background: #30D158; color: #06310f; }
 
 .propose-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 14px; margin: 0 0 4px; background: rgba(255,159,10,0.12); border: 1px solid rgba(255,159,10,0.3); border-radius: var(--r-md); }
 .pb-text { font-size: 12px; font-weight: 600; color: #b7791f; }
 .pb-note { flex: 1; min-width: 160px; border: 1px solid var(--clr-border); border-radius: var(--r-sm); padding: 6px 9px; font-size: 13px; color: var(--clr-text); background: var(--clr-bg); }
 .pb-note:focus { outline: none; border-color: var(--clr-accent); }
+
+.version-banner { display: inline-flex; align-self: flex-start; max-width: calc(100% - 40px); align-items: center; gap: 16px; flex-wrap: wrap; padding: 8px 8px 8px 14px; margin: 0 20px 8px; background: rgba(0,113,227,0.1); border: 1px solid rgba(0,113,227,0.3); border-radius: var(--r-md); }
+.vb-text { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--clr-accent); }
+.vb-back { font-size: 12px; font-weight: 600; color: #fff; background: var(--clr-accent); border-radius: var(--r-md); padding: 6px 13px; white-space: nowrap; }
+.vb-back:hover { background: var(--clr-accent-hover); }
 .icon-act.danger { background: rgba(255,59,48,0.1); color: var(--clr-danger); }
 .icon-act.danger:hover { background: rgba(255,59,48,0.18); }
 
@@ -1051,7 +1353,17 @@ function remove() {
   flex-direction: column;
   gap: 14px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
+
+/* JSON / YAML code view — replaces the FIELDS block (tabs/flow/console stay below). */
+.ms-code-view { min-height: 260px; max-height: 60vh; overflow: auto; background: var(--clr-bg); border: 1px solid var(--clr-border-light); border-radius: var(--r-md); padding: 12px 14px; }
+.ms-code { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.6; color: var(--clr-text); white-space: pre-wrap; word-break: break-word; }
+
+/* Always-visible console dock at the very bottom of the modal (teleport target). */
+.modal-console-dock { flex-shrink: 0; background: var(--clr-bg); border-top: 1px solid var(--clr-border); }
+.modal-console-dock:empty { display: none; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -1064,10 +1376,18 @@ function remove() {
 }
 .ms-tab:hover { color: var(--clr-text-2); }
 .ms-tab.active { color: var(--clr-accent); border-bottom-color: var(--clr-accent); }
-.ms-tab-body { height: 320px; display: flex; flex-direction: column; } /* fixed so the modal is the same height on every tab */
+.ms-tab-body { height: 360px; display: flex; flex-direction: column; } /* fixed so the modal is the same height on every tab */
+.ms-flow { padding: 0; }
 /* fieldsets are only used to disable the whole form in read-only mode — strip their chrome */
 .panel-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-.ms-group { display: flex; flex-direction: column; gap: 14px; }
+/* Two-column field grid: compact fields pair up, wide ones (Title, description,
+   date ranges) span the full width. Wraps gracefully when a field is hidden. */
+.ms-group { display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: start; border: 0; padding: 0; margin: 0; min-width: 0; }
+.ms-group > .field { flex: 1 1 calc(50% - 9px); min-width: 210px; }
+.ms-group > .span2 { flex: 1 1 100%; }
+/* The description fields render last (so Sub-area|Type and the other short fields
+   pair up cleanly above them) without reordering the DOM. */
+.ms-group > .type-fields { order: 1; }
 /* read-only view: keep the disabled controls fully legible (no browser dimming) */
 .panel-form fieldset:disabled :disabled { opacity: 1; cursor: default; }
 .panel-form fieldset:disabled .field-input,
@@ -1075,6 +1395,47 @@ function remove() {
 .panel-form fieldset:disabled .field-date {
   color: var(--clr-text); -webkit-text-fill-color: var(--clr-text); background: var(--clr-bg);
 }
+/* Read-mode: the same fields render as clean display text — no borders, no input
+   chrome — so the layout is identical to edit mode, only the affordance changes. */
+.panel-form.read-mode .field-input,
+.panel-form.read-mode .field-textarea,
+.panel-form.read-mode .field-date {
+  border-color: transparent; background: transparent; box-shadow: none;
+  padding-top: 2px; padding-bottom: 2px; padding-left: 0; padding-right: 0;
+  appearance: none; -webkit-appearance: none; font-weight: 500;
+}
+.panel-form.read-mode .field-input::-webkit-calendar-picker-indicator,
+.panel-form.read-mode .field-input::-webkit-inner-spin-button { display: none; }
+.panel-form.read-mode .field-label { color: var(--clr-text-3); }
+/* Read-mode is compact: label sits to the LEFT of the value (one line per field),
+   with tighter gaps, so the fields don't push the Flow below the fold. */
+.panel-form.read-mode .ms-group { gap: 8px 30px; }
+.panel-form.read-mode .field:not(.type-fields) { flex-direction: row; align-items: baseline; gap: 14px; }
+.panel-form.read-mode .field:not(.type-fields) > .field-label { flex: 0 0 104px; margin: 0; padding-top: 2px; }
+.panel-form.read-mode .field:not(.type-fields) > .field-input,
+.panel-form.read-mode .field:not(.type-fields) > .field-date,
+.panel-form.read-mode .field:not(.type-fields) > .read-val { flex: 1 1 auto; width: auto; min-width: 0; }
+.panel-form.read-mode .type-fields { gap: 8px; }
+.panel-form.read-mode .type-hint { display: none; }
+/* Read-mode display bits (maturity/progress value, type-field list, ref pills). */
+.read-val { font-size: 14px; font-weight: 500; color: var(--clr-text); padding: 2px 0; }
+.read-fields { display: grid; grid-template-columns: 120px 1fr; gap: 6px 14px; margin-top: 4px; }
+.read-fields dt { font-size: 12px; font-weight: 600; color: var(--clr-text-3); }
+.read-fields dd { font-size: 13.5px; color: var(--clr-text); }
+.read-fields dd.read-empty { color: var(--clr-text-3); }
+.read-fields dd.read-prose { white-space: pre-wrap; line-height: 1.5; }
+.read-refs { display: flex; flex-wrap: wrap; gap: 6px; }
+.read-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 100px; padding: 4px 11px; cursor: pointer; transition: filter 0.12s; }
+.read-pill:hover:not(.missing) { filter: brightness(1.18); }
+.read-pill.missing { cursor: default; }
+.read-pill-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.read-pill-ver { font-weight: 500; color: var(--clr-text-3); }
+.read-deps { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.read-deps li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+.read-dep-rel { flex-shrink: 0; padding-top: 5px; min-width: 96px; font-size: 12px; font-weight: 500; color: var(--clr-text-3); }
+.read-groups { display: flex; flex-wrap: wrap; gap: 6px; }
+.read-group { font-size: 12px; font-weight: 600; border-radius: 100px; padding: 3px 10px; border: 1px solid currentColor; }
+.read-none { font-size: 13px; color: var(--clr-text-3); }
 .ro-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--clr-text-3); }
 .ms-panel { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; overflow-y: auto; }
 .scm-hint { font-size: 12.5px; color: var(--clr-text-3); line-height: 1.45; margin-top: -1px; }
@@ -1149,8 +1510,23 @@ function remove() {
 .type-fields .tf-combo-opt.on { color: var(--clr-accent); font-weight: 600; }
 .type-fields .tf-combo-check { width: 12px; flex-shrink: 0; color: var(--clr-accent); }
 .type-fields .tf-combo-empty, .type-fields .tf-combo-more { padding: 6px 10px; font-size: 12px; color: var(--clr-text-3); }
-.ms-status { display: flex; align-items: center; gap: 8px; }
+/* Status shown as a coloured chip (tint = its status colour); click opens the flow. */
+.ms-status-chip {
+  display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
+  font-size: 13.5px; font-weight: 600; color: var(--chip, var(--clr-text));
+  padding: 8px 12px; border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--chip, #8a8a8e) 50%, transparent);
+  background: color-mix(in srgb, var(--chip, #8a8a8e) 12%, transparent);
+  cursor: pointer; transition: background 0.14s, border-color 0.14s;
+}
+.ms-status-chip:hover { background: color-mix(in srgb, var(--chip, #8a8a8e) 20%, transparent); }
 .ms-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.ms-status-ico { flex-shrink: 0; }
+.ms-status-lbl { color: var(--clr-text); }
+.ms-status-flowico { margin-left: 2px; opacity: 0.7; color: var(--chip); }
+/* Compact variant for the header (top of the modal). */
+.ms-status-chip-sm { padding: 4px 10px; font-size: 12.5px; border-radius: 100px; }
+.ms-status-chip-sm .ms-status-dot { width: 8px; height: 8px; }
 
 .field-input,
 .field-textarea {
@@ -1173,6 +1549,9 @@ function remove() {
 }
 .field-input::placeholder,
 .field-textarea::placeholder { color: var(--clr-text-3); }
+/* Description textareas start small and grow with their content (no giant empty
+   boxes). field-sizing is progressive — browsers without it fall back to `rows`. */
+.field-textarea { field-sizing: content; min-height: 2.6em; max-height: 260px; overflow-y: auto; }
 
 .field-date { cursor: pointer; }
 
@@ -1187,6 +1566,9 @@ function remove() {
 
 .type-row { display: flex; align-items: center; gap: 9px; }
 .type-ico { flex-shrink: 0; display: inline-flex; }
+/* Fixed type: plain read-only text — no field box, no chevron, so nobody mistakes
+   it for a control (it can't change once the item exists). */
+.type-static { font-size: 14px; font-weight: 600; color: var(--clr-text); cursor: default; user-select: none; }
 .type-row .field-input { flex: 1; }
 .type-hint { font-size: 11px; color: var(--clr-text-3); margin-top: 5px; }
 .marker-row { display: flex; gap: 6px; }
