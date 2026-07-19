@@ -140,6 +140,24 @@
           </div>
         </span>
 
+        <span
+          v-if="conflictWarnings.length"
+          class="risk-hdr"
+          title="Resource conflicts (an exclusive item is double-booked)"
+          @mouseenter="hoverConflict = true"
+          @mouseleave="hoverConflict = false"
+        >
+          <AlertTriangle :size="14" />
+          {{ conflictWarnings.length }}
+          <div v-if="hoverConflict" class="risk-pop">
+            <div class="risk-pop-title">Resource conflicts ({{ conflictWarnings.length }})</div>
+            <div v-for="w in conflictWarnings" :key="w.id" class="risk-pop-row" @click.stop="focusRisk(w.id)">
+              <span class="risk-pop-name">{{ w.title }}</span>
+              <span class="risk-pop-sub">{{ w.sub }}</span>
+            </div>
+          </div>
+        </span>
+
         <span v-if="baselines.activeId" class="view-pill" title="Viewing a saved baseline — editing is disabled">
           <span class="view-dot"></span>
           Viewing baseline
@@ -172,7 +190,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Sun, Moon, AlertTriangle, Clock, Settings, Bookmark } from 'lucide-vue-next'
-import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, ui, session, workspace, canEditWorkspace, EXPLORER_MODES, setExplorerMode } from '../stores/useAppStore.js'
+import { useAppStore, baselines, store, MONTHS, settings, toggleTheme, riskWarnings, lateItems, resourceConflicts, ui, session, workspace, canEditWorkspace, EXPLORER_MODES, setExplorerMode } from '../stores/useAppStore.js'
 import { APP_VERSION } from '../version.js'
 import PlanSwitcher from './PlanSwitcher.vue'
 
@@ -217,7 +235,18 @@ function jumpBaseline(dir) {
 
 const hoverRisk = ref(false)
 const hoverLate = ref(false)
-function focusRisk(id) { ui.focusItemId = id; hoverRisk.value = false; hoverLate.value = false }
+const hoverConflict = ref(false)
+// Exclusive-resource over-bookings (#128), grouped one row per conflicting item.
+const conflictWarnings = computed(() => {
+  const out = []
+  for (const [id, list] of Object.entries(resourceConflicts.value)) {
+    const m = store.milestones.find(x => x.id === id)
+    if (!m) continue
+    out.push({ id, title: m.title, sub: list.map(c => `${c.resourceTitle}: ${c.otherTitle}`).join(' · ') })
+  }
+  return out
+})
+function focusRisk(id) { ui.focusItemId = id; hoverRisk.value = false; hoverLate.value = false; hoverConflict.value = false }
 
 // Today's date + ISO calendar week, shown next to the brand.
 function isoWeek(dt) {

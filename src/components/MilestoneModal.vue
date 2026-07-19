@@ -166,6 +166,26 @@
                 </div>
               </div>
 
+              <!-- Exclusive resource (#128): a capacity-1 backlog item can be used
+                   by many timeline items, but never by two whose bookings overlap
+                   in time (e.g. a machine can't be on two sites at once). -->
+              <div v-if="!isTimelineType" class="field span2 excl-block">
+                <label class="field-label">Exclusive resource</label>
+                <span v-if="!editable" class="read-val">{{ exclusiveSummary }}</span>
+                <div v-else class="excl-edit">
+                  <div class="excl-modes">
+                    <label v-for="m in EXCL_MODES" :key="m.key" class="excl-mode" :class="{ on: exclusive.mode === m.key }">
+                      <input type="radio" :value="m.key" v-model="exclusive.mode" :disabled="formLocked" />
+                      <span>{{ m.label }}</span>
+                    </label>
+                  </div>
+                  <p class="excl-hint">{{ EXCL_MODES.find(m => m.key === exclusive.mode)?.hint }}</p>
+                  <div v-if="exclusive.mode !== 'off'" class="excl-buffer">
+                    <label class="excl-buf">Setup days before <input type="number" min="0" class="field-input excl-num" :disabled="formLocked" v-model.number="exclusive.before" /></label>
+                    <label class="excl-buf">after <input type="number" min="0" class="field-input excl-num" :disabled="formLocked" v-model.number="exclusive.after" /></label>
+                  </div>
+                </div>
+              </div>
 
               <div class="field">
                 <label class="field-label">
@@ -271,7 +291,7 @@
                   <li v-for="g in readDeps" :key="g.rel">
                     <span class="read-dep-rel">{{ g.rel }}</span>
                     <span class="read-refs">
-                      <span v-for="d in g.items" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span></span>
+                      <span v-for="d in g.items" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
                     </span>
                   </li>
                 </ul>
@@ -407,7 +427,7 @@
                   <li v-for="g in readUses" :key="g.rel">
                     <span class="read-dep-rel">{{ g.rel }}</span>
                     <span class="read-refs">
-                      <span v-for="d in g.items" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span></span>
+                      <span v-for="d in g.items" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
                     </span>
                   </li>
                 </ul>
@@ -528,7 +548,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, canProposeChanges, proposeChange, proposeCreate, memberName, memberInitials, memberById, openProfile, STATUS_TONES, toneColor, statusColor, parseRef, itemLink, itemStatus, isSchedulableItem, ui, pushNav } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, canProposeChanges, proposeChange, proposeCreate, memberName, memberInitials, memberById, openProfile, STATUS_TONES, toneColor, statusColor, parseRef, itemLink, itemStatus, isSchedulableItem, ui, pushNav, checkResourceConflicts, resourceConflicts } from '../stores/useAppStore.js'
 
 function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
@@ -541,7 +561,7 @@ import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
 import StatusFlow from './StatusFlow.vue'
-import { Lock, History, Workflow, Link2, Braces, FileText, Pencil, Check, AlignLeft } from 'lucide-vue-next'
+import { Lock, History, Workflow, Link2, Braces, FileText, Pencil, Check, AlignLeft, AlertTriangle } from 'lucide-vue-next'
 
 const props = defineProps({
   mode:      { type: String,  default: 'add' },
@@ -718,6 +738,25 @@ const isTimelineType = computed(() => {
 })
 const currentTypeFields = computed(() => currentType.value?.fields || [])
 const currentTypeLabel = computed(() => currentType.value?.label || 'Type')
+
+// Exclusive-resource config (#128) — only meaningful for backlog items. Stored in
+// item.data._exclusive; injected into the save payload by encodedData().
+const EXCL_MODES = [
+  { key: 'off',   label: 'Off',   hint: 'No limit — any number of timeline items can use this at the same time.' },
+  { key: 'warn',  label: 'Warn',  hint: 'Overlapping bookings are flagged with a warning, but still allowed.' },
+  { key: 'block', label: 'Block', hint: 'Overlapping bookings are rejected — only one timeline item can use this at a time.' },
+]
+const exclusive = reactive({
+  mode:   props.milestone?.data?._exclusive?.mode || 'off',
+  before: props.milestone?.data?._exclusive?.before ?? 0,
+  after:  props.milestone?.data?._exclusive?.after ?? 0,
+})
+const exclusiveSummary = computed(() => {
+  if (exclusive.mode === 'off') return '—'
+  const label = exclusive.mode === 'block' ? 'Block overlaps' : 'Warn on overlaps'
+  const b = Math.max(0, +exclusive.before || 0), a = Math.max(0, +exclusive.after || 0)
+  return (b || a) ? `${label} · buffer ${b}d before / ${a}d after` : label
+})
 const typeStatuses = computed(() => currentType.value?.statuses || [])
 const currentStatusTone = computed(() => (typeStatuses.value.find(s => s.key === form.status)?.tone) || 'neutral')
 const currentStatusColor = computed(() => statusColor(typeStatuses.value.find(s => s.key === form.status)))
@@ -795,6 +834,14 @@ const readDependencyGroups = computed(() => {
 })
 const readDeps = computed(() => readDependencyGroups.value.filter(g => g.relKey !== 'uses'))
 const readUses = computed(() => readDependencyGroups.value.filter(g => g.relKey === 'uses'))
+// When viewing an exclusive resource, flag the users that over-book it (#128).
+function pillConflict(itemId) {
+  const rid = props.milestone?.id
+  if (!rid) return ''
+  const list = (resourceConflicts.value[itemId] || []).filter(c => c.resourceId === rid)
+  if (!list.length) return ''
+  return list.map(c => `Overlaps “${c.otherTitle}” (${c.when})`).join('\n')
+}
 const readItemGroups = computed(() => groups.list.filter(g => (g.itemIds || []).includes(props.milestone?.id)))
 
 const rawStatusLabel = computed(() => typeStatuses.value.find(s => s.key === (props.milestone?.status))?.label || props.milestone?.status || '')
@@ -951,6 +998,12 @@ function encodedData() {
     const enc = (id) => (id && pins[id] ? `${id}@v${pins[id]}` : id)
     const v = out[f.key]
     out[f.key] = Array.isArray(v) ? v.map(enc) : enc(v)
+  }
+  // Exclusive-resource config (#128) — backlog items only.
+  if (!isTimelineType.value && exclusive.mode && exclusive.mode !== 'off') {
+    out._exclusive = { mode: exclusive.mode, before: Math.max(0, +exclusive.before || 0), after: Math.max(0, +exclusive.after || 0) }
+  } else {
+    delete out._exclusive
   }
   return out
 }
@@ -1155,6 +1208,19 @@ const justSaved = ref(false)
 let savedTimer = null
 function flashSaved() { justSaved.value = true; clearTimeout(savedTimer); savedTimer = setTimeout(() => { justSaved.value = false }, 1600) }
 
+// Block-mode conflicts this save would introduce (#128). Only timeline items book
+// resources; the candidate window uses the item's proposed dates and its current
+// (possibly just-edited) set of "uses" links.
+function blockingConflicts(id, payload) {
+  if (!isTimelineType.value) return []
+  const start = payload.startDate || payload.when
+  const end   = payload.endDate || payload.startDate || payload.when
+  if (!start) return []
+  const resourceIds = edges.value.filter(e => e.a === SELF && (e.rel || 'depends-on') === 'uses').map(e => e.b)
+  if (!resourceIds.length) return []
+  return checkResourceConflicts({ id, start, end, resourceIds }).filter(c => c.mode === 'block')
+}
+
 function submit(keepOpen = false) {
   if (formLocked.value) return false // view-only and not proposing
   if (dateError.value) return false // the date field (with its error) lives in the always-visible top block
@@ -1210,6 +1276,14 @@ function submit(keepOpen = false) {
     done.catch(e => alert(e?.message || 'Could not submit the proposal'))
     if (!props.embedded) emit('close')
     return true
+  }
+  // Block-mode exclusive resources (#128): refuse the save if this timeline item's
+  // booking would overlap another user of a capacity-1 resource it uses.
+  const blocked = blockingConflicts(props.mode === 'edit' ? props.milestone.id : SELF, payload)
+  if (blocked.length) {
+    const c = blocked[0]
+    alert(`${c.resourceTitle} is already booked ${c.when} by “${c.otherTitle}”.\nMove the dates or free the resource before saving.`)
+    return false
   }
   if (props.mode === 'edit') {
     updateMilestone(props.milestone.id, payload)
@@ -1429,6 +1503,7 @@ function remove() {
 .read-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 100px; padding: 4px 11px; cursor: pointer; transition: filter 0.12s; }
 .read-pill:hover:not(.missing) { filter: brightness(1.18); }
 .read-pill.missing { cursor: default; }
+.read-pill.pill-conflict { box-shadow: inset 0 0 0 1.5px #FF3B30; }
 .read-pill-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .read-pill-ver { font-weight: 500; color: var(--clr-text-3); }
 .read-deps { list-style: none; display: flex; flex-direction: column; gap: 8px; }
@@ -1487,6 +1562,17 @@ function remove() {
 .type-fields .tf-empty { font-size: 12px; color: var(--clr-text-3); }
 .type-fields .field-input.tf-invalid { border-color: var(--clr-danger); box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
 .type-fields .tf-checks.tf-invalid { border: 1px solid var(--clr-danger); border-radius: var(--r-md); padding: 6px 8px; box-shadow: 0 0 0 2px rgba(255,59,48,0.18); }
+
+/* Exclusive-resource settings (#128) */
+.excl-edit { display: flex; flex-direction: column; gap: 6px; }
+.excl-modes { display: inline-flex; gap: 4px; background: var(--clr-bg-2); border-radius: var(--r-md); padding: 3px; width: max-content; }
+.excl-mode { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border-radius: calc(var(--r-md) - 2px); font-size: 13px; font-weight: 600; color: var(--clr-text-2); cursor: pointer; }
+.excl-mode input { position: absolute; opacity: 0; width: 0; height: 0; }
+.excl-mode.on { background: var(--clr-accent); color: #fff; }
+.excl-hint { margin: 0; font-size: 12px; color: var(--clr-text-3); }
+.excl-buffer { display: flex; align-items: center; gap: 16px; }
+.excl-buf { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--clr-text-2); }
+.excl-num { width: 64px; }
 .type-fields .tf-row { flex-wrap: wrap; } /* lets the version-pin strip drop to its own line */
 .type-fields .tf-pins { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-left: 130px; }
 .type-fields .tf-refhint { flex-basis: 100%; padding-left: 130px; font-size: 12px; color: var(--clr-warning, #FF9F0A); }
