@@ -100,6 +100,7 @@ export const session = reactive({
   firstName: '',
   lastName: '',
   publicReadEnabled: true,
+  publicCREnabled: false,
   ready: false,
   error: null, // 'auth-required' | 'private' | 'not-found' | message string | null
 })
@@ -150,6 +151,13 @@ export function canEditWorkspace() {
 // sources, sharing, change-request decisions, members)? Owner — or a site admin.
 export function canAdminWorkspace() {
   return session.authenticated && (session.role === 'admin' || workspace.role === 'owner')
+}
+
+// Can the current user PROPOSE a change (Change Request)? Only people who can't
+// edit directly — viewers (members) and, when the project opts in via public CRs,
+// anyone (even without an account). Owners/editors/admins edit directly instead.
+export function canProposeChanges() {
+  return !baselines.activeId && !canEditWorkspace() && ((session.authenticated && !!workspace.role) || session.publicCREnabled)
 }
 
 // Appearance settings are stored per-workspace on the server (so a plan looks the
@@ -871,6 +879,10 @@ export async function initApp() {
   } catch (e) {
     if (e.status === 401 || e.status === 403) session.publicReadEnabled = false
   }
+  try {
+    const pc = await api.getPublicCR()
+    session.publicCREnabled = !!pc.enabled
+  } catch { session.publicCREnabled = false }
 
   try {
     await loadPlan()
@@ -1160,6 +1172,10 @@ export function useAppStore() {
       const pr = await api.getPublicRead()
       session.publicReadEnabled = !!pr.enabled
     } catch { /* ignore */ }
+    try {
+      const pc = await api.getPublicCR()
+      session.publicCREnabled = !!pc.enabled
+    } catch { /* ignore */ }
     await loadPlan()
   }
   async function logout() {
@@ -1181,6 +1197,10 @@ export function useAppStore() {
   async function setPublicRead(enabled) {
     await api.setPublicRead(enabled)
     session.publicReadEnabled = enabled
+  }
+  async function setPublicCR(enabled) {
+    await api.setPublicCR(enabled)
+    session.publicCREnabled = enabled
   }
 
   // ── Shared colour palette ───────────────────────────────────────────────────
@@ -1275,7 +1295,7 @@ export function useAppStore() {
     addMilestone, updateMilestone, deleteMilestone,
     addLink, removeLink, getLinkedIds, dependsOnIds, dependentIds,
     cellMilestones,
-    login, logout, setPublicRead, loadPlan,
+    login, logout, setPublicRead, setPublicCR, loadPlan,
     loadBaselines, selectBaseline, createBaseline, deleteBaseline,
     addPaletteColor, removePaletteColor, resetPalette,
     addGroup, updateGroup, deleteGroup, toggleItemGroup, itemGroupIds, setItemGroups,

@@ -76,6 +76,7 @@
         :read-only="readOnly"
         @add-milestone="openAdd"
         @edit-milestone="openEdit"
+        @propose-milestone="openPropose"
         @show-history="openEdit($event, 'history')"
         @manage="openManage"
       />
@@ -210,6 +211,15 @@ function openEdit(milestone, tab = 'details') {
   Object.assign(modal, {
     show: true, mode: 'edit', swimlane, subLane,
     month: milestone.month, year: milestone.year, date: null, milestone, initialType: '', initialTab: tab, proposeMode: false,
+  })
+}
+// Open an existing item straight in "propose a change" mode (viewers / public users).
+function openPropose(milestone) {
+  const swimlane = store.swimlanes.find(s => s.id === milestone.swimlaneId)
+  const subLane = swimlane?.subLanes.find(s => s.id === milestone.subLaneId) ?? null
+  Object.assign(modal, {
+    show: true, mode: 'edit', swimlane, subLane,
+    month: milestone.month, year: milestone.year, date: null, milestone, initialType: '', initialTab: 'details', proposeMode: true,
   })
 }
 </script>
