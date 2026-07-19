@@ -81,7 +81,7 @@
       />
     </template>
 
-    <FacetFilter v-if="session.ready && !session.error && store.view === 'timeline'" />
+    <FacetFilter v-if="session.ready && !session.error && store.view === 'timeline'" @open-item="openEdit" />
     <GroupLegend v-if="session.ready && !session.error && store.view === 'timeline'" :read-only="readOnly" />
     </template>
     </div>
