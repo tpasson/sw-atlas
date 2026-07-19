@@ -9,7 +9,7 @@ import (
 )
 
 // appVersion is shown in the admin server panel (keep in sync with the frontend).
-const appVersion = "1.5.3"
+const appVersion = "2.0.0"
 
 // getInstanceUISettings returns the global (instance-wide) Display config. Readable
 // by anyone — every plan renders with it.
