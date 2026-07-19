@@ -790,6 +790,31 @@ func (s *Store) SetPublicRead(ctx context.Context, ws string, enabled bool) erro
 	return err
 }
 
+// GetPublicCR reports whether people without an account may submit change requests
+// to this workspace. Defaults to FALSE (opt-in), unlike public read.
+func (s *Store) GetPublicCR(ctx context.Context, ws string) (bool, error) {
+	var v string
+	err := s.pool.QueryRow(ctx, `SELECT value FROM app_setting WHERE key = 'public_cr_enabled' AND workspace_id = $1`, ws).Scan(&v)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return v == "true", nil
+}
+
+func (s *Store) SetPublicCR(ctx context.Context, ws string, enabled bool) error {
+	v := "false"
+	if enabled {
+		v = "true"
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO app_setting (workspace_id, key, value) VALUES ($1, 'public_cr_enabled', $2)
+		 ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`, ws, v)
+	return err
+}
+
 // GetPalette returns the shared, editor-managed list of custom area colours.
 func (s *Store) GetPalette(ctx context.Context, ws string) ([]string, error) {
 	var v string

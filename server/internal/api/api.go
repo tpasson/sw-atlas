@@ -181,6 +181,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Get("/plan", s.getPlan)
 			r.Get("/export", s.exportPlan)
 			r.Get("/settings/public-read", s.getPublicRead)
+			r.Get("/settings/public-cr", s.getPublicCR)
 			r.Get("/settings/palette", s.getPalette)
 			r.Get("/settings/groups", s.getGroups)
 			r.Get("/settings/ui", s.getUISettings)
@@ -222,6 +223,7 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireWorkspaceOwner)
 			r.Put("/settings/public-read", s.setPublicRead)
+			r.Put("/settings/public-cr", s.setPublicCR)
 			r.Put("/settings/palette", s.setPalette)
 			r.Put("/settings/ui", s.setUISettings)
 			r.Put("/settings/git-colors", s.setGitColors)
@@ -240,11 +242,17 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 			r.Post("/change-requests/{id}/reject", s.rejectChangeRequest)
 		})
 
-		// Change requests: any member can propose and list them.
+		// Reviewing (listing) change requests stays member-only.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireMember)
-			r.Post("/change-requests", s.createChangeRequest)
 			r.Get("/change-requests", s.listChangeRequests)
+		})
+
+		// Proposing a change: any member — or, when the project opts in, anyone
+		// (account-less) via the public-CR switch.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireProposeAccess)
+			r.Post("/change-requests", s.createChangeRequest)
 		})
 
 		// Write endpoints: editors only (content, not configuration).
@@ -476,6 +484,44 @@ func (s *Server) requireMember(next http.Handler) http.Handler {
 		}
 		if role == "" && sess.Role != store.RoleAdmin {
 			writeErr(w, http.StatusForbidden, "you are not a member of this project")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
+	})
+}
+
+// requireProposeAccess gates change-request creation: any member (or site admin)
+// may propose; when the project opts in via the public-CR switch, anyone may —
+// even without an account.
+func (s *Server) requireProposeAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		target, err := s.resolveTargetWorkspace(r)
+		if err == store.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		if err != nil {
+			s.internalError(w, err)
+			return
+		}
+		if sess, authed := s.authedSession(r); authed {
+			role, err := s.store.RoleInWorkspace(r.Context(), sess.UserID, target)
+			if err != nil {
+				s.internalError(w, err)
+				return
+			}
+			if role != "" || sess.Role == store.RoleAdmin {
+				next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
+				return
+			}
+		}
+		pub, err := s.store.GetPublicCR(r.Context(), target)
+		if err != nil {
+			s.internalError(w, err)
+			return
+		}
+		if !pub {
+			writeErr(w, http.StatusForbidden, "change requests aren't open to the public for this project")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withWorkspace(r.Context(), target)))
@@ -732,6 +778,29 @@ func (s *Server) setPublicRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.SetPublicRead(r.Context(), s.currentWorkspace(r), in.Enabled); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": in.Enabled})
+}
+
+func (s *Server) getPublicCR(w http.ResponseWriter, r *http.Request) {
+	enabled, err := s.store.GetPublicCR(r.Context(), s.currentWorkspace(r))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
+}
+
+func (s *Server) setPublicCR(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.store.SetPublicCR(r.Context(), s.currentWorkspace(r), in.Enabled); err != nil {
 		s.fail(w, err)
 		return
 	}

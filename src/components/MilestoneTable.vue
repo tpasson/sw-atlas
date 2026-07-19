@@ -215,7 +215,7 @@
         <div class="tooltip-header">
           <MarkerIcon :shape="markerOf(tooltip.ms)" :color="itemColor(tooltip.ms)" :size="14" :fill="markerFillFor(tooltip.ms)" class="tooltip-ico" />
           <span class="tooltip-title">{{ tooltip.ms.title }}</span>
-          <button v-if="!props.readOnly && !tooltip.ms.sourceSystem" type="button" class="tooltip-edit" @click.stop="onEdit(tooltip.ms)">Edit</button>
+          <button v-if="!tooltip.ms.sourceSystem && (!props.readOnly || canProposeChanges())" type="button" class="tooltip-edit" @click.stop="props.readOnly ? (emit('propose-milestone', tooltip.ms), tooltip.visible = false) : onEdit(tooltip.ms)">{{ props.readOnly ? 'Propose change' : 'Edit' }}</button>
         </div>
         <div class="tooltip-fields">
           <div v-if="tooltip.ms.assigneeId && memberName(tooltip.ms.assigneeId)" class="tooltip-field">
@@ -351,7 +351,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey, itemStatus, statusColor, toneColor } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey, itemStatus, statusColor, toneColor, canProposeChanges } from '../stores/useAppStore.js'
 import { AlertTriangle, Clock, Lock, User, Pencil, History } from 'lucide-vue-next'
 import MarkerIcon from './MarkerIcon.vue'
 import MaturityGlyph from './MaturityGlyph.vue'
@@ -404,7 +404,7 @@ const props = defineProps({
   zoom: { type: Number, default: 1 },
   readOnly: { type: Boolean, default: false },
 })
-const emit = defineEmits(['add-milestone', 'edit-milestone', 'show-history', 'manage'])
+const emit = defineEmits(['add-milestone', 'edit-milestone', 'propose-milestone', 'show-history', 'manage'])
 const { getLinkedIds, dependsOnIds, dependentIds, updateMilestone, setView } = useAppStore()
 
 // Months fill the available width at 100% zoom; the zoom control then widens the

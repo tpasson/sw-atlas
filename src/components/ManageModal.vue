@@ -282,6 +282,19 @@
                     </button>
                   </div>
                 </div>
+                <!-- Let people without an account propose changes (opt-in). -->
+                <div class="card">
+                  <p class="section-label">Public change requests</p>
+                  <div class="row-between">
+                    <div class="setting-info">
+                      <span class="setting-name">Allow account-less Change Requests</span>
+                      <span class="setting-desc">When on, anyone who can view this plan — even without an account — can submit a <strong>Change Request</strong> for you to review and approve. When off, only project members can propose changes.</span>
+                    </div>
+                    <button class="toggle" :class="{ active: session.publicCREnabled }" @click="togglePublicCR">
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </div>
+                </div>
                 <ShareManager />
                 <SubscriptionManager />
               </section>
@@ -362,7 +375,7 @@ async function saveTypesAndClose() {
   }
 }
 
-const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
+const { addSwimlane, updateSwimlane, deleteSwimlane, moveSwimlane, setLaneHidden, moveSwimlaneTo, commitSwimlaneOrder, moveSubLaneTo, commitSubLaneOrder, addSubLane, updateSubLane, deleteSubLane, setPublicRead, setPublicCR, addPaletteColor, removePaletteColor, resetPalette, deleteBaseline } = useAppStore()
 
 // Open on a requested tab when it's available to this user; fall back to Areas.
 const ALLOWED_INITIAL = ['areas', 'groups', 'types', 'workflows', 'baselines', 'data', 'sharing', 'members']
@@ -459,6 +472,13 @@ async function onDeleteBaseline(b) {
 async function togglePublicRead() {
   try {
     await setPublicRead(!session.publicReadEnabled)
+  } catch (e) {
+    alert('Could not change setting: ' + (e.message || 'error'))
+  }
+}
+async function togglePublicCR() {
+  try {
+    await setPublicCR(!session.publicCREnabled)
   } catch (e) {
     alert('Could not change setting: ' + (e.message || 'error'))
   }

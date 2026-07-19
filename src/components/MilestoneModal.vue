@@ -27,6 +27,7 @@
                   <button type="button" class="icon-act" :class="{ on: viewFormat === 'json' }" title="View as JSON" @click="setFormat('json')"><Braces :size="15" /></button>
                   <button type="button" class="icon-act" :class="{ on: viewFormat === 'yaml' }" title="View as YAML" @click="setFormat('yaml')"><FileText :size="15" /></button>
                 </template>
+                <button v-if="canPropose && !proposing && viewVersion == null && viewFormat === 'form'" type="button" class="propose-act" @click="proposing = true; editing = true">{{ mode === 'add' ? 'Propose new item' : 'Propose change' }}</button>
                 <button v-if="mode === 'edit' && !readOnly && editable && viewVersion == null" type="button" class="icon-act danger" title="Delete" @click="remove">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>
@@ -527,7 +528,7 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, proposeChange, proposeCreate, memberName, memberInitials, memberById, openProfile, STATUS_TONES, toneColor, statusColor, parseRef, itemLink, itemStatus, isSchedulableItem, ui, pushNav } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, canProposeChanges, proposeChange, proposeCreate, memberName, memberInitials, memberById, openProfile, STATUS_TONES, toneColor, statusColor, parseRef, itemLink, itemStatus, isSchedulableItem, ui, pushNav } from '../stores/useAppStore.js'
 
 function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
@@ -573,8 +574,8 @@ const readOnly = computed(() => !!props.milestone?.sourceSystem || !!baselines.a
 const proposing = ref(!!props.proposeMode)
 const proposeNote = ref('')
 const canPropose = computed(() =>
-  (props.mode === 'edit' || props.mode === 'add') && session.authenticated && !!workspace.role &&
-  !baselines.activeId && !props.milestone?.sourceSystem)
+  (props.mode === 'edit' || props.mode === 'add') &&
+  !baselines.activeId && !props.milestone?.sourceSystem && canProposeChanges())
 // Previewing a historical version: the whole form shows that snapshot, read-only,
 // until "Back to latest". null = the live/head version.
 const viewVersion = ref(null)
