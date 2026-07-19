@@ -94,7 +94,7 @@
                   <select v-if="mode === 'add' && !formLocked" class="field-input" :value="form.typeKey" @change="applyType($event.target.value)">
                     <option v-for="t in itemTypes.list" :key="t.key" :value="t.key">{{ t.label }}</option>
                   </select>
-                  <span v-else class="type-static">{{ currentType?.label || form.typeKey }}</span>
+                  <span v-else class="type-static" :style="{ color: currentType?.color || swimlane?.color || '#8a8a8e' }">{{ currentType?.label || form.typeKey }}</span>
                 </div>
                 <p class="type-hint">{{ mode === 'add' && !formLocked ? 'The icon comes from the type — set it under Settings → Types.' : 'The type is fixed once an item is created.' }}</p>
               </div>
@@ -107,7 +107,7 @@
                     <dt>{{ f.label }}</dt>
                     <dd v-if="f.refs" :class="{ 'read-empty': !f.refs.length }">
                       <span v-if="f.refs.length" class="read-refs">
-                        <span v-for="r in f.refs" :key="r.id + ':' + (r.version || '')" class="read-pill" :class="{ missing: !r.exists }" :style="{ color: r.color, background: r.color + '22' }" @click="r.exists && openRef(r)"><span class="read-pill-dot" :style="{ background: r.dot }"></span><MarkerIcon :shape="r.icon" :color="r.color" :size="12" :fill="r.fill" />{{ r.title }}<span v-if="r.version" class="read-pill-ver">v{{ r.version }}</span></span>
+                        <span v-for="r in f.refs" :key="r.id + ':' + (r.version || '')" class="read-pill" :class="{ missing: !r.exists }" :style="{ color: r.color, background: r.color + '22' }" @click="r.exists && openRef(r)"><MarkerIcon :shape="r.icon" :color="r.dot" :size="12" :fill="r.fill" />{{ r.title }}<span v-if="r.version" class="read-pill-ver">v{{ r.version }}</span></span>
                       </span>
                       <template v-else>—</template>
                     </dd>
@@ -291,7 +291,7 @@
                   <li v-for="g in readDeps" :key="g.rel">
                     <span class="read-dep-rel">{{ g.rel }}</span>
                     <span class="read-refs">
-                      <span v-for="d in g.items" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
+                      <span v-for="d in g.items" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
                     </span>
                   </li>
                 </ul>
@@ -427,7 +427,7 @@
                   <li v-for="g in readUses" :key="g.rel">
                     <span class="read-dep-rel">{{ g.rel }}</span>
                     <span class="read-refs">
-                      <span v-for="d in g.items" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><span class="read-pill-dot" :style="{ background: d.dot }"></span><MarkerIcon :shape="d.icon" :color="d.color" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
+                      <span v-for="d in g.items" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
                     </span>
                   </li>
                 </ul>
@@ -1504,7 +1504,6 @@ function remove() {
 .read-pill:hover:not(.missing) { filter: brightness(1.18); }
 .read-pill.missing { cursor: default; }
 .read-pill.pill-conflict { box-shadow: inset 0 0 0 1.5px #FF3B30; }
-.read-pill-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .read-pill-ver { font-weight: 500; color: var(--clr-text-3); }
 .read-deps { list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .read-deps li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }

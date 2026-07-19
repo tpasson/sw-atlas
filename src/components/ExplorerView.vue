@@ -30,7 +30,7 @@
               :class="{ on: selectedId === m.id }"
               @click="selectLeaf(m.id)"
             >
-              <span class="ex-leaf-dot" :style="{ background: dotColor(m) }"></span>
+              <MarkerIcon class="ex-leaf-ico" :shape="g.type.icon || 'l:Diamond'" :color="dotColor(m)" :size="13" :fill="g.type.fill !== false" />
               <span class="ex-leaf-title">{{ m.title }}</span>
               <span class="ex-leaf-ver">v{{ m.version || 1 }}</span>
             </button>
@@ -374,6 +374,7 @@ function resetWidth() {
 .ex-leaf.on { background: var(--clr-surface-2); }
 .ex-leaf.on::before { content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--clr-accent); }
 .ex-leaf-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.ex-leaf-ico { flex-shrink: 0; }
 .ex-leaf-title { flex: 1; min-width: 0; font-size: 13px; color: var(--clr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ex-cr-kind { display: inline-block; width: 13px; margin-right: 3px; color: var(--clr-text-3); font-weight: 700; }
 .ex-leaf-ver { flex-shrink: 0; font-size: 11px; color: var(--clr-text-3); font-variant-numeric: tabular-nums; }
