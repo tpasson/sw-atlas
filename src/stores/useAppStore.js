@@ -604,6 +604,80 @@ export const riskWarnings = computed(() => {
 })
 export const riskIds = computed(() => new Set(riskWarnings.value.map(w => w.item.id)))
 
+// ── Exclusive resources (#128): a backlog item flagged capacity-1 can't be used
+// by two timeline items whose occupied windows overlap. The window extends each
+// booking by the resource's setup buffer (before/after days). Config lives in
+// item.data._exclusive = { mode: 'off'|'warn'|'block', before, after }.
+export function exclusiveOf(item) {
+  const ex = item && item.data && item.data._exclusive
+  if (!ex || !ex.mode || ex.mode === 'off') return null
+  return { mode: ex.mode, before: Math.max(0, +ex.before || 0), after: Math.max(0, +ex.after || 0) }
+}
+function bookStart(m) { return m.startDate || m.when || fallbackDate(m) }
+function bookEnd(m) { return m.endDate || m.when || m.startDate || fallbackDate(m) }
+function dayNum(iso) { if (!iso) return null; const [y, mo, d] = String(iso).split('-').map(Number); return Math.floor(Date.UTC(y, (mo || 1) - 1, d || 1) / 86400000) }
+// The timeline items that use a given resource (a=user uses b=resource).
+function resourceUsers(resourceId) {
+  const users = []
+  for (const l of store.links) {
+    if ((l.rel || 'depends-on') !== 'uses' || l.b !== resourceId) continue
+    const t = store.milestones.find(m => m.id === l.a)
+    if (t && !t.sourceSystem && (t.when || t.startDate)) users.push(t)
+  }
+  return users
+}
+function windowFor(item, ex) { return { s: dayNum(bookStart(item)) - ex.before, e: dayNum(bookEnd(item)) + ex.after } }
+function overlaps(a, b) { return a.s <= b.e && b.s <= a.e }
+function fmtWin(item) { const s = bookStart(item), e = bookEnd(item); return s === e ? s : `${s} → ${e}` }
+
+// Every current over-booking of an exclusive resource, keyed by the conflicting
+// timeline item id → [{ resourceId, resourceTitle, mode, otherId, otherTitle, when }].
+export const resourceConflicts = computed(() => {
+  const out = {}
+  const push = (id, entry) => { (out[id] = out[id] || []).push(entry) }
+  for (const R of store.milestones) {
+    const ex = exclusiveOf(R)
+    if (!ex) continue
+    const users = resourceUsers(R.id).map(t => ({ item: t, w: windowFor(t, ex) }))
+    for (let i = 0; i < users.length; i++) {
+      for (let j = i + 1; j < users.length; j++) {
+        if (!overlaps(users[i].w, users[j].w)) continue
+        const A = users[i].item, B = users[j].item
+        push(A.id, { resourceId: R.id, resourceTitle: R.title, mode: ex.mode, otherId: B.id, otherTitle: B.title, when: fmtWin(B) })
+        push(B.id, { resourceId: R.id, resourceTitle: R.title, mode: ex.mode, otherId: A.id, otherTitle: A.title, when: fmtWin(A) })
+      }
+    }
+  }
+  return out
+})
+export const resourceConflictIds = computed(() => new Set(Object.keys(resourceConflicts.value)))
+export const resourceConflictCount = computed(() => {
+  const pairs = new Set()
+  for (const [id, list] of Object.entries(resourceConflicts.value)) {
+    for (const c of list) pairs.add([id, c.otherId].sort().join('~') + '|' + c.resourceId)
+  }
+  return pairs.size
+})
+
+// For enforcement: would a candidate booking (item id, its dates, the resource ids
+// it uses) over-book any resource? Returns the conflicting entries (block ones too).
+export function checkResourceConflicts({ id, start, end, resourceIds }) {
+  const conflicts = []
+  for (const rid of (resourceIds || [])) {
+    const R = store.milestones.find(m => m.id === rid)
+    const ex = exclusiveOf(R)
+    if (!ex) continue
+    const w = { s: dayNum(start) - ex.before, e: dayNum(end) + ex.after }
+    for (const other of resourceUsers(rid)) {
+      if (other.id === id) continue
+      if (overlaps(w, windowFor(other, ex))) {
+        conflicts.push({ resourceId: rid, resourceTitle: R.title, mode: ex.mode, otherId: other.id, otherTitle: other.title, when: fmtWin(other) })
+      }
+    }
+  }
+  return conflicts
+}
+
 // Calendar-late: a TRACKED item (progress explicitly set) that's past its deadline
 // and not finished. Deadline = end (range) or when (point); coarse year/month-only
 // placements aren't judged. Mirrors the server's public-plan "late" count exactly.

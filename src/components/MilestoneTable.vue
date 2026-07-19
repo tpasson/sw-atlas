@@ -132,7 +132,7 @@
                   @dblclick.stop="onEdit(it.m)"
                 >
                   <MarkerIcon :shape="markerOf(it.m)" :color="itemColor(it.m)" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" :fill="markerFillFor(it.m)" class="mk-icon" />
-                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="'var(--clr-text-2)'" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                  <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span><span class="mk-label">{{ it.m.title }}</span><MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="'var(--clr-text-2)'" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><AlertTriangle v-if="resourceConflictIds.has(it.m.id)" class="conflict-badge" :title="conflictTitle(it.m.id)" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                 </div>
 
                 <!-- Cluster: collapsed overflow markers; click to expand the list -->
@@ -167,7 +167,7 @@
                       :stroke-width="settings.items.markerStroke"
                       class="bar-marker"
                     />
-                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="'var(--clr-text-2)'" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
+                    <span v-if="it.m.sourceSystem" class="chip-lock" title="Synced — read-only"><Lock :size="10" :stroke-width="2.5" /></span>{{ it.m.title }}<MaturityGlyph v-if="it.m.maturity" :level="it.m.maturity" variant="grid" :size="matSize" :color="'var(--clr-text-2)'" :title="maturityTitle(it.m.maturity)" class="mk-mat" /><AlertTriangle v-if="riskIds.has(it.m.id)" class="risk-badge" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><Clock v-if="lateIds.has(it.m.id)" class="late-badge" title="Overdue" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" /><AlertTriangle v-if="resourceConflictIds.has(it.m.id)" class="conflict-badge" :title="conflictTitle(it.m.id)" :size="settings.items.markerSize" :stroke-width="settings.items.markerStroke" color="#FF3B30" />
                   </span>
                   <span v-if="it.continuesRight" class="bar-arrow">▶</span>
                   <template v-if="!props.readOnly && !it.m.sourceSystem">
@@ -255,6 +255,10 @@
         <div v-if="lateIds.has(tooltip.ms.id)" class="tooltip-late">
           <Clock :size="12" :stroke-width="2.2" />
           <span>Overdue — not finished past its date</span>
+        </div>
+        <div v-for="c in itemConflicts(tooltip.ms.id)" :key="c.resourceId + ':' + c.otherId" class="tooltip-conflict">
+          <AlertTriangle :size="12" :stroke-width="2.2" />
+          <span>Conflicts with <strong>{{ c.otherTitle }}</strong> over <strong>{{ c.resourceTitle }}</strong> ({{ c.when }})</span>
         </div>
         <div v-if="linkedMilestones.length > 0" class="tooltip-links">
           <span class="tl-label">Blocked by</span>
@@ -351,7 +355,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey, itemStatus, statusColor, toneColor, canProposeChanges } from '../stores/useAppStore.js'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, viewItems, settings, groups, ui, riskIds, riskByItem, lateIds, stripMarkdown, memberName, memberById, openProfile, itemTypeByKey, itemStatus, statusColor, toneColor, canProposeChanges, resourceConflicts, resourceConflictIds, checkResourceConflicts } from '../stores/useAppStore.js'
 import { AlertTriangle, Clock, Lock, User, Pencil, History } from 'lucide-vue-next'
 import MarkerIcon from './MarkerIcon.vue'
 import MaturityGlyph from './MaturityGlyph.vue'
@@ -625,6 +629,7 @@ function rowItems(row) {
       const trailW = (m.maturity ? Math.ceil(matSize.value * 2.3) + settings.items.iconGap + 5 : 0)
         + (riskIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
         + (lateIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
+        + (resourceConflictIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
       // If the icon + title (+ trailing badges) don't fit, the whole unit moves to
       // the right of the bar (tight together); otherwise it sits inside the bar.
       const labelOutside = iconW + labelW + trailW + settings.items.labelBuffer > width
@@ -645,6 +650,7 @@ function rowItems(row) {
       const trailW = (m.maturity ? Math.ceil(matSize.value * 2.3) + settings.items.iconGap + 5 : 0)
         + (riskIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
         + (lateIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
+        + (resourceConflictIds.value.has(m.id) ? settings.items.markerSize + settings.items.iconGap : 0)
       items.push({
         key: m.id, m, type: 'point', x,
         x0: x - 6 - pad - dotExtra(m),
@@ -943,8 +949,19 @@ function onDragEnd() {
         s = addDaysToDate(s, deltaDays)
         if (s > en) s = en
       }
-      const [yy, mm] = s.split('-').map(Number)
-      updateMilestone(ds.id, { startDate: s, endDate: en, when: s, year: yy, month: mm })
+      // Block-mode exclusive resources (#128): a drag that would over-book a
+      // capacity-1 resource is refused — the bar snaps back (no update applied).
+      const resourceIds = store.links.filter(l => l.a === ds.id && (l.rel || 'depends-on') === 'uses').map(l => l.b)
+      const blocked = resourceIds.length
+        ? checkResourceConflicts({ id: ds.id, start: s, end: en, resourceIds }).filter(c => c.mode === 'block')
+        : []
+      if (blocked.length) {
+        const c = blocked[0]
+        alert(`${c.resourceTitle} is already booked ${c.when} by “${c.otherTitle}”.\nThe move was reverted.`)
+      } else {
+        const [yy, mm] = s.split('-').map(Number)
+        updateMilestone(ds.id, { startDate: s, endDate: en, when: s, year: yy, month: mm })
+      }
     }
     suppressClick.value = true
     setTimeout(() => { suppressClick.value = false }, 60)
@@ -1101,6 +1118,14 @@ const lateBlockerIds = computed(() => {
   const list = (id && riskByItem.value[id]) ? riskByItem.value[id] : []
   return new Set(list.map(p => p.id))
 })
+
+// Exclusive-resource over-bookings for an item (#128) — tooltip / badge detail.
+function itemConflicts(id) { return resourceConflicts.value[id] || [] }
+function conflictTitle(id) {
+  const list = itemConflicts(id)
+  if (!list.length) return ''
+  return list.map(c => `Conflicts with “${c.otherTitle}” over ${c.resourceTitle} (${c.when})`).join('\n')
+}
 
 function onEdit(m) {
   // Opening the editor: dismiss the info tooltip (the dblclick's .stop would
@@ -1571,9 +1596,12 @@ thead th {
 .tl-more { font-size: 11px; color: var(--clr-text-3); padding-left: 12px; }
 
 /* Dependency-risk badge + tooltip section */
-.risk-badge, .late-badge { flex-shrink: 0; margin-left: 3px; align-self: center; vertical-align: middle; }
+.risk-badge, .late-badge, .conflict-badge { flex-shrink: 0; margin-left: 3px; align-self: center; vertical-align: middle; }
 .tooltip-late { display: flex; align-items: center; gap: 6px; padding: 8px 14px 10px;
   font-size: 10px; font-weight: 700; color: #FF3B30; text-transform: uppercase; letter-spacing: 0.5px; }
+.tooltip-conflict { display: flex; align-items: flex-start; gap: 6px; padding: 6px 14px; color: #FF3B30;
+  font-size: 11.5px; line-height: 1.35; }
+.tooltip-conflict strong { font-weight: 700; }
 .mk-mat { margin-left: 5px; }
 .tr-item { font-size: 12.5px; color: var(--clr-text); }
 
