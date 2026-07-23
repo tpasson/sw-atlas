@@ -47,7 +47,7 @@
       <div class="sf-foot" :class="{ 'sf-foot-docked': inline }">
         <div ref="consoleEl" class="sf-console" :class="{ tall: !canArrange }">
           <div v-for="(m, i) in moveLog" :key="'m' + i" class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ m.time }}]</span><span class="sf-gt">&gt;</span><span class="sf-move">{{ m.text }}</span></div>
-          <div class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ clock }}]</span><span class="sf-gt">&gt;</span><span class="sf-linetext"><template v-for="(t, i) in visibleTokens" :key="i"><button v-if="t.key || t.action" type="button" class="sf-cmd" :style="{ color: t.color }" @click="t.action ? onAction(t.action) : advance({ key: t.key })">{{ t.text }}</button><span v-else>{{ t.text }}</span></template><span class="sf-cursor" :class="{ steady: typing }">▋</span></span></div>
+          <div class="sf-logline"><span class="sf-prompt">atlas:status</span><span class="sf-time">[{{ clock }}]</span><span class="sf-gt">&gt;</span><span class="sf-linetext"><template v-for="(t, i) in visibleTokens" :key="i"><button v-if="t.key || t.action" type="button" class="sf-cmd" :style="{ color: t.color }" @click="t.action ? onAction(t.action) : advance({ key: t.key })">{{ t.text }}</button><span v-else>{{ t.text }}</span></template><span class="sf-cursor" :class="{ steady: typing }"></span></span></div>
         </div>
         <div v-if="canArrange" class="sf-actions">
           <button v-if="mode === 'custom' || hasSaved" type="button" class="sf-btn" @click="onReset">Reset to auto</button>
@@ -74,9 +74,14 @@ const props = defineProps({
   arrangeable: { type: Boolean, default: false }, // can drag/save the layout — workflow settings only
   inline: { type: Boolean, default: false },      // embed in a panel (no overlay/backdrop/header)
   layout: { type: Object, default: null },        // saved { nodes, edges } or null
+  commentable: { type: Boolean, default: false }, // offer a "comment" command in the prompt
+  userName: { type: String, default: '' },        // acting user — status moves are logged with it
 })
-const emit = defineEmits(['advance', 'close', 'saveLayout', 'resetLayout', 'backToLatest'])
-function onAction(a) { if (a === 'latest') emit('backToLatest') }
+const emit = defineEmits(['advance', 'close', 'saveLayout', 'resetLayout', 'backToLatest', 'comment'])
+function onAction(a) {
+  if (a === 'latest') emit('backToLatest')
+  if (a === 'comment') emit('comment')
+}
 // Two independent capabilities: advancing (from an item, gated by !readOnly) and
 // arranging the diagram (only in workflow settings, gated by arrangeable). An
 // item view never arranges, so you can't nudge the graph while switching status.
@@ -313,7 +318,7 @@ function advance(n) {
   if (props.readOnly || !reachable.value.has(n.key)) return
   const toLabel = nodeByKey.get(n.key)?.label || n.key
   const fromVer = props.version || 1
-  moveLog.value.push({ time: stamp(), text: `you picked ${toLabel} — version v${fromVer} → v${fromVer + 1}` })
+  moveLog.value.push({ time: stamp(), text: `${props.userName || 'you'} picked ${toLabel} — version v${fromVer} → v${fromVer + 1}` })
   emit('advance', n.key)
   scrollConsoleSoon()
 }
@@ -338,13 +343,18 @@ const consoleTokens = computed(() => {
     return [{ text: `this item is in status "${curLabel}" — ${props.readOnlyNote || 'read-only'}` }]
   }
   const rs = [...reachable.value].map(k => nodeByKey.get(k)).filter(Boolean)
-  if (!rs.length) return [{ text: `this item is in status "${curLabel}" — final state, nothing to advance` }]
+  if (!rs.length) {
+    const out = [{ text: `this item is in status "${curLabel}" — final state, nothing to advance` }]
+    if (props.commentable) out.push({ text: ' · you can still ' }, { text: 'Comment', action: 'comment', color: accentColor })
+    return out
+  }
   const out = [{ text: `this item is in status "${curLabel}" — you can move to ` }]
   rs.forEach((n, i) => {
     out.push({ text: n.label, key: n.key, tone: n.tone, color: n.color })
     if (i < rs.length - 2) out.push({ text: ', ' })
     else if (i === rs.length - 2) out.push({ text: ' or ' })
   })
+  if (props.commentable) out.push({ text: ' — or ' }, { text: 'Comment', action: 'comment', color: accentColor })
   return out
 })
 const totalLen = computed(() => consoleTokens.value.reduce((s, t) => s + t.text.length, 0))
@@ -454,7 +464,9 @@ onBeforeUnmount(() => {
 .sf-gt { color: #2e9e4f; margin-right: 7px; user-select: none; }
 .sf-cmd { display: inline; padding: 0; margin: 0; border: none; background: none; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .sf-cmd:hover { filter: brightness(1.3); }
-.sf-cursor { display: inline-block; margin-left: 1px; color: var(--clr-text-2); animation: sf-blink 1s step-end infinite; }
+/* Block cursor (one character cell wide, like the VS Code terminal). */
+.sf-cursor { display: inline-block; width: 1ch; height: 1.2em; margin-left: 2px; background: var(--clr-text-2);
+  vertical-align: text-bottom; animation: sf-blink 1s step-end infinite; }
 .sf-cursor.steady { animation: none; }
 .sf-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
 .sf-btn { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-surface-2); border-radius: var(--r-md); padding: 6px 12px; }

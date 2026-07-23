@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,10 +121,12 @@ func nullIfEmpty(s string) any {
 }
 
 type Link struct {
-	A       string `json:"a"`
-	B       string `json:"b"`
-	Rel     string `json:"rel"`               // relationship kind (depends-on, uses, child-of, …)
-	Version *int   `json:"version,omitempty"` // "uses" links may pin a target version; nil = latest
+	A           string `json:"a"`
+	B           string `json:"b"`
+	Rel         string `json:"rel"`                   // relationship kind (depends-on, uses, child-of, …)
+	Version     *int   `json:"version,omitempty"`     // "uses" links may pin a target version; nil = latest
+	Qty         *int   `json:"qty,omitempty"`         // "uses" links may carry a BOM quantity; nil = 1
+	Designators string `json:"designators,omitempty"` // "uses" links may name usage positions ("C1, C2, C10-C17")
 }
 
 type Plan struct {
@@ -204,13 +207,13 @@ func (s *Store) GetPlan(ctx context.Context, ws string) (Plan, error) {
 		return p, err
 	}
 
-	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id, rel, version FROM link WHERE workspace_id = $1`, ws)
+	lkRows, err := s.pool.Query(ctx, `SELECT a_item_id, b_item_id, rel, version, qty, COALESCE(designators, '') FROM link WHERE workspace_id = $1`, ws)
 	if err != nil {
 		return p, err
 	}
 	for lkRows.Next() {
 		var l Link
-		if err := lkRows.Scan(&l.A, &l.B, &l.Rel, &l.Version); err != nil {
+		if err := lkRows.Scan(&l.A, &l.B, &l.Rel, &l.Version, &l.Qty, &l.Designators); err != nil {
 			lkRows.Close()
 			return p, err
 		}
@@ -738,20 +741,26 @@ func itemDates(it Item) (whenV, startV, endV interface{}, err error) {
 
 // ── Links ───────────────────────────────────────────────────────────────────
 
-func (s *Store) AddLink(ctx context.Context, ws, a, b, rel string, version *int) error {
+func (s *Store) AddLink(ctx context.Context, ws, a, b, rel string, version, qty *int, designators string) error {
 	if a == b {
 		return nil
 	}
 	if rel == "" {
 		rel = "depends-on"
 	}
+	// qty is the BOM multiplicity of a "uses" edge; 1 is the default and is stored
+	// as NULL (so pre-qty links and qty=1 links are indistinguishable, on purpose).
+	if qty != nil && *qty < 2 {
+		qty = nil
+	}
+	designators = strings.TrimSpace(designators)
 	// The (a_item_id, b_item_id) pair is unique, so a directed pair holds one
-	// relationship; re-adding updates its kind + pinned version (for "uses").
+	// relationship; re-adding updates kind + pinned version + qty + designators.
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO link (a_item_id, b_item_id, rel, workspace_id, version)
-		 VALUES ($1, $2, $3, $4, $5)
-		 ON CONFLICT (a_item_id, b_item_id) DO UPDATE SET rel = EXCLUDED.rel, version = EXCLUDED.version`,
-		a, b, rel, ws, version)
+		`INSERT INTO link (a_item_id, b_item_id, rel, workspace_id, version, qty, designators)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 ON CONFLICT (a_item_id, b_item_id) DO UPDATE SET rel = EXCLUDED.rel, version = EXCLUDED.version, qty = EXCLUDED.qty, designators = EXCLUDED.designators`,
+		a, b, rel, ws, version, qty, nullIfEmpty(designators))
 	return err
 }
 

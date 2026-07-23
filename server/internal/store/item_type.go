@@ -82,10 +82,16 @@ func DescriptionFields() []ItemField {
 // kinds (milestone/event/point) so existing items map 1:1 — see migration 00019.
 func DefaultItemTypes() []ItemType {
 	return []ItemType{
-		{Key: "milestone", Label: "Milestone", Family: FamilyTimelinePoint, Icon: "l:Diamond", Fields: DescriptionFields(), WorkflowKey: "standard", Builtin: true},
-		{Key: "event", Label: "Event", Family: FamilyTimelineRange, Icon: "l:Flag", Fields: DescriptionFields(), WorkflowKey: "standard", Builtin: true},
+		{Key: "milestone", Label: "Milestones", Family: FamilyTimelinePoint, Icon: "l:Diamond", Fields: DescriptionFields(), WorkflowKey: "standard", Builtin: true},
+		{Key: "event", Label: "Events", Family: FamilyTimelineRange, Icon: "l:Flag", Fields: DescriptionFields(), WorkflowKey: "standard", Builtin: true},
 	}
 }
+
+// legacyBuiltinLabel are the singular default names built-ins shipped with before
+// they were pluralised. A stored override still equal to one of these is a phantom
+// from older saves (which persisted the resolved label even when unchanged) and is
+// ignored on read, so the current default wins. A genuinely different name is kept.
+var legacyBuiltinLabel = map[string]string{"milestone": "Milestone", "event": "Event"}
 
 func builtinTypeKeys() map[string]bool {
 	m := map[string]bool{}
@@ -136,7 +142,7 @@ func (s *Store) ListItemTypes(ctx context.Context, ws string) ([]ItemType, error
 	out := []ItemType{}
 	for _, d := range DefaultItemTypes() {
 		if ov, ok := overrides[d.Key]; ok {
-			if ov.Label != "" {
+			if ov.Label != "" && ov.Label != legacyBuiltinLabel[d.Key] {
 				d.Label = ov.Label
 			}
 			if ov.Icon != "" {

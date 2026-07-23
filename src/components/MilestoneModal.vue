@@ -22,10 +22,19 @@
               </div>
               <div class="panel-actions-top">
                 <template v-if="mode === 'edit' && milestone">
+                  <button v-if="canComment" type="button" class="icon-act" title="Write a comment" @click="focusComment"><MessageSquarePlus :size="15" /></button>
                   <button type="button" class="icon-act" :class="{ done: copied === 'link' }" :title="copied === 'link' ? 'Copied' : 'Copy link to this view'" @click="copy('link')"><Check v-if="copied === 'link'" :size="15" :stroke-width="2.5" /><Link2 v-else :size="15" /></button>
-                  <button type="button" class="icon-act" :class="{ on: viewFormat === 'form' }" title="Normal view" @click="setFormat('form')"><AlignLeft :size="15" /></button>
-                  <button type="button" class="icon-act" :class="{ on: viewFormat === 'json' }" title="View as JSON" @click="setFormat('json')"><Braces :size="15" /></button>
-                  <button type="button" class="icon-act" :class="{ on: viewFormat === 'yaml' }" title="View as YAML" @click="setFormat('yaml')"><FileText :size="15" /></button>
+                  <!-- View formats live behind one menu — JSON/YAML are occasional
+                       tools, not everyday buttons. -->
+                  <div class="fmt-menu">
+                    <button type="button" class="icon-act" :class="{ on: fmtOpen || viewFormat !== 'form' }" title="View format" @click="fmtOpen = !fmtOpen"><MoreHorizontal :size="15" /></button>
+                    <div v-if="fmtOpen" class="fmt-bg" @click="fmtOpen = false"></div>
+                    <div v-if="fmtOpen" class="fmt-pop">
+                      <button type="button" class="fmt-opt" :class="{ on: viewFormat === 'form' }" @click="setFormat('form'); fmtOpen = false"><AlignLeft :size="13" /> Normal view</button>
+                      <button type="button" class="fmt-opt" :class="{ on: viewFormat === 'json' }" @click="setFormat('json'); fmtOpen = false"><Braces :size="13" /> JSON</button>
+                      <button type="button" class="fmt-opt" :class="{ on: viewFormat === 'yaml' }" @click="setFormat('yaml'); fmtOpen = false"><FileText :size="13" /> YAML</button>
+                    </div>
+                  </div>
                 </template>
                 <button v-if="canPropose && !proposing && viewVersion == null && viewFormat === 'form'" type="button" class="propose-act" @click="proposing = true; editing = true">{{ mode === 'add' ? 'Propose new item' : 'Propose change' }}</button>
                 <button v-if="mode === 'edit' && !readOnly && editable && viewVersion == null" type="button" class="icon-act danger" title="Delete" @click="remove">
@@ -34,6 +43,11 @@
                   </svg>
                 </button>
                 <button v-if="embedded && !editable && !readOnly && viewVersion == null" type="button" class="icon-act primary" title="Edit" @click="setFormat('form'); editing = true"><Pencil :size="15" /></button>
+                <button v-if="embedded && editable && mode === 'edit'" type="button" class="icon-act" title="Cancel — discard changes" @click="cancelEdit">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                  </svg>
+                </button>
                 <button v-if="editable && viewVersion == null" type="button" class="icon-act primary" :class="{ saved: justSaved }" :title="proposing ? 'Submit proposal' : (mode === 'edit' ? 'Save' : 'Create')" @click="onSave"><Check :size="16" :stroke-width="2.5" /></button>
                 <button v-if="!embedded" type="button" class="icon-act" title="Close" @click="$emit('close')">
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -54,10 +68,16 @@
             </div>
 
             <!-- Form -->
-            <form class="panel-form" :class="{ 'read-mode': formLocked }" @submit.prevent="submit">
-              <!-- JSON / YAML view replaces the FIELDS block; the tabs (flow, console…)
-                   below stay visible. -->
-              <div v-if="viewFormat !== 'form'" class="ms-code-view"><pre class="ms-code">{{ formattedText }}</pre></div>
+            <form class="panel-form" :class="{ 'read-mode': formLocked }" @submit.prevent="onSave">
+              <!-- JSON / YAML view replaces the FIELDS block AND the tabs below —
+                   their content (uses, referenced by, history) is serialized into
+                   the export instead. -->
+              <div v-if="viewFormat !== 'form'" class="ms-code-view" :class="{ full: embedded }">
+                <button type="button" class="code-copy" :class="{ done: copied === viewFormat }" :title="copied === viewFormat ? 'Copied' : 'Copy ' + viewFormat.toUpperCase()" @click="copy(viewFormat)">
+                  <Check v-if="copied === viewFormat" :size="14" :stroke-width="2.5" /><CopyIcon v-else :size="14" />
+                </button>
+                <pre class="ms-code">{{ formattedText }}</pre>
+              </div>
               <fieldset v-else class="ms-group" :disabled="formLocked">
               <div class="field span2">
                 <label class="field-label">Title <span class="req">*</span></label>
@@ -102,8 +122,10 @@
               <!-- Type-specific fields: schema comes from the selected item type. -->
               <div v-if="currentTypeFields.length" class="field type-fields span2">
                 <label class="field-label">Fields</label>
+                <!-- Read mode hides empty fields — a row of "—" carries no
+                     information; a dim toggle brings them back on demand. -->
                 <dl v-if="!editable" class="read-fields">
-                  <template v-for="f in readFieldRows" :key="f.key">
+                  <template v-for="f in visibleReadFieldRows" :key="f.key">
                     <dt>{{ f.label }}</dt>
                     <dd v-if="f.refs" :class="{ 'read-empty': !f.refs.length }">
                       <span v-if="f.refs.length" class="read-refs">
@@ -114,6 +136,9 @@
                     <dd v-else :class="{ 'read-empty': !f.v, 'read-prose': f.prose }">{{ f.v || '—' }}</dd>
                   </template>
                 </dl>
+                <span v-if="!editable && emptyFieldCount" class="rf-toggle" role="button" @click="showEmptyFields = !showEmptyFields">
+                  {{ showEmptyFields ? 'hide empty fields' : `${emptyFieldCount} empty ${emptyFieldCount === 1 ? 'field' : 'fields'} · show` }}
+                </span>
                 <div v-for="f in (editable ? currentTypeFields : [])" :key="f.key" class="tf-row">
                   <label class="tf-label">{{ f.label || f.key }}<span v-if="f.required" class="tf-req" title="Required">*</span></label>
                   <select v-if="f.type === 'select'" class="field-input" :class="{ 'tf-invalid': invalidFields.includes(f.key) }" :disabled="formLocked" v-model="form.data[f.key]">
@@ -169,7 +194,7 @@
               <!-- Exclusive resource (#128): a capacity-1 backlog item can be used
                    by many timeline items, but never by two whose bookings overlap
                    in time (e.g. a machine can't be on two sites at once). -->
-              <div v-if="!isTimelineType" class="field span2 excl-block">
+              <div v-if="!isTimelineType && (editable || exclusive.mode !== 'off')" class="field span2 excl-block">
                 <label class="field-label">Exclusive resource</label>
                 <span v-if="!editable" class="read-val">{{ exclusiveSummary }}</span>
                 <div v-else class="excl-edit">
@@ -192,8 +217,15 @@
                   Maturity
                   <span v-if="form.maturity && editable" class="mat-current">{{ MATURITY_STAGES[form.maturity - 1] }}</span>
                 </label>
-                <span v-if="!editable" class="read-val">{{ form.maturity ? MATURITY_STAGES[form.maturity - 1] : '—' }}</span>
-                <div v-else class="maturity-row">
+                <span v-if="!editable" class="read-val" :class="{ qa: quickEditable }" :role="quickEditable ? 'button' : null" :title="quickEditable ? 'Click to change' : null" @click="toggleQa('maturity')">{{ form.maturity ? MATURITY_STAGES[form.maturity - 1] : '—' }}<Pencil v-if="quickEditable" class="qa-pen" :size="11" /></span>
+                <div v-if="!editable && qaOpen === 'maturity'" class="qa-wrap">
+                  <div class="qa-bg" @click="qaOpen = null"></div>
+                  <div class="qa-pop">
+                    <span class="qa-opt" :class="{ on: !form.maturity }" role="button" @click="setQuick('maturity', null)">None</span>
+                    <span v-for="(s, i) in MATURITY_STAGES" :key="s" class="qa-opt" :class="{ on: form.maturity === i + 1 }" role="button" @click="setQuick('maturity', i + 1)">{{ s }}</span>
+                  </div>
+                </div>
+                <div v-if="editable" class="maturity-row">
                   <button
                     type="button"
                     class="maturity-btn"
@@ -224,8 +256,15 @@
                   Progress
                   <span v-if="form.progress != null && editable" class="mat-current">{{ form.progress }}%</span>
                 </label>
-                <span v-if="!editable" class="read-val">{{ form.progress != null ? form.progress + '%' : '—' }}</span>
-                <div v-else class="progress-row">
+                <span v-if="!editable" class="read-val" :class="{ qa: quickEditable }" :role="quickEditable ? 'button' : null" :title="quickEditable ? 'Click to change' : null" @click="toggleQa('progress')">{{ form.progress != null ? form.progress + '%' : '—' }}<Pencil v-if="quickEditable" class="qa-pen" :size="11" /></span>
+                <div v-if="!editable && qaOpen === 'progress'" class="qa-wrap">
+                  <div class="qa-bg" @click="qaOpen = null"></div>
+                  <div class="qa-pop">
+                    <span class="qa-opt" :class="{ on: form.progress == null }" role="button" @click="setQuick('progress', null)">None</span>
+                    <span v-for="p in [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]" :key="p" class="qa-opt num" :class="{ on: form.progress === p }" role="button" @click="setQuick('progress', p)">{{ p }}%</span>
+                  </div>
+                </div>
+                <div v-if="editable" class="progress-row">
                   <button
                     type="button"
                     class="maturity-btn"
@@ -244,7 +283,15 @@
                    are for relations, flow & history. -->
               <div class="field">
                 <label class="field-label">Assigned to</label>
-                <select class="field-input" :disabled="formLocked" v-model="form.assigneeId">
+                <span v-if="!editable" class="read-val" :class="{ qa: quickEditable }" :role="quickEditable ? 'button' : null" :title="quickEditable ? 'Click to change' : null" @click="toggleQa('assignee')">{{ form.assigneeId ? (memberName(form.assigneeId) || 'someone') : 'Unassigned' }}<Pencil v-if="quickEditable" class="qa-pen" :size="11" /></span>
+                <div v-if="!editable && qaOpen === 'assignee'" class="qa-wrap">
+                  <div class="qa-bg" @click="qaOpen = null"></div>
+                  <div class="qa-pop">
+                    <span class="qa-opt" :class="{ on: !form.assigneeId }" role="button" @click="setQuick('assigneeId', null)">Unassigned</span>
+                    <span v-for="mb in workspace.members" :key="mb.userId" class="qa-opt" :class="{ on: form.assigneeId === mb.userId }" role="button" @click="setQuick('assigneeId', mb.userId)">{{ mb.username }}</span>
+                  </div>
+                </div>
+                <select v-if="editable" class="field-input" :disabled="formLocked" v-model="form.assigneeId">
                   <option :value="null">Unassigned</option>
                   <option v-for="mb in workspace.members" :key="mb.userId" :value="mb.userId">{{ mb.username }}</option>
                 </select>
@@ -268,22 +315,89 @@
               <p v-if="dateError" class="field-error span2">{{ dateError }}</p>
               </fieldset>
 
-              <div class="ms-tabs" role="tablist">
-                <button v-if="typeStatuses.length" type="button" class="ms-tab" :class="{ active: tab === 'flow' }" @click="tab = 'flow'">Flow</button>
-                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'">Dependencies</button>
-                <button type="button" class="ms-tab" :class="{ active: tab === 'uses' }" @click="tab = 'uses'">Uses</button>
-                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'">Groups</button>
-                <button v-if="mode === 'edit' && !milestone?.sourceSystem" type="button" class="ms-tab" :class="{ active: tab === 'history' }" @click="tab = 'history'">History</button>
+              <div v-if="viewFormat === 'form'" class="ms-tabs" role="tablist">
+                <button v-if="typeStatuses.length" type="button" class="ms-tab" :class="{ active: tab === 'flow' }" @click="tab = 'flow'"><Workflow :size="13" :stroke-width="2" />Flow</button>
+                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'deps' }" @click="tab = 'deps'"><CalendarClock :size="13" :stroke-width="2" />Scheduling</button>
+                <button type="button" class="ms-tab" :class="{ active: tab === 'uses' }" @click="tab = 'uses'"><Boxes :size="13" :stroke-width="2" />Uses</button>
+                <button v-if="mode === 'edit'" type="button" class="ms-tab" :class="{ active: tab === 'structure' }" @click="tab = 'structure'"><Network :size="13" :stroke-width="2" />Graph</button>
+                <button v-if="mode === 'edit'" type="button" class="ms-tab" title="Bill of Material" :class="{ active: tab === 'bom' }" @click="tab = 'bom'"><Table2 :size="13" :stroke-width="2" />BOM</button>
+                <button type="button" class="ms-tab" :class="{ active: tab === 'refby' }" @click="tab = 'refby'"><Link2 :size="13" :stroke-width="2" />Referenced by</button>
+                <button v-if="currentSchedulable" type="button" class="ms-tab" :class="{ active: tab === 'groups' }" @click="tab = 'groups'"><Layers :size="13" :stroke-width="2" />Groups</button>
+                <button v-if="mode === 'edit' && !milestone?.sourceSystem" type="button" class="ms-tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><History :size="13" :stroke-width="2" />History</button>
+                <button v-if="typeStatuses.length" type="button" class="ms-tab" :class="{ active: tab === 'log' }" @click="tab = 'log'"><Terminal :size="13" :stroke-width="2" />Log</button>
               </div>
 
               <!-- The History tab is read-only display, so it's never form-disabled
                    (you can browse versions even when the rest is read-only). -->
-              <fieldset class="ms-tab-body" :disabled="formLocked && tab !== 'history'">
+              <fieldset v-if="viewFormat === 'form'" class="ms-tab-body" :disabled="formLocked && tab !== 'history' && tab !== 'structure' && tab !== 'bom' && tab !== 'log'">
               <div v-show="tab === 'history'" class="ms-panel ms-history">
                 <ItemHistory v-if="milestone && tab === 'history'" :key="milestone.id" :item-id="milestone.id" :current-version="viewVersion || headVersion" @select="onSelectVersion" />
               </div>
+              <!-- Log: the real version history as terminal lines, with the status
+                   console (teleported out of the Flow diagram) docked below it. -->
+              <div v-show="tab === 'log'" class="ms-panel ms-log">
+                <!-- ONE terminal: history lines on top, the live status console
+                     (teleported from the Flow diagram) as the prompt at the end. -->
+                <div ref="logHistEl" class="log-hist">
+                  <div v-for="e in logDisplay" :key="e.key" class="log-line">
+                    <template v-if="e.kind === 'revgroup' && e.items.length === 1">
+                      <span class="log-prompt">atlas:history</span><span class="log-time">[{{ fmtStamp(e.first.time) }}]</span><span class="log-gt">&gt;</span><span class="log-text">saved <strong>v{{ e.first.version }}</strong> · {{ who(e.first.by) }}</span>
+                    </template>
+                    <template v-else-if="e.kind === 'revgroup'">
+                      <span class="log-prompt">atlas:history</span><span class="log-time">[{{ revRange(e) }}]</span><span class="log-gt">&gt;</span><span class="log-text">saved <button type="button" class="log-ref" title="Open the History tab" @click="tab = 'history'">v{{ e.first.version }} → v{{ e.last.version }}</button> · {{ e.sameBy !== null ? who(e.sameBy) : 'several editors' }} <span class="log-dim">({{ e.items.length }} saves)</span></span>
+                    </template>
+                    <template v-else-if="e.kind === 'comment'">
+                      <span class="log-prompt cmt">atlas:comment</span><span class="log-time">[{{ fmtStamp(e.time) }}]</span><span class="log-gt cmt">&gt;</span><span class="log-text"><strong>{{ who(e.by) }}</strong>: <template v-for="(p, i) in commentParts(e.body)" :key="i"><button v-if="p.id" type="button" class="log-ref" @click="openRef({ id: p.id, exists: true })">{{ p.title }}</button><span v-else>{{ p.text }}</span></template></span>
+                      <button v-if="canDeleteComment(e)" type="button" class="log-del" title="Delete comment" @click="removeComment(e.id)">×</button>
+                    </template>
+                    <template v-else>
+                      <span class="log-prompt mnt">atlas:mention</span><span class="log-time">[{{ fmtStamp(e.time) }}]</span><span class="log-gt mnt">&gt;</span><span class="log-text"><strong>{{ who(e.by) }}</strong> on <button type="button" class="log-ref" @click="openRef({ id: e.host, exists: true })">{{ hostTitle(e.host) }}</button>: <template v-for="(p, i) in commentParts(e.body)" :key="i"><button v-if="p.id" type="button" class="log-ref" @click="openRef({ id: p.id, exists: true })">{{ p.title }}</button><span v-else>{{ p.text }}</span></template></span>
+                    </template>
+                  </div>
+                  <div v-if="!logEntries.length" class="log-line log-none">no history yet</div>
+                  <!-- While composing, the status prompt (incl. its cursor) hides —
+                       the comment line IS the terminal's active line. CSS-hide, not
+                       v-if: the teleported console must keep its target mounted. -->
+                  <div v-if="typeStatuses.length" v-show="!composing" id="modal-console-dock" class="modal-console-dock"></div>
+                  <!-- Comment prompt: appears only on demand — via "comment" in the
+                       status prompt. The dim trigger line shows ONLY for items
+                       without a status console (no prompt to click there). "/ref"
+                       opens an item picker; picks are sent as [[id]] tokens. -->
+                  <button v-if="canComment && !composing && !typeStatuses.length" type="button" class="log-line log-add" @click="focusComment">
+                    <span class="log-prompt cmt">{{ myName }}:comment</span><span class="log-gt cmt">&gt;</span><span class="log-add-t">write a comment…</span>
+                  </button>
+                  <div v-if="canComment && composing" class="log-input-row">
+                    <span class="log-prompt cmt">{{ myName }}:comment</span><span class="log-gt cmt">&gt;</span>
+                    <!-- Terminal-style caret: the native (thin) caret is hidden and a
+                         block cursor — same as the status prompt's — sits at the end
+                         of the typed text. The input auto-sizes to its content. -->
+                    <div class="log-input-wrap" @click="commentInput?.focus()">
+                      <input
+                        ref="commentInput" v-model="commentText" class="log-input" autocomplete="off" spellcheck="false"
+                        :style="{ width: Math.max(commentText.length, 1) + 'ch' }"
+                        @input="updateRefSuggest"
+                        @keydown.enter.prevent="onCommentEnter"
+                        @keydown.down.prevent="refIdx = Math.min(refIdx + 1, refResults.length - 1)"
+                        @keydown.up.prevent="refIdx = Math.max(refIdx - 1, 0)"
+                        @keydown.esc.stop="onCommentEsc"
+                        @blur="onCommentBlur"
+                      />
+                      <span class="log-cursor"></span>
+                      <span v-if="!commentText" class="log-hint">write a comment — type /ref to link an item</span>
+                      <div v-if="refResults.length" class="log-refpick">
+                        <button v-for="(m, i) in refResults" :key="m.id" type="button" class="log-refopt" :class="{ act: i === refIdx }" @mousedown.prevent="pickRefItem(m)" @mousemove="refIdx = i">
+                          <span class="picker-dot" :style="{ background: usesDot(m) }"></span>
+                          <span class="log-refopt-t">{{ m.title }}</span>
+                          <span class="log-refopt-ty">{{ usesTypeLabel(m) }}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div v-show="tab === 'flow'" class="ms-panel ms-flow">
-                <StatusFlow v-if="typeStatuses.length" inline :statuses="typeStatuses" :current="form.status" :version="milestone?.version || 1" :read-only="readOnly || viewVersion != null" :viewing-version="viewVersion || 0" :arrangeable="false" :layout="currentType?.layout" @advance="onFlowAdvance" @back-to-latest="backToLatest" />
+                <StatusFlow v-if="typeStatuses.length" inline :statuses="typeStatuses" :current="form.status" :version="milestone?.version || 1" :read-only="readOnly || viewVersion != null" :viewing-version="viewVersion || 0" :arrangeable="false" :layout="currentType?.layout" :commentable="canComment && mode === 'edit'" :user-name="myName" @advance="onFlowAdvance" @back-to-latest="backToLatest" @comment="focusComment" />
               </div>
 
               <div v-show="tab === 'deps' && !editable" class="ms-panel">
@@ -299,7 +413,7 @@
               </div>
 
               <div v-show="tab === 'deps' && editable" class="ms-panel">
-              <div class="field">
+              <div v-if="availableRelTypes.length > 1" class="field">
                 <label class="field-label">Relationship</label>
                 <select v-model="relType" class="field-input" :disabled="formLocked">
                   <option v-for="r in availableRelTypes" :key="r.key" :value="r.key">{{ r.label }} ↔ {{ r.inverse }}</option>
@@ -422,84 +536,108 @@
               </div>
               </div>
 
+              <!-- Uses (STRUCTURE / composition — the BOM edge). One-directional:
+                   you edit only what THIS item uses; the reverse ("Used by") is
+                   read-only under the Referenced-by tab. Version-pinnable = config. -->
+              <!-- Both directions always render, an empty one says "none" — so the
+                   structure situation is visible at a glance without guessing. -->
               <div v-show="tab === 'uses' && !editable" class="ms-panel">
-                <ul v-if="readUses.length" class="read-deps">
-                  <li v-for="g in readUses" :key="g.rel">
-                    <span class="read-dep-rel">{{ g.rel }}</span>
+                <ul class="read-deps">
+                  <li>
+                    <span class="read-dep-rel">Uses</span>
                     <span class="read-refs">
-                      <span v-for="d in g.items" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" />{{ d.title }}<span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
+                      <span v-for="d in usesOut" :key="d.id" class="read-pill" :class="{ 'pill-conflict': pillConflict(d.id) }" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, version: d.version, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" /><span class="read-pill-qty">{{ d.qty || 1 }}×</span>{{ d.title }}<span v-if="d.designators" class="read-pill-ver">{{ d.designators }}</span><span v-if="d.version" class="read-pill-ver">v{{ d.version }}</span><AlertTriangle v-if="pillConflict(d.id)" :size="12" :stroke-width="2.4" color="#FF3B30" :title="pillConflict(d.id)" /></span>
+                      <span v-if="!usesOut.length" class="read-none-i">none</span>
+                    </span>
+                  </li>
+                  <li>
+                    <span class="read-dep-rel">Used by</span>
+                    <span class="read-refs">
+                      <span v-for="d in usesIn" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" /><span class="read-pill-qty">{{ d.qty || 1 }}×</span>{{ d.title }}<span v-if="d.designators" class="read-pill-ver">{{ d.designators }}</span></span>
+                      <span v-if="!usesIn.length" class="read-none-i">none</span>
                     </span>
                   </li>
                 </ul>
-                <p v-else class="read-none">Uses nothing yet.</p>
               </div>
 
               <div v-show="tab === 'uses' && editable" class="ms-panel">
-              <p class="uses-hint">Backlog items this one <strong>uses</strong> (components / sub-artifacts). Timeline items aren't selectable here.</p>
-              <div class="two-col dep-cols">
-              <div class="field">
-                <label class="field-label">
-                  Uses
-                  <span v-if="localUsesIds.size > 0" class="link-count link-toggle" :class="{ on: showOnlyU1 }" :title="showOnlyU1 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnlyU1 = !showOnlyU1">{{ localUsesIds.size }}</span>
-                </label>
-                <div class="ms-picker">
-                  <div class="picker-search">
-                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                    <input v-model="usesSearch" class="picker-input" placeholder="Search backlog items…" autocomplete="off" />
-                    <button v-if="usesSearch" type="button" class="picker-clear" @click="usesSearch = ''">×</button>
-                  </div>
-                  <div class="picker-list">
-                    <template v-for="group in usesGroups" :key="'u-' + group.swimlane.id">
-                      <div v-for="m in group.milestones" :key="m.id" class="picker-row">
-                        <button
-                          type="button" class="picker-item"
-                          :class="{ 'picker-active': localUsesIds.has(m.id) }"
-                          :style="localUsesIds.has(m.id) ? activePickerStyle(usesDot(m)) : {}"
-                          @click="toggleUses(m.id)"
-                        >
-                          <span class="picker-dot" :style="{ background: usesDot(m) }"></span>
-                          <div class="picker-info"><span class="picker-title">{{ m.title }}</span><span class="picker-meta">{{ usesTypeLabel(m) }}</span></div>
-                          <svg v-if="localUsesIds.has(m.id)" class="picker-check" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
-                        </button>
-                        <select v-if="localUsesIds.has(m.id)" class="picker-ver" v-model="usesPins[m.id]" title="Pin a version (or track the latest)" @click.stop @mousedown.stop>
-                          <option :value="''">latest</option>
-                          <option v-for="v in refVersions(m.id)" :key="v" :value="v">v{{ v }}</option>
-                        </select>
-                      </div>
-                    </template>
-                    <div v-if="usesGroups.length === 0" class="picker-empty">{{ usesSearch ? 'No backlog items match' : 'No backlog items to reference' }}</div>
-                  </div>
-                </div>
-              </div>
-              <div class="field">
-                <label class="field-label">
-                  Used by
-                  <span v-if="localUsedByIds.size > 0" class="link-count link-toggle" :class="{ on: showOnlyU2 }" :title="showOnlyU2 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnlyU2 = !showOnlyU2">{{ localUsedByIds.size }}</span>
-                </label>
-                <div class="ms-picker">
-                  <div class="picker-search">
-                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                    <input v-model="usesSearch2" class="picker-input" placeholder="Search backlog items…" autocomplete="off" />
-                    <button v-if="usesSearch2" type="button" class="picker-clear" @click="usesSearch2 = ''">×</button>
-                  </div>
-                  <div class="picker-list">
-                    <template v-for="group in usesGroups2" :key="'ub-' + group.swimlane.id">
-                      <button
-                        v-for="m in group.milestones" :key="m.id" type="button" class="picker-item"
-                        :class="{ 'picker-active': localUsedByIds.has(m.id) }"
-                        :style="localUsedByIds.has(m.id) ? activePickerStyle(usesDot(m)) : {}"
-                        @click="toggleUsedBy(m.id)"
-                      >
-                        <span class="picker-dot" :style="{ background: usesDot(m) }"></span>
-                        <div class="picker-info"><span class="picker-title">{{ m.title }}</span><span class="picker-meta">{{ usesTypeLabel(m) }}</span></div>
-                        <svg v-if="localUsedByIds.has(m.id)" class="picker-check" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
-                      </button>
-                    </template>
-                    <div v-if="usesGroups2.length === 0" class="picker-empty">{{ usesSearch2 ? 'No backlog items match' : 'No backlog items to reference' }}</div>
+                <p class="uses-hint">Backlog items this one <strong>uses / is composed of</strong> (the structure / BOM edge). Timeline items aren't selectable here.</p>
+                <div class="field">
+                  <label class="field-label">
+                    Uses
+                    <span v-if="localUsesIds.size > 0" class="link-count link-toggle" :class="{ on: showOnlyU1 }" :title="showOnlyU1 ? 'Show all' : 'Show only selected'" @click.prevent.stop="showOnlyU1 = !showOnlyU1">{{ localUsesIds.size }}</span>
+                  </label>
+                  <div class="ms-picker">
+                    <div class="picker-search">
+                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                      <input v-model="usesSearch" class="picker-input" placeholder="Search backlog items…" autocomplete="off" />
+                      <button v-if="usesSearch" type="button" class="picker-clear" @click="usesSearch = ''">×</button>
+                    </div>
+                    <div class="picker-list">
+                      <template v-for="group in usesGroups" :key="'u-' + group.swimlane.id">
+                        <div v-for="m in group.milestones" :key="m.id" class="picker-row">
+                          <button
+                            type="button" class="picker-item"
+                            :class="{ 'picker-active': localUsesIds.has(m.id) }"
+                            :style="localUsesIds.has(m.id) ? activePickerStyle(usesDot(m)) : {}"
+                            @click="toggleUses(m.id)"
+                          >
+                            <span class="picker-dot" :style="{ background: usesDot(m) }"></span>
+                            <div class="picker-info"><span class="picker-title">{{ m.title }}</span><span class="picker-meta">{{ usesTypeLabel(m) }}<template v-if="m.swimlaneId || m.sourceSystem"> · timeline</template></span></div>
+                            <svg v-if="localUsesIds.has(m.id)" class="picker-check" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+                          </button>
+                          <input v-if="localUsesIds.has(m.id)" v-model="usesQty[m.id]" class="picker-qty" type="number" min="1" step="1" placeholder="1" title="Quantity — how many of this the item uses (BOM multiplicity)" @click.stop @mousedown.stop />
+                          <span v-if="localUsesIds.has(m.id)" class="picker-qty-x">×</span>
+                          <input v-if="localUsesIds.has(m.id)" v-model="usesRefDes[m.id]" class="picker-refdes" type="text" spellcheck="false" autocomplete="off" placeholder="RefDes (C1, C4-C7)" title="Reference designators — names of the usage positions, e.g. C1, C2, C10-C17" @click.stop @mousedown.stop />
+                          <AlertTriangle v-if="localUsesIds.has(m.id) && refDesMismatch(m.id)" :size="13" :stroke-width="2.4" color="#FF9F0A" class="picker-refdes-warn" :title="refDesMismatch(m.id)" />
+                          <select v-if="localUsesIds.has(m.id)" class="picker-ver" v-model="usesPins[m.id]" title="Pin a version (or track the latest)" @click.stop @mousedown.stop>
+                            <option :value="''">latest</option>
+                            <option v-for="v in refVersions(m.id)" :key="v" :value="v">v{{ v }}</option>
+                          </select>
+                        </div>
+                      </template>
+                      <div v-if="usesGroups.length === 0" class="picker-empty">{{ usesSearch ? 'No backlog items match' : 'No backlog items to reference' }}</div>
+                    </div>
                   </div>
                 </div>
               </div>
+
+              <!-- Graph + BOM: this item's exploded structure (node graph / BOM
+                   table), read-only display — composition is edited under Uses.
+                   Clicking a node/row navigates to that item (like a ref pill). -->
+              <div v-show="tab === 'structure'" class="ms-panel ms-struct">
+                <StructureGraph v-if="milestone && tab === 'structure'" :key="milestone.id" :root-id="milestone.id" view="graph" @edit="m => openRef({ id: m.id, exists: true })" />
               </div>
+              <div v-show="tab === 'bom'" class="ms-panel ms-struct">
+                <StructureGraph v-if="milestone && tab === 'bom'" :key="milestone.id" :root-id="milestone.id" view="table" @edit="m => openRef({ id: m.id, exists: true })" />
+              </div>
+
+              <!-- Referenced by: all INCOMING links, read-only. Two kinds: items
+                   that USE this one (uses reverse) and items whose reference FIELD
+                   points here. Edit the link from the other item, never here. -->
+              <div v-show="tab === 'refby'" class="ms-panel">
+                <ul v-if="usedByGroup.items.length || referencedByGroups.length || mentionHosts.length" class="read-deps">
+                  <li v-if="usedByGroup.items.length" :key="'usedby'">
+                    <span class="read-dep-rel">{{ usedByGroup.label }}</span>
+                    <span class="read-refs">
+                      <span v-for="d in usedByGroup.items" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" />{{ d.title }}<span class="read-pill-ver">{{ d.qty || 1 }}×</span></span>
+                    </span>
+                  </li>
+                  <li v-for="g in referencedByGroups" :key="g.key">
+                    <span class="read-dep-rel">{{ g.label }}</span>
+                    <span class="read-refs">
+                      <span v-for="d in g.items" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" />{{ d.title }}</span>
+                    </span>
+                  </li>
+                  <li v-if="mentionHosts.length">
+                    <span class="read-dep-rel">Mentioned in comments</span>
+                    <span class="read-refs">
+                      <span v-for="d in mentionHosts" :key="d.id" class="read-pill" :style="{ color: d.color, background: d.color + '22' }" @click="openRef({ id: d.id, exists: true })"><MarkerIcon :shape="d.icon" :color="d.dot" :size="12" :fill="d.fill" />{{ d.title }}</span>
+                    </span>
+                  </li>
+                </ul>
+                <p v-else class="read-none">Nothing references this yet.</p>
+                <p class="uses-hint">Read-only — add or change these links from the other item.</p>
               </div>
 
               <div v-show="tab === 'groups' && !editable" class="ms-panel">
@@ -536,9 +674,6 @@
               <button type="submit" class="hidden-submit" tabindex="-1" aria-hidden="true"></button>
             </form>
 
-            <!-- Always-visible item console: the status flow teleports its terminal
-                 here, so it stays on screen across every tab. -->
-            <div v-if="typeStatuses.length" id="modal-console-dock" class="modal-console-dock"></div>
           </div>
         </Transition>
       </div>
@@ -547,8 +682,8 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed, onMounted, watch } from 'vue'
-import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, canProposeChanges, proposeChange, proposeCreate, memberName, memberInitials, memberById, openProfile, STATUS_TONES, toneColor, statusColor, parseRef, itemLink, itemStatus, isSchedulableItem, ui, pushNav, checkResourceConflicts, resourceConflicts } from '../stores/useAppStore.js'
+import { reactive, ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useAppStore, MONTHS, MATURITY_STAGES, store, groups, swatchColors, stripMarkdown, itemTypes, itemTypeByKey, RELATIONSHIP_TYPES, workspace, session, baselines, canEditWorkspace, canProposeChanges, proposeChange, proposeCreate, memberName, memberInitials, memberById, openProfile, STATUS_TONES, toneColor, statusColor, parseRef, parseDesignators, itemLink, itemStatus, isSchedulableItem, ui, pushNav, checkResourceConflicts, resourceConflicts } from '../stores/useAppStore.js'
 
 function who(id) { return id ? (memberName(id) || 'someone') : 'system' }
 function fmtStamp(iso) {
@@ -561,7 +696,8 @@ import MaturityGlyph from './MaturityGlyph.vue'
 import MarkerIcon from './MarkerIcon.vue'
 import ItemHistory from './ItemHistory.vue'
 import StatusFlow from './StatusFlow.vue'
-import { Lock, History, Workflow, Link2, Braces, FileText, Pencil, Check, AlignLeft, AlertTriangle } from 'lucide-vue-next'
+import StructureGraph from './StructureGraph.vue'
+import { Lock, History, Workflow, Link2, Braces, FileText, Pencil, Check, AlignLeft, AlertTriangle, CalendarClock, Boxes, Network, Table2, Layers, Copy as CopyIcon, Terminal, MoreHorizontal, MessageSquarePlus } from 'lucide-vue-next'
 
 const props = defineProps({
   mode:      { type: String,  default: 'add' },
@@ -580,7 +716,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 const { addMilestone, updateMilestone, deleteMilestone, addLink, removeLink, itemGroupIds, setItemGroups } = useAppStore()
 
-const TABS = ['flow', 'deps', 'uses', 'groups', 'history']
+const TABS = ['flow', 'deps', 'uses', 'structure', 'bom', 'refby', 'groups', 'history', 'log']
 const tab = ref(props.mode === 'edit' && TABS.includes(props.initialTab) ? props.initialTab : 'flow')
 const invalidFields = ref([]) // keys of empty required fields, framed red
 const isFieldEmpty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0)
@@ -704,20 +840,24 @@ watch(() => ui.explorerItemVersion, (v) => {
 // versions separately in refPins; both are re-encoded on save. Decode any pins
 // already stored so editing an item preserves them.
 const refPins = reactive({}) // { [fieldKey]: { [id]: version } }
-for (const f of (itemTypeByKey(form.typeKey)?.fields || [])) {
-  if (f.type !== 'reference') continue
-  refPins[f.key] = {} // always present so the version <select>'s v-model path is safe
-  const raw = form.data[f.key]
-  const entries = Array.isArray(raw) ? raw : (raw ? [raw] : [])
-  const bare = []
-  for (const e of entries) {
-    const { id, version } = parseRef(e)
-    if (!id) continue
-    bare.push(id)
-    if (version) refPins[f.key][id] = version
+function decodeRefPins() {
+  for (const k of Object.keys(refPins)) delete refPins[k]
+  for (const f of (itemTypeByKey(form.typeKey)?.fields || [])) {
+    if (f.type !== 'reference') continue
+    refPins[f.key] = {} // always present so the version <select>'s v-model path is safe
+    const raw = form.data[f.key]
+    const entries = Array.isArray(raw) ? raw : (raw ? [raw] : [])
+    const bare = []
+    for (const e of entries) {
+      const { id, version } = parseRef(e)
+      if (!id) continue
+      bare.push(id)
+      if (version) refPins[f.key][id] = version
+    }
+    form.data[f.key] = f.refMulti ? bare : (bare[0] || '')
   }
-  form.data[f.key] = f.refMulti ? bare : (bare[0] || '')
 }
+decodeRefPins()
 
 // Lanes you can place a new item / proposal in (mirrored Git lanes excluded).
 const timelineLanes = computed(() => store.swimlanes.filter(s => !s.sourceSystem))
@@ -792,13 +932,21 @@ function itemPill(id) {
     dot: st ? statusColor(st) : (lane || '#8a8a8e'),
   }
 }
-function refDisplay(entry) {
+// Structured reference for the code views: stable id + human title + the version
+// state as separate fields — no "Radar · v2 (latest v4)" display strings that a
+// consumer would have to regex apart.
+function refExport(entry) {
   const { id, version } = parseRef(entry)
   const target = store.milestones.find(m => m.id === id)
-  const title = target?.title || id
-  if (!version) return title
-  const head = target?.version
-  return head && head > version ? `${title} · v${version} (latest v${head})` : `${title} · v${version}`
+  const o = { item: target?.title || id, id }
+  if (version) {
+    o.version = `v${version} (pinned)`
+    const head = target?.version
+    if (head && head > version) o.latest = `v${head}`
+  } else {
+    o.version = 'latest'
+  }
+  return o
 }
 function openRef(r) {
   if (!r || r.exists === false || !r.id) return
@@ -816,6 +964,29 @@ const readFieldRows = computed(() => (currentType.value?.fields || []).map(f => 
   const ids = Array.isArray(v) ? v : (v ? [v] : [])
   return { key: f.key, label: f.label || f.key, refs: ids.map(entry => { const { id, version } = parseRef(entry); return { id, version, ...itemPill(id) } }) }
 }))
+// Read mode hides empty fields (a "—" row says nothing); a dim toggle reveals them.
+const showEmptyFields = ref(false)
+const rowFilled = (r) => (r.refs ? r.refs.length > 0 : !!r.v)
+const visibleReadFieldRows = computed(() => showEmptyFields.value ? readFieldRows.value : readFieldRows.value.filter(rowFilled))
+const emptyFieldCount = computed(() => readFieldRows.value.filter(r => !rowFilled(r)).length)
+
+// View-format overflow menu (Normal / JSON / YAML).
+const fmtOpen = ref(false)
+
+// Quick actions: assignee / progress / maturity are editable straight from the
+// read card (small popover, auto-saved) — same rule as the status quick-action.
+const qaOpen = ref(null) // 'maturity' | 'progress' | 'assignee' | null
+const quickEditable = computed(() => props.mode === 'edit' && !!props.milestone && !readOnly.value && viewVersion.value == null && !proposing.value)
+function toggleQa(which) {
+  if (!quickEditable.value) return
+  qaOpen.value = qaOpen.value === which ? null : which
+}
+function setQuick(field, value) {
+  qaOpen.value = null
+  form[field] = value
+  updateMilestone(props.milestone.id, { [field]: value })
+}
+
 // All links touching this item, grouped by relationship (read-mode Dependencies).
 const readDependencyGroups = computed(() => {
   const id = props.milestone?.id
@@ -825,15 +996,58 @@ const readDependencyGroups = computed(() => {
   const out = []
   for (const l of store.links) {
     const relKey = l.rel || 'depends-on'
-    if (l.a === id && byId.has(l.b)) out.push({ relKey, rel: relLabel(l.rel, true), id: l.b, version: l.version ?? null, ...itemPill(l.b) })
-    else if (l.b === id && byId.has(l.a)) out.push({ relKey, rel: relLabel(l.rel, false), id: l.a, version: l.version ?? null, ...itemPill(l.a) })
+    if (l.a === id && byId.has(l.b)) out.push({ relKey, rel: relLabel(l.rel, true), id: l.b, version: l.version ?? null, qty: l.qty ?? null, designators: l.designators || '', ...itemPill(l.b) })
+    else if (l.b === id && byId.has(l.a)) out.push({ relKey, rel: relLabel(l.rel, false), id: l.a, version: l.version ?? null, qty: l.qty ?? null, ...itemPill(l.a) })
   }
   const m = new Map()
   for (const d of out) { if (!m.has(d.rel)) m.set(d.rel, { rel: d.rel, relKey: d.relKey, items: [] }); m.get(d.rel).items.push(d) }
   return [...m.values()]
 })
-const readDeps = computed(() => readDependencyGroups.value.filter(g => g.relKey !== 'uses'))
+// Scheduling tab shows only the temporal relation; the Uses tab shows composition.
+const readDeps = computed(() => readDependencyGroups.value.filter(g => g.relKey === 'depends-on'))
 const readUses = computed(() => readDependencyGroups.value.filter(g => g.relKey === 'uses'))
+// The two directions split out — the read tab always renders both rows.
+const usesOut = computed(() => readUses.value.find(g => g.rel === 'Uses')?.items || [])
+const usesIn = computed(() => readUses.value.find(g => g.rel === 'Used by')?.items || [])
+// Used by (uses reverse) — read-only, shown under the Referenced-by tab.
+const usedByGroup = computed(() => {
+  const id = props.milestone?.id
+  const items = []
+  if (id) {
+    for (const l of store.links) {
+      if ((l.rel || 'depends-on') === 'uses' && l.b === id && store.milestones.some(m => m.id === l.a)) {
+        items.push({ id: l.a, qty: l.qty ?? null, ...itemPill(l.a) })
+      }
+    }
+  }
+  return { label: 'Used by', items }
+})
+
+// Reference-field back-links: which items point at THIS one through a reference
+// field (e.g. every Maschine whose "Projekt" field targets this project). Read-
+// only and one-directional — links are always edited from the referencing item.
+// Reference values live in item.data (single id or array, optionally id@vN), so
+// this is a pure client-side reverse scan; grouped by referencing type + field.
+const referencedByGroups = computed(() => {
+  const id = props.milestone?.id
+  if (!id) return []
+  const groups = new Map()
+  for (const m of store.milestones) {
+    if (m.id === id) continue
+    const t = itemTypeByKey(m.typeKey || m.kind || 'milestone')
+    if (!t) continue
+    for (const f of (t.fields || [])) {
+      if (f.type !== 'reference') continue
+      const v = m.data?.[f.key]
+      const vals = Array.isArray(v) ? v : (v ? [v] : [])
+      if (!vals.some(entry => parseRef(entry).id === id)) continue
+      const key = (m.typeKey || m.kind || 'milestone') + '::' + f.key
+      if (!groups.has(key)) groups.set(key, { key, label: `${t.label} · ${f.label || f.key}`, items: [] })
+      groups.get(key).items.push({ id: m.id, ...itemPill(m.id) })
+    }
+  }
+  return [...groups.values()]
+})
 // When viewing an exclusive resource, flag the users that over-book it (#128).
 function pillConflict(itemId) {
   const rid = props.milestone?.id
@@ -859,9 +1073,9 @@ const formattedText = computed(() =>
 function exportFieldValue(f) {
   const v = props.milestone?.data?.[f.key]
   if (f.type === 'reference') {
-    const ids = Array.isArray(v) ? v : (v ? [v] : [])
-    const names = ids.map(refDisplay)
-    return f.refMulti ? names : (names[0] || '')
+    const entries = Array.isArray(v) ? v : (v ? [v] : [])
+    const refs = entries.map(refExport)
+    return f.refMulti ? refs : (refs[0] || '')
   }
   return Array.isArray(v) ? v : (v == null ? '' : v)
 }
@@ -877,8 +1091,192 @@ const exportObj = computed(() => {
   const fields = {}
   for (const f of (t?.fields || [])) fields[f.label || f.key] = exportFieldValue(f)
   if (Object.keys(fields).length) o.fields = fields
+  // The tabs are hidden in the code views, so their content rides along in the
+  // export instead: structure (both directions), reference back-links, history.
+  o.uses = usesOut.value.map(d => {
+    const u = { item: d.title, id: d.id, qty: d.qty || 1 }
+    if (d.designators) u.designators = d.designators
+    u.version = d.version ? `v${d.version} (pinned)` : 'latest'
+    return u
+  })
+  o.usedBy = usesIn.value.map(d => {
+    const u = { item: d.title, id: d.id, qty: d.qty || 1 }
+    if (d.designators) u.designators = d.designators
+    return u
+  })
+  o.referencedBy = referencedByGroups.value.flatMap(g => g.items.map(d => ({ item: d.title, id: d.id, via: g.label })))
+  if (comments.value.length) {
+    o.comments = comments.value.map(c => ({ by: who(c.authorId), at: c.createdAt, text: commentParts(c.body).map(p => p.id ? p.title : p.text).join('') }))
+  }
+  const mIn = mentions.value.filter(c => c.itemId !== it.id).map(c => ({ item: hostTitle(c.itemId), id: c.itemId, by: who(c.authorId), at: c.createdAt, text: commentParts(c.body).map(p => p.id ? p.title : p.text).join('') }))
+  if (mIn.length) o.mentionedIn = mIn
+  if (exportRevisions.value.length) {
+    o.history = exportRevisions.value.map(r => ({ version: `v${r.version}`, by: who(r.editedBy), at: r.editedAt }))
+  }
   return o
 })
+// Revisions + comments for the code views AND the Log tab — fetched lazily the
+// first time either opens (small metadata, no snapshots).
+const exportRevisions = ref([])
+const comments = ref([])
+const mentions = ref([]) // comments elsewhere that reference THIS item ([[id]])
+const logHistEl = ref(null)
+function scrollLogSoon() { nextTick(() => { const el = logHistEl.value; if (el) el.scrollTop = el.scrollHeight }) }
+// Terminal behaviour: anything appended (status move, comment, the composer,
+// the typing prompt) keeps the view pinned to the bottom — unless the user has
+// deliberately scrolled up to read older lines.
+let logObs = null
+onMounted(() => {
+  if (!logHistEl.value || typeof MutationObserver === 'undefined') return
+  logObs = new MutationObserver(() => {
+    const el = logHistEl.value
+    if (!el) return
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight
+  })
+  logObs.observe(logHistEl.value, { childList: true, subtree: true, characterData: true })
+})
+onBeforeUnmount(() => { if (logObs) logObs.disconnect() })
+watch([viewFormat, tab, () => props.milestone?.id], async ([f, tb, id]) => {
+  if (!id) return
+  if (f === 'form' && tb !== 'log' && tb !== 'refby') return
+  const [revs, cs, ms] = await Promise.all([
+    api.listRevisions(id).catch(() => []),
+    api.listComments(id).catch(() => []),
+    api.listMentions(id).catch(() => []),
+  ])
+  exportRevisions.value = revs || []
+  comments.value = cs || []
+  mentions.value = ms || []
+  // terminal convention: newest at the bottom, scrolled into view
+  if (tb === 'log') scrollLogSoon()
+}, { immediate: true })
+// One merged terminal stream: history + comments + incoming mentions, oldest
+// first. Self-mentions are already in the stream as the comment itself.
+const logEntries = computed(() => {
+  const revs = exportRevisions.value.map(r => ({ kind: 'rev', key: 'r' + r.version, time: r.editedAt, version: r.version, by: r.editedBy }))
+  const cs = comments.value.map(c => ({ kind: 'comment', key: 'c' + c.id, time: c.createdAt, id: c.id, by: c.authorId, body: c.body }))
+  const ms = mentions.value.filter(c => c.itemId !== props.milestone?.id).map(c => ({ kind: 'mention', key: 'm' + c.id, time: c.createdAt, by: c.authorId, body: c.body, host: c.itemId }))
+  return [...revs, ...cs, ...ms].sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
+})
+// The DISPLAYED stream compresses runs of consecutive saves into one line
+// ("saved v107 → v122 · name (16 saves)") — the full list lives in the History
+// tab; the log only keeps saves as time anchors between comments/mentions.
+const logDisplay = computed(() => {
+  const out = []
+  let run = null
+  const flush = () => {
+    if (!run) return
+    const items = run
+    const first = items[0], last = items[items.length - 1]
+    const authors = [...new Set(items.map(i => i.by || ''))]
+    out.push({ kind: 'revgroup', key: 'g' + first.version + '-' + last.version, items, first, last, sameBy: authors.length === 1 ? first.by : null })
+    run = null
+  }
+  for (const e of logEntries.value) {
+    if (e.kind === 'rev') { (run = run || []).push(e); continue }
+    flush()
+    out.push(e)
+  }
+  flush()
+  return out
+})
+function shortDate(iso) { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : `${d.getDate()} ${MONTHS[d.getMonth()]}` }
+function revRange(e) {
+  const a = shortDate(e.first.time), b = shortDate(e.last.time)
+  return a === b ? fmtStamp(e.last.time) : `${a} – ${b}`
+}
+
+// Items whose comments mention this one — the Referenced-by tab's third group.
+const mentionHosts = computed(() => {
+  const ids = [...new Set(mentions.value.map(c => c.itemId))]
+  return ids.filter(id => id !== props.milestone?.id && store.milestones.some(m => m.id === id)).map(id => ({ id, ...itemPill(id) }))
+})
+
+// ── Comments: terminal input line with /ref item autocompletion ─────────────
+// Picked items are shown as [[Title]] in the input and sent as [[id]] tokens;
+// display resolves ids back to (current) titles, clickable like ref pills.
+const canComment = computed(() => canEditWorkspace() || canProposeChanges())
+const commentText = ref('')
+const commentInput = ref(null)
+const pickedRefs = ref([]) // { title, id } in pick order (consumed on submit)
+const refQuery = ref(null) // null = picker closed; '' / text = open with filter
+const refIdx = ref(0)
+function updateRefSuggest() {
+  const m = commentText.value.match(/\/ref\s*([^[\]]*)$/i)
+  refQuery.value = m ? m[1].trim().toLowerCase() : null
+  refIdx.value = 0
+}
+const refResults = computed(() => {
+  if (refQuery.value == null) return []
+  const q = refQuery.value
+  return store.milestones.filter(m => m.id !== props.milestone?.id && (!q || (m.title || '').toLowerCase().includes(q))).slice(0, 8)
+})
+function pickRefItem(m) {
+  commentText.value = commentText.value.replace(/\/ref\s*([^[\]]*)$/i, `[[${m.title}]] `)
+  pickedRefs.value.push({ title: m.title, id: m.id })
+  refQuery.value = null
+  commentInput.value?.focus()
+}
+function onCommentEnter() {
+  if (refResults.value.length) { pickRefItem(refResults.value[refIdx.value] || refResults.value[0]); return }
+  postComment()
+}
+function encodeCommentBody(text) {
+  const pool = [...pickedRefs.value]
+  return text.replace(/\[\[([^\]]+)\]\]/g, (full, title) => {
+    const i = pool.findIndex(p => p.title === title)
+    if (i === -1) return full
+    const [p] = pool.splice(i, 1)
+    return `[[${p.id}]]`
+  })
+}
+async function postComment() {
+  const text = commentText.value.trim()
+  if (!text || !props.milestone) return
+  const body = encodeCommentBody(text)
+  commentText.value = ''
+  pickedRefs.value = []
+  refQuery.value = null
+  composing.value = false // done — the status prompt returns as the active line
+  try {
+    const c = await api.addComment(props.milestone.id, body)
+    comments.value.push(c)
+  } catch (e) { alert(e?.message || 'Could not post the comment') }
+  scrollLogSoon()
+}
+function hostTitle(id) { return store.milestones.find(m => m.id === id)?.title || '(unknown item)' }
+function commentParts(body) {
+  return String(body || '').split(/(\[\[[^\]]+\]\])/).filter(Boolean).map(part => {
+    const m = part.match(/^\[\[([^\]]+)\]\]$/)
+    if (!m) return { text: part }
+    const it = store.milestones.find(x => x.id === m[1])
+    return it ? { id: it.id, title: it.title } : { text: m[1] }
+  })
+}
+const myMemberId = computed(() => workspace.members?.find(w => w.username === session.username)?.id || null)
+const myName = computed(() => memberName(myMemberId.value) || session.username || 'you')
+function canDeleteComment(e) { return !!e.by && (e.by === myMemberId.value || e.by === 'you') }
+async function removeComment(id) {
+  try {
+    await api.deleteComment(id)
+    comments.value = comments.value.filter(c => c.id !== id)
+  } catch (e) { alert(e?.message || 'Could not delete the comment') }
+}
+// The input line exists only while composing — opened via the status prompt's
+// "comment" command or the dim trigger line; Esc / clicking away closes it.
+const composing = ref(false)
+function focusComment() {
+  tab.value = 'log'
+  composing.value = true
+  nextTick(() => { commentInput.value?.focus(); scrollLogSoon() })
+}
+function onCommentEsc() {
+  if (refQuery.value != null) { refQuery.value = null; return }
+  composing.value = false
+}
+function onCommentBlur() {
+  if (!commentText.value.trim() && refQuery.value == null) composing.value = false
+}
 function yamlScalar(v) {
   if (v == null) return '""'
   if (typeof v === 'number' || typeof v === 'boolean') return String(v)
@@ -891,7 +1289,17 @@ function toYaml(obj, indent = 0) {
   for (const [k, v] of Object.entries(obj)) {
     if (Array.isArray(v)) {
       if (!v.length) { lines.push(`${pad}${k}: []`); continue }
-      lines.push(`${pad}${k}:`); for (const el of v) lines.push(`${pad}  - ${yamlScalar(el)}`)
+      lines.push(`${pad}${k}:`)
+      for (const el of v) {
+        if (el && typeof el === 'object' && !Array.isArray(el)) {
+          // object list entry: "- key: v" on the marker line, rest indented under it
+          const sub = toYaml(el, indent + 2).split('\n')
+          lines.push(`${pad}  - ${sub[0].trim()}`)
+          for (let i = 1; i < sub.length; i++) lines.push(sub[i])
+        } else {
+          lines.push(`${pad}  - ${yamlScalar(el)}`)
+        }
+      }
     } else if (v && typeof v === 'object') {
       const entries = Object.entries(v)
       if (!entries.length) { lines.push(`${pad}${k}: {}`); continue }
@@ -1051,17 +1459,34 @@ watch(availableRelTypes, (types) => {
 }, { immediate: true })
 // Backlog/container items don't sit in the timeline: the Dependencies (scheduling)
 // and Groups (timeline legend/highlight) tabs are hidden for them — their
-// relationships live in the Uses tab.
+// scheduling links live on the timeline. Uses (structure) + Referenced-by apply
+// to every item.
 watch(currentSchedulable, (ok) => { if (!ok && (tab.value === 'deps' || tab.value === 'groups')) tab.value = 'flow' }, { immediate: true })
 const SELF = props.milestone?.id || '__NEW__'
 const originalEdges = (props.milestone ? store.links.filter(l => l.a === SELF || l.b === SELF) : [])
-  .map(l => ({ a: l.a, b: l.b, rel: l.rel || 'depends-on', version: l.version ?? null }))
+  .map(l => ({ a: l.a, b: l.b, rel: l.rel || 'depends-on', version: l.version ?? null, qty: l.qty ?? null, designators: l.designators || '' }))
 const edges = ref(originalEdges.map(e => ({ ...e })))
 
-// Pinned versions for outgoing "uses" links (this item uses X at version N).
-// Kept separate from edge membership so the version <select> can v-model it.
-const usesPins = reactive({}) // { [usedItemId]: version }
-for (const l of originalEdges) if (l.rel === 'uses' && l.a === SELF && l.version != null) usesPins[l.b] = l.version
+// Pinned versions + quantities for outgoing "uses" links (this item uses N× X at
+// version V) — the configuration + multiplicity dimensions of the BOM edge. Kept
+// out of edge membership so the version <select> / qty <input> can v-model them.
+const usesPins = reactive({})   // { [usedItemId]: version }
+const usesQty = reactive({})    // { [usedItemId]: quantity } — empty/1 = default
+const usesRefDes = reactive({}) // { [usedItemId]: "C1, C2, C10-C17" } — free text
+for (const l of originalEdges) {
+  if (l.rel !== 'uses' || l.a !== SELF) continue
+  if (l.version != null) usesPins[l.b] = l.version
+  if (l.qty != null) usesQty[l.b] = l.qty
+  if (l.designators) usesRefDes[l.b] = l.designators
+}
+// Soft plausibility hint: when the designators parse to a countable list and
+// that count differs from qty, warn — non-blocking, qty stays authoritative.
+function refDesMismatch(id) {
+  const parsed = parseDesignators(usesRefDes[id])
+  if (!parsed) return ''
+  const q = Number(usesQty[id]) >= 2 ? Math.floor(Number(usesQty[id])) : 1
+  return parsed.length === q ? '' : `Designators count ${parsed.length}, but quantity is ${q}`
+}
 
 // Sets for the SELECTED relationship — drive the two pickers.
 const localLinkedIds = computed(() => new Set(edges.value.filter(e => e.a === SELF && e.rel === relType.value).map(e => e.b)))
@@ -1105,14 +1530,19 @@ function activePickerStyle(color) {
 const pickerSearch = ref('')
 const pickerSearch2 = ref('')
 
-function buildPickerGroups(query, onlyIds, backlogOnly = false) {
+function buildPickerGroups(query, onlyIds, backlogOnly = false, includeIds = null) {
   const q = (query || '').toLowerCase()
   const groups = []
   // Uses tab: off-timeline (backlog) items only, in one flat "Backlog" group.
+  // includeIds keeps ALREADY-LINKED items visible even when they fail the backlog
+  // rule (e.g. a timeline item linked before it was scheduled) — otherwise the
+  // link would be stuck: shown in read mode but impossible to deselect here. The
+  // rule only restricts NEW links, never editing existing ones.
   if (backlogOnly) {
     const backlog = store.milestones.filter(m => {
       if (m.id === props.milestone?.id) return false
-      if (m.swimlaneId || m.sourceSystem) return false
+      const isBacklog = !m.swimlaneId && !m.sourceSystem
+      if (!isBacklog && !(includeIds && includeIds.has(m.id))) return false
       if (onlyIds && !onlyIds.has(m.id)) return false
       if (q && !m.title.toLowerCase().includes(q)) return false
       return true
@@ -1142,28 +1572,21 @@ const showOnly2 = ref(false)
 const pickerGroups = computed(() => buildPickerGroups(pickerSearch.value, showOnly1.value && localLinkedIds.value.size ? localLinkedIds.value : null))
 const pickerGroups2 = computed(() => buildPickerGroups(pickerSearch2.value, showOnly2.value && localDependentIds.value.size ? localDependentIds.value : null))
 
-// ── Uses tab (#86): reference Backlog items only. Same edge store, rel='uses',
-// with a backlog-only picker. Two directions: "Uses" (this → backlog) and
-// "Used by" (backlog → this).
+// ── Uses tab: the composition / BOM edge (backlog items this one uses). Stored
+// as rel='uses' links, version-pinnable. Edited ONE-directionally — only the
+// outgoing "Uses" side; the reverse ("Used by") is read-only under Referenced-by.
 const localUsesIds = computed(() => new Set(edges.value.filter(e => e.a === SELF && e.rel === 'uses').map(e => e.b)))
-const localUsedByIds = computed(() => new Set(edges.value.filter(e => e.b === SELF && e.rel === 'uses').map(e => e.a)))
 function toggleUses(id) {
   const had = edges.value.some(e => e.a === SELF && e.b === id && e.rel === 'uses')
   edges.value = edges.value.filter(e => !(e.rel === 'uses' && ((e.a === SELF && e.b === id) || (e.a === id && e.b === SELF))))
   if (!had) edges.value.push({ a: SELF, b: id, rel: 'uses' })
-  else delete usesPins[id]
-}
-function toggleUsedBy(id) {
-  const had = edges.value.some(e => e.a === id && e.b === SELF && e.rel === 'uses')
-  edges.value = edges.value.filter(e => !(e.rel === 'uses' && ((e.a === id && e.b === SELF) || (e.a === SELF && e.b === id))))
-  if (!had) edges.value.push({ a: id, b: SELF, rel: 'uses' })
+  else { delete usesPins[id]; delete usesQty[id]; delete usesRefDes[id] }
 }
 function usesDot(m) { return itemTypeByKey(m.typeKey || m.kind)?.color || '#8a8a8e' }
 function usesTypeLabel(m) { return itemTypeByKey(m.typeKey || m.kind)?.label || (m.typeKey || m.kind || '') }
-const usesSearch = ref(''); const usesSearch2 = ref('')
-const showOnlyU1 = ref(false); const showOnlyU2 = ref(false)
-const usesGroups = computed(() => buildPickerGroups(usesSearch.value, showOnlyU1.value && localUsesIds.value.size ? localUsesIds.value : null, true))
-const usesGroups2 = computed(() => buildPickerGroups(usesSearch2.value, showOnlyU2.value && localUsedByIds.value.size ? localUsedByIds.value : null, true))
+const usesSearch = ref('')
+const showOnlyU1 = ref(false)
+const usesGroups = computed(() => buildPickerGroups(usesSearch.value, showOnlyU1.value && localUsesIds.value.size ? localUsesIds.value : null, true, localUsesIds.value))
 
 const titleInput = ref(null)
 onMounted(() => {
@@ -1189,7 +1612,43 @@ function resolveLinks(msId) {
     b: e.b === SELF ? msId : e.b,
     rel: e.rel,
     version: (e.rel === 'uses' && e.a === SELF && usesPins[e.b]) ? Number(usesPins[e.b]) : null,
+    qty: (e.rel === 'uses' && e.a === SELF && Number(usesQty[e.b]) >= 2) ? Math.floor(Number(usesQty[e.b])) : null,
+    designators: (e.rel === 'uses' && e.a === SELF) ? String(usesRefDes[e.b] || '').trim() : '',
   }))
+}
+
+// Reset the link-edit baseline to the CURRENT store state — called after a save,
+// so a later cancel restores the saved state, not the state from when the modal
+// first opened.
+function snapshotEdgeState() {
+  originalEdges.length = 0
+  if (!props.milestone) return
+  for (const l of store.links.filter(l => l.a === SELF || l.b === SELF)) {
+    originalEdges.push({ a: l.a, b: l.b, rel: l.rel || 'depends-on', version: l.version ?? null, qty: l.qty ?? null, designators: l.designators || '' })
+  }
+}
+
+// Cancel (embedded edit): throw away everything typed since the last saved state
+// and flip back to read mode — form fields, links, pins, quantities, groups.
+function cancelEdit() {
+  viewVersion.value = null
+  applyToForm(props.milestone)
+  decodeRefPins()
+  edges.value = originalEdges.map(e => ({ ...e }))
+  for (const k of Object.keys(usesPins)) delete usesPins[k]
+  for (const k of Object.keys(usesQty)) delete usesQty[k]
+  for (const k of Object.keys(usesRefDes)) delete usesRefDes[k]
+  for (const l of originalEdges) {
+    if (l.rel !== 'uses' || l.a !== SELF) continue
+    if (l.version != null) usesPins[l.b] = l.version
+    if (l.qty != null) usesQty[l.b] = l.qty
+    if (l.designators) usesRefDes[l.b] = l.designators
+  }
+  localGroupIds.value = new Set(props.milestone ? itemGroupIds(props.milestone.id) : [])
+  invalidFields.value = []
+  proposing.value = false
+  proposeNote.value = ''
+  editing.value = false
 }
 
 function syncLinks(msId) {
@@ -1199,7 +1658,7 @@ function syncLinks(msId) {
   const orig = new Map(originalEdges.map(e => [key(e), e]))
   for (const [k, e] of want) {
     const o = orig.get(k)
-    if (!o || (o.version ?? null) !== (e.version ?? null)) addLink(e.a, e.b, e.rel, e.version) // new link or version change → upsert
+    if (!o || (o.version ?? null) !== (e.version ?? null) || (o.qty ?? null) !== (e.qty ?? null) || (o.designators || '') !== (e.designators || '')) addLink(e.a, e.b, e.rel, e.version, e.qty, e.designators) // new link or version/qty/refdes change → upsert
   }
   for (const [k, e] of orig) if (!want.has(k)) removeLink(e.a, e.b, e.rel)
 }
@@ -1299,13 +1758,13 @@ function submit(keepOpen = false) {
   return true
 }
 
-// Header Save: pop-up saves (keeping edit open for edits / closing on create); the
-// embedded view saves and flips back to read.
+// Header Save (also Enter-to-save): the pop-up saves and closes; the embedded
+// view saves in place and flips back to read.
 function onSave() {
   if (props.embedded) {
-    if (submit(true)) { editing.value = false; proposing.value = false }
+    if (submit(true)) { editing.value = false; proposing.value = false; snapshotEdgeState() }
   } else {
-    submit(props.mode === 'edit' && !proposing.value)
+    submit()
   }
 }
 
@@ -1432,27 +1891,122 @@ function remove() {
   min-height: 0;
 }
 
-/* JSON / YAML code view — replaces the FIELDS block (tabs/flow/console stay below). */
-.ms-code-view { min-height: 260px; max-height: 60vh; overflow: auto; background: var(--clr-bg); border: 1px solid var(--clr-border-light); border-radius: var(--r-md); padding: 12px 14px; }
+/* JSON / YAML code view — replaces the FIELDS block AND the tabs. Long documents
+   scroll INSIDE the box. Popup: bounded by the modal (60vh). Embedded: exactly
+   viewport minus the chrome above it (app header ~96 + panel header ~60 +
+   bottom padding 20), so it ends flush with the window edge. */
+.ms-code-view { flex: 1; min-height: 260px; max-height: 60vh; overflow: auto; background: var(--clr-bg); border: 1px solid var(--clr-border-light); border-radius: var(--r-md); padding: 12px 14px; }
+.ms-code-view.full { flex: 0 0 calc(100vh - 176px); height: calc(100vh - 176px); max-height: none; }
 .ms-code { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.6; color: var(--clr-text); white-space: pre-wrap; word-break: break-word; }
+/* Copy-the-document button — sticky top-right so it stays put while the code scrolls. */
+.code-copy { position: sticky; top: 0; float: right; z-index: 2; display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border: 1px solid var(--clr-border); border-radius: 8px; background: var(--clr-surface);
+  color: var(--clr-text-2); cursor: pointer; transition: all 0.12s; }
+.code-copy:hover { color: var(--clr-text); border-color: var(--clr-accent); }
+.code-copy.done { background: #30D158; color: #06310f; border-color: transparent; }
 
-/* Always-visible console dock at the very bottom of the modal (teleport target). */
-.modal-console-dock { flex-shrink: 0; background: var(--clr-bg); border-top: 1px solid var(--clr-border); }
+/* Log tab: real version history as terminal lines + the status console below
+   (teleport target — the console lives in the Flow diagram component). */
+.ms-log { gap: 10px; overflow: hidden; }
+.log-hist { flex: 1; min-height: 120px; overflow-y: auto; background: var(--clr-bg); border: 1px solid var(--clr-border-light);
+  border-radius: var(--r-md); padding: 10px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.7; }
+.log-line { white-space: pre-wrap; word-break: break-word; color: var(--clr-text-3); }
+.log-line strong { color: var(--clr-text); font-weight: 700; }
+.log-prompt { color: #2e9e4f; user-select: none; }
+.log-time { color: var(--clr-text-3); margin: 0 4px; user-select: none; }
+.log-gt { color: #2e9e4f; margin-right: 7px; user-select: none; }
+.log-none { font-style: italic; }
+.log-dim { opacity: 0.6; }
+/* Comments in the stream: blue prompt, inline item refs, delete on hover. */
+.log-prompt.cmt, .log-gt.cmt { color: #4c8dff; }
+.log-prompt.mnt, .log-gt.mnt { color: #b478f0; }
+.log-ref { display: inline; padding: 0; border: 0; background: none; font: inherit; color: var(--clr-accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.log-ref:hover { filter: brightness(1.25); }
+.log-del { display: inline-flex; margin-left: 6px; border: 0; background: none; color: var(--clr-text-3); cursor: pointer; font-size: 13px; padding: 0 3px; border-radius: 4px; opacity: 0; }
+.log-line:hover .log-del { opacity: 1; }
+.log-del:hover { color: #FF3B30; }
+/* The comment prompt (input line) + the /ref item picker above it. */
+.log-add { display: flex; align-items: center; width: 100%; text-align: left; border: 0; background: none; padding: 0; margin-top: 2px;
+  font: inherit; cursor: text; opacity: 0.55; transition: opacity 0.12s; }
+.log-add:hover { opacity: 1; }
+.log-add-t { color: var(--clr-text-3); font-style: italic; }
+.log-input-row { display: flex; align-items: center; margin-top: 2px; }
+.log-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; cursor: text; }
+.log-input { flex: 0 0 auto; max-width: 100%; border: 0; background: none; outline: none; color: var(--clr-text); font: inherit; padding: 0; caret-color: transparent; }
+/* Same block cursor as the status prompt (1 character cell, VS-Code-terminal style). */
+.log-cursor { flex-shrink: 0; display: inline-block; width: 1ch; height: 1.2em; margin-left: 1px; background: var(--clr-text-2); animation: log-blink 1s step-end infinite; }
+.log-hint { margin-left: 8px; color: var(--clr-text-3); font-style: italic; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes log-blink { 50% { opacity: 0; } }
+.log-refpick { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20; min-width: 280px; max-height: 240px; overflow-y: auto;
+  background: var(--clr-surface); border: 1px solid var(--clr-border); border-radius: 10px; box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.3); padding: 5px; }
+.log-refopt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: none; color: var(--clr-text);
+  padding: 6px 9px; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
+.log-refopt.act { background: color-mix(in srgb, var(--clr-accent) 14%, transparent); }
+.log-refopt-t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-refopt-ty { margin-left: auto; padding-left: 12px; font-size: 11px; color: var(--clr-text-3); flex-shrink: 0; }
+/* The docked console loses its own chrome + inner scroll inside the terminal —
+   the surrounding .log-hist is the single scroll area. */
 .modal-console-dock:empty { display: none; }
+.log-hist :deep(.sf-foot),
+.log-hist :deep(.sf-foot-docked) { border: 0; padding: 0; margin: 0; background: none; }
+.log-hist :deep(.sf-foot-docked .sf-console),
+.log-hist :deep(.sf-foot-docked .sf-console.tall) { height: auto; max-height: none; overflow: visible; line-height: 1.7; font-size: 12px; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .ms-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--clr-border-light); margin: 2px 0 0; }
 .ms-tab {
-  padding: 8px 14px; font-size: 13.5px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 12px; font-size: 13.5px; font-weight: 600;
   color: var(--clr-text-3); background: none;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
   cursor: pointer; transition: color 0.12s, border-color 0.12s;
 }
+.ms-tab svg { flex-shrink: 0; opacity: 0.75; }
+.ms-tab.active svg { opacity: 1; }
 .ms-tab:hover { color: var(--clr-text-2); }
 .ms-tab.active { color: var(--clr-accent); border-bottom-color: var(--clr-accent); }
 .ms-tab-body { height: 360px; display: flex; flex-direction: column; } /* fixed so the modal is the same height on every tab */
 .ms-flow { padding: 0; }
+/* History list scrolls inside the panel — keep the rows clear of the scrollbar. */
+.ms-history { padding-right: 10px; }
+
+/* Empty-fields toggle in the read card. */
+.rf-toggle { align-self: flex-start; font-size: 11.5px; color: var(--clr-text-3); font-style: italic; cursor: pointer; padding: 2px 0; }
+.rf-toggle:hover { color: var(--clr-text-2); }
+
+/* View-format overflow menu (header). */
+.fmt-menu { position: relative; }
+.fmt-bg { position: fixed; inset: 0; z-index: 40; }
+.fmt-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 41; min-width: 160px; background: var(--clr-surface);
+  border: 1px solid var(--clr-border); border-radius: 10px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.35); padding: 5px; }
+.fmt-opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: none;
+  color: var(--clr-text-2); padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 12.5px; font-weight: 600; }
+.fmt-opt:hover { background: var(--clr-surface-2); color: var(--clr-text); }
+.fmt-opt.on { color: var(--clr-accent); }
+
+/* Quick-action popovers (read mode: assignee / progress / maturity). Spans, not
+   buttons — real form controls would be disabled by the read-mode fieldset. */
+/* No permanent decoration — the value looks normal; hovering reveals a small
+   pencil and tints the value, which is the whole "you can click this" cue. */
+.read-val.qa { cursor: pointer; }
+.read-val.qa:hover { color: var(--clr-accent); }
+.qa-pen { display: inline-block; vertical-align: baseline; margin-left: 7px; opacity: 0; color: var(--clr-text-3); transition: opacity 0.12s; }
+.read-val.qa:hover .qa-pen { opacity: 1; color: var(--clr-accent); }
+.qa-wrap { position: relative; }
+.qa-bg { position: fixed; inset: 0; z-index: 40; }
+.qa-pop { position: absolute; top: 4px; left: 0; z-index: 41; display: flex; flex-wrap: wrap; gap: 4px; max-width: 340px;
+  background: var(--clr-surface); border: 1px solid var(--clr-border); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.35); padding: 8px; }
+.qa-opt { font-size: 12px; font-weight: 600; color: var(--clr-text-2); background: var(--clr-bg-2); border: 1px solid var(--clr-border);
+  border-radius: 7px; padding: 4px 10px; cursor: pointer; transition: all 0.12s; }
+.qa-opt:hover { color: var(--clr-text); border-color: var(--clr-accent); }
+.qa-opt.on { color: #fff; background: var(--clr-accent); border-color: var(--clr-accent); }
+.qa-opt.num { font-variant-numeric: tabular-nums; }
+/* Structure tab: the graph/table fills the fixed tab body, no outer scroll. */
+.ms-struct { padding: 0; overflow: hidden; }
+.ms-struct :deep(.sg) { height: 100%; }
 /* fieldsets are only used to disable the whole form in read-only mode — strip their chrome */
 .panel-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 /* Two-column field grid: compact fields pair up, wide ones (Title, description,
@@ -1505,6 +2059,8 @@ function remove() {
 .read-pill.missing { cursor: default; }
 .read-pill.pill-conflict { box-shadow: inset 0 0 0 1.5px #FF3B30; }
 .read-pill-ver { font-weight: 500; color: var(--clr-text-3); }
+.read-pill-qty { font-weight: 750; font-variant-numeric: tabular-nums; margin-right: 1px; }
+.read-none-i { color: var(--clr-text-3); font-size: 13px; font-style: italic; }
 .read-deps { list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .read-deps li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
 .read-dep-rel { flex-shrink: 0; padding-top: 5px; min-width: 96px; font-size: 12px; font-weight: 500; color: var(--clr-text-3); }
@@ -1524,6 +2080,17 @@ function remove() {
 .picker-ver { flex-shrink: 0; margin-right: 8px; padding: 3px 6px; font-size: 11px; font-variant-numeric: tabular-nums;
   color: var(--clr-text-2); background: var(--clr-bg); border: 1px solid var(--clr-border); border-radius: var(--r-sm); }
 .picker-ver:focus { outline: none; border-color: var(--clr-accent); }
+/* BOM quantity: "6×" before the version dropdown. Empty = 1. */
+.picker-qty { flex-shrink: 0; width: 44px; padding: 3px 6px; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right;
+  color: var(--clr-text-2); background: var(--clr-bg); border: 1px solid var(--clr-border); border-radius: var(--r-sm); -moz-appearance: textfield; }
+.picker-qty::-webkit-outer-spin-button, .picker-qty::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.picker-qty:focus { outline: none; border-color: var(--clr-accent); }
+.picker-qty-x { flex-shrink: 0; margin: 0 6px 0 3px; font-size: 11px; color: var(--clr-text-3); }
+/* Reference designators (electronics BOM): free text naming usage positions. */
+.picker-refdes { flex-shrink: 0; width: 128px; padding: 3px 6px; font-size: 11px; margin-right: 6px;
+  color: var(--clr-text-2); background: var(--clr-bg); border: 1px solid var(--clr-border); border-radius: var(--r-sm); }
+.picker-refdes:focus { outline: none; border-color: var(--clr-accent); }
+.picker-refdes-warn { flex-shrink: 0; margin-right: 6px; }
 .dep-cols { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .dep-cols .field { min-height: 0; }
 .dep-cols .ms-picker { display: flex; flex-direction: column; flex: 1; min-height: 0; }

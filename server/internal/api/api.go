@@ -246,6 +246,12 @@ func NewRouter(st *store.Store, au *auth.Auth, staticDir string) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireMember)
 			r.Get("/change-requests", s.listChangeRequests)
+			// Item comments (the Log tab): any member can read and write; a
+			// comment can only be deleted by its author.
+			r.Get("/items/{id}/comments", s.listComments)
+			r.Get("/items/{id}/mentions", s.listMentions)
+			r.Post("/items/{id}/comments", s.addComment)
+			r.Delete("/comments/{id}", s.deleteComment)
 		})
 
 		// Proposing a change: any member — or, when the project opts in, anyone
@@ -1409,12 +1415,60 @@ func (s *Server) scmRefreshItem(w http.ResponseWriter, r *http.Request) {
 
 // ── links ───────────────────────────────────────────────────────────────────
 
+func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
+	out, err := s.store.ListComments(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) listMentions(w http.ResponseWriter, r *http.Request) {
+	out, err := s.store.ListMentions(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Body string `json:"body"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	body := strings.TrimSpace(in.Body)
+	if body == "" {
+		writeErr(w, http.StatusBadRequest, "a comment body is required")
+		return
+	}
+	sess, _ := s.auth.SessionFromRequest(r)
+	c, err := s.store.AddComment(r.Context(), s.currentWorkspace(r), uuid.NewString(), chi.URLParam(r, "id"), sess.UserID, body)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, c)
+}
+
+func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.auth.SessionFromRequest(r)
+	if err := s.store.DeleteComment(r.Context(), s.currentWorkspace(r), chi.URLParam(r, "id"), sess.UserID); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) addLink(w http.ResponseWriter, r *http.Request) {
 	var in store.Link
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.store.AddLink(r.Context(), s.currentWorkspace(r), in.A, in.B, in.Rel, in.Version); err != nil {
+	if err := s.store.AddLink(r.Context(), s.currentWorkspace(r), in.A, in.B, in.Rel, in.Version, in.Qty, in.Designators); err != nil {
 		s.fail(w, err)
 		return
 	}

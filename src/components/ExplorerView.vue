@@ -186,7 +186,11 @@ const folders = computed(() => {
     if (!g) { g = { key: k, type: { key: k, label: k, icon: 'l:Diamond', color: '' }, items: [] }; byKey.set(k, g) }
     g.items.push(m)
   }
-  const out = [...byKey.values()].filter(g => g.items.length > 0 || (g.type && !g.type.builtin))
+  // Every DEFINED type gets a folder — built-in or custom — even when empty (it
+  // then shows "— empty —"), so Event/Milestone behave like custom types. Only a
+  // stray group with no type and no items would be dropped (never happens: byKey
+  // is seeded from itemTypes.list, and item-derived groups always have items).
+  const out = [...byKey.values()].filter(g => g.items.length > 0 || g.type)
   for (const g of out) g.items = sortItems(g.items)
   return out.sort((a, b) => (a.type.label || '').localeCompare(b.type.label || ''))
 })

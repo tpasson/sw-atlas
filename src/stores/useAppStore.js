@@ -18,16 +18,19 @@ export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 
 // Typed relationships for links (R1). For an edge a→b: `label` reads it from a's
 // side, `inverse` from b's side. 'depends-on' keeps the legacy blocking wording.
-// scheduling:true marks a temporal relationship — it only makes sense between
-// two timeline items (dated). The rest are traceability relations, valid across
-// families (incl. timeline ↔ backlog). See relationsFor() for the family rule.
+// Two relationship axes remain (the vague middle kinds — relates-to / child-of /
+// implements / verifies — were dropped as noise):
+//   • uses        = STRUCTURE / composition (BOM): "this is composed of / uses X".
+//                   A free graph edge, version-pinnable (link.version = config).
+//                   This is what a product-tree / D3 BOM traversal walks.
+//   • depends-on  = TIME / scheduling: "Blocked by / Blocks", only meaningful
+//                   between two dated timeline items (scheduling:true).
+// Typed reference fields are a separate thing (attributes / membership), surfaced
+// read-only under "Referenced by". Uses is edited one-directionally — the reverse
+// ("Used by") is read-only.
 export const RELATIONSHIP_TYPES = [
   { key: 'depends-on', label: 'Blocked by', inverse: 'Blocks', scheduling: true },
   { key: 'uses', label: 'Uses', inverse: 'Used by' },
-  { key: 'relates-to', label: 'Relates to', inverse: 'Relates to' },
-  { key: 'child-of', label: 'Child of', inverse: 'Parent of' },
-  { key: 'implements', label: 'Implements', inverse: 'Implemented by' },
-  { key: 'verifies', label: 'Verifies', inverse: 'Verified by' },
 ]
 
 // Whether an item sits on the timeline (schedulable) vs. off-timeline backlog —
@@ -449,20 +452,73 @@ export const groups = reactive({ list: [] })
 // focusItemId/focusVersion: transient "jump to this item on the timeline" signal.
 // explorerItemId/explorerItemVersion: the Explorer's currently open item — kept in
 // the URL (?item=&v=) so browser back/forward restores it.
-// Explorer view mode (Tree / Table / Board) — shared so the switcher can live in
-// the top header while ExplorerView reads it. Persisted per browser.
+// Explorer view mode (Tree / Table / Board / Graph) — shared so the switcher can
+// live in the top header while ExplorerView reads it. Persisted per browser and
+// mirrored in the URL (?mode=) for shareable links.
 export const EXPLORER_MODES = [{ key: 'folders', label: 'Tree' }, { key: 'table', label: 'Table' }, { key: 'board', label: 'Board' }]
 const EXPLORER_MODE_KEY = 'atlas-explorer-mode'
+const EXPLORER_MODE_KEYS = ['folders', 'table', 'board']
 function initialExplorerMode() {
   const v = localStorage.getItem(EXPLORER_MODE_KEY)
-  return ['folders', 'table', 'board'].includes(v) ? v : 'folders'
+  return EXPLORER_MODE_KEYS.includes(v) ? v : 'folders'
 }
 export function setExplorerMode(k) {
   ui.explorerMode = k
   try { localStorage.setItem(EXPLORER_MODE_KEY, k) } catch { /* ignore */ }
+  // Reflect the mode in the URL (shareable), keeping any open item.
+  pushNav({ view: 'explorer', item: ui.explorerItemId || null, version: ui.explorerItemVersion || null })
 }
 
 export const ui = reactive({ hoverGroupId: null, focusItemId: null, focusVersion: null, explorerItemId: null, explorerItemVersion: null, highlightIds: null, settingsSection: initialSettingsSection(), focusCrId: null, explorerMode: initialExplorerMode() })
+
+// Recently visited items (per browser, newest first, max 10). Every item opened in
+// the Explorer lands here; quick pickers (e.g. the structure graph's root search)
+// offer them as history — re-visiting a recent item is the common case. Ids that
+// no longer resolve (deleted, other workspace) are simply skipped on display.
+const RECENT_ITEMS_KEY = 'atlas-recent-items'
+function initialRecentItems() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_ITEMS_KEY) || '[]')
+    return Array.isArray(v) ? v.filter(x => typeof x === 'string').slice(0, 10) : []
+  } catch { return [] }
+}
+export const recentItems = reactive({ list: initialRecentItems() })
+export function recordItemVisit(id) {
+  if (!id) return
+  const l = recentItems.list
+  const i = l.indexOf(id)
+  if (i === 0) return
+  if (i > 0) l.splice(i, 1)
+  l.unshift(id)
+  if (l.length > 10) l.length = 10
+  try { localStorage.setItem(RECENT_ITEMS_KEY, JSON.stringify([...l])) } catch { /* ignore */ }
+}
+watch(() => ui.explorerItemId, id => recordItemVisit(id))
+
+// parseDesignators turns the free-text designator field of a "uses" edge
+// ("C1, C2, C10-C17") into the individual designators [C1, C2, C10, …, C17].
+// Returns null when the text doesn't follow the countable pattern (free prose
+// like "see schematic p.3") — callers then skip counting/instance expansion.
+// Ranges need a shared alpha prefix (C10-C17); mixed prefixes don't count.
+export function parseDesignators(text) {
+  const s = String(text || '').trim()
+  if (!s) return null
+  const out = []
+  for (const part of s.split(/[,;]+/).map(p => p.trim()).filter(Boolean)) {
+    const range = part.match(/^([A-Za-z]+)(\d+)\s*[-–]\s*([A-Za-z]*)(\d+)$/)
+    if (range) {
+      const [, pre, a, pre2, b] = range
+      if (pre2 && pre2 !== pre) return null
+      const start = Number(a), end = Number(b)
+      if (!(end >= start) || end - start > 999) return null
+      for (let i = start; i <= end; i++) out.push(pre + i)
+      continue
+    }
+    if (/^[A-Za-z]+\d*$/.test(part)) { out.push(part); continue }
+    return null
+  }
+  return out.length ? out : null
+}
 
 // A reference-field value can pin a specific version of its target, encoded as
 // "<id>@v<n>". parseRef splits that back into { id, version } (version = null when
@@ -616,7 +672,8 @@ export function exclusiveOf(item) {
 function bookStart(m) { return m.startDate || m.when || fallbackDate(m) }
 function bookEnd(m) { return m.endDate || m.when || m.startDate || fallbackDate(m) }
 function dayNum(iso) { if (!iso) return null; const [y, mo, d] = String(iso).split('-').map(Number); return Math.floor(Date.UTC(y, (mo || 1) - 1, d || 1) / 86400000) }
-// The timeline items that use a given resource (a=user uses b=resource).
+// The dated timeline items that book a given resource — i.e. "use" it (a uses b,
+// a=user, b=resource). Only dated items occupy the resource in time.
 function resourceUsers(resourceId) {
   const users = []
   for (const l of store.links) {
@@ -817,9 +874,9 @@ export function goHomeView() {
   workspace.mode = 'landing'
 }
 
-// applyNav reconciles the view + open item from the URL (?view=&item=&v=), without
-// a reload. Used on first load and on browser back/forward, so those states are
-// restorable. An ?item with no explicit ?view implies the Explorer (its web layout).
+// applyNav reconciles the view + open item from the URL (?view=&item=&v=&mode=),
+// without a reload. Used on first load and on browser back/forward, so those states
+// are restorable. An ?item with no explicit ?view implies the Explorer (its web layout).
 function applyNav() {
   if (typeof window === 'undefined') return
   let q
@@ -836,6 +893,14 @@ function applyNav() {
   const v = parseInt(q.get('v') || '', 10)
   ui.explorerItemId = id || null
   ui.explorerItemVersion = id && Number.isFinite(v) && v > 0 ? v : null
+  if (resolved === 'explorer') {
+    // ?mode carries the Explorer sub-mode; absent means Tree (pushNav omits the
+    // default), so back/forward restores the sub-mode deterministically.
+    const mode = q.get('mode')
+    const m = EXPLORER_MODE_KEYS.includes(mode) ? mode : 'folders'
+    ui.explorerMode = m
+    try { localStorage.setItem(EXPLORER_MODE_KEY, m) } catch { /* ignore */ }
+  }
 }
 
 // pushNav records a navigable state (view + optional open item) into the URL and
@@ -848,8 +913,11 @@ export function pushNav({ view, item, version, section, fmt } = {}, replace = fa
   let url
   try {
     url = new URL(window.location.href)
-    url.searchParams.delete('view'); url.searchParams.delete('item'); url.searchParams.delete('v'); url.searchParams.delete('section'); url.searchParams.delete('fmt')
+    url.searchParams.delete('view'); url.searchParams.delete('item'); url.searchParams.delete('v'); url.searchParams.delete('section'); url.searchParams.delete('fmt'); url.searchParams.delete('mode')
     if (v && v !== 'timeline') url.searchParams.set('view', v)
+    // The Explorer carries its sub-mode (?mode=table|board|graph) so links and
+    // back/forward restore it; the default Tree stays implicit (clean URLs).
+    if (v === 'explorer' && ui.explorerMode !== 'folders') url.searchParams.set('mode', ui.explorerMode)
     if (v === 'settings' || v === 'project-settings') { const s = section || ui.settingsSection; if (s) url.searchParams.set('section', s) }
     if (item) { url.searchParams.set('item', item); if (version) url.searchParams.set('v', String(version)); if (fmt && fmt !== 'form') url.searchParams.set('fmt', fmt) }
   } catch { return }
@@ -1186,17 +1254,21 @@ export function useAppStore() {
   }
 
   // ── Links ─────────────────────────────────────────────────────────────────
-  function addLink(idA, idB, rel = 'depends-on', version = null) {
+  function addLink(idA, idB, rel = 'depends-on', version = null, qty = null, designators = '') {
     if (idA === idB) return
     const v = version ?? null
+    const q = Number(qty) >= 2 ? Math.floor(Number(qty)) : null // qty <2 = default 1 = null
+    const des = String(designators || '').trim()
     const existing = store.links.find(l => l.a === idA && l.b === idB && (l.rel || 'depends-on') === rel)
     if (existing) {
-      if ((existing.version ?? null) === v) return // unchanged
-      existing.version = v // version-only change (e.g. re-pin a "uses" link)
+      if ((existing.version ?? null) === v && (existing.qty ?? null) === q && (existing.designators || '') === des) return // unchanged
+      existing.version = v // version/qty/designator change (e.g. re-pin a "uses" link)
+      existing.qty = q
+      existing.designators = des
     } else {
-      store.links.push({ a: idA, b: idB, rel, version: v })
+      store.links.push({ a: idA, b: idB, rel, version: v, qty: q, designators: des })
     }
-    api.addLink(idA, idB, rel, v).catch(onWriteError)
+    api.addLink(idA, idB, rel, v, q, des).catch(onWriteError)
   }
   function removeLink(idA, idB, rel = 'depends-on') {
     store.links = store.links.filter(l => !(l.a === idA && l.b === idB && (l.rel || 'depends-on') === rel))

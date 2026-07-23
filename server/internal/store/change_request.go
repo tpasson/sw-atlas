@@ -147,10 +147,12 @@ func (s *Store) ApproveChangeRequest(ctx context.Context, ws, id, deciderID, not
 	// replace the item's links wholesale so additions AND removals both take effect.
 	var lp struct {
 		Links *[]struct {
-			A       string `json:"a"`
-			B       string `json:"b"`
-			Rel     string `json:"rel"`
-			Version *int   `json:"version"`
+			A           string `json:"a"`
+			B           string `json:"b"`
+			Rel         string `json:"rel"`
+			Version     *int   `json:"version"`
+			Qty         *int   `json:"qty"`
+			Designators string `json:"designators"`
 		} `json:"links"`
 	}
 	if err := json.Unmarshal(cr.Payload, &lp); err == nil && lp.Links != nil && itemID != "" {
@@ -159,7 +161,7 @@ func (s *Store) ApproveChangeRequest(ctx context.Context, ws, id, deciderID, not
 			return cr, err
 		}
 		for _, l := range *lp.Links {
-			if err := s.AddLink(ctx, ws, l.A, l.B, l.Rel, l.Version); err != nil {
+			if err := s.AddLink(ctx, ws, l.A, l.B, l.Rel, l.Version, l.Qty, l.Designators); err != nil {
 				return cr, err
 			}
 		}

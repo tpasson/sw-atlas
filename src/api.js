@@ -114,7 +114,7 @@ const realApi = {
   deleteItem: (id) => req('DELETE', `/items/${id}`),
 
   // links
-  addLink: (a, b, rel = 'depends-on', version = null) => req('POST', '/links', { a, b, rel, version }),
+  addLink: (a, b, rel = 'depends-on', version = null, qty = null, designators = '') => req('POST', '/links', { a, b, rel, version, qty, designators }),
   removeLink: (a, b, rel = 'depends-on') => req('DELETE', '/links', { a, b, rel }),
 
   // sharing — federation producer side
@@ -146,6 +146,12 @@ const realApi = {
   getBaseline: (id) => req('GET', `/baselines/${id}`),
   createBaseline: (name, note = '') => req('POST', '/baselines', { name, note }),
   deleteBaseline: (id) => req('DELETE', `/baselines/${id}`),
+
+  // item comments (the Log tab's discussion stream)
+  listComments: (id) => req('GET', `/items/${id}/comments`),
+  listMentions: (id) => req('GET', `/items/${id}/mentions`),
+  addComment: (id, body) => req('POST', `/items/${id}/comments`, { body }),
+  deleteComment: (id) => req('DELETE', `/comments/${id}`),
 
   // item version history (attribution + revisions)
   listRevisions: (id) => req('GET', `/items/${id}/revisions`),

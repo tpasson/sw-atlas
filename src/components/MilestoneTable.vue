@@ -1020,8 +1020,7 @@ const parentMilestones = computed(() => {
   const parents = dependentIds(selectedMs.value.id)
   return store.milestones.filter(m => parents.has(m.id))
 })
-// Uses / Used-by (traceability to backlog items) — shown in the tooltip too, not
-// just in the item detail. These are off-timeline, so clicking opens the Explorer.
+// Uses / Used-by (composition edge to backlog items) — shown in the tooltip too.
 const usesMilestones = computed(() => {
   if (!selectedMs.value) return []
   const id = selectedMs.value.id

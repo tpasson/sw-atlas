@@ -114,10 +114,13 @@ const DESC_FIELDS = [
 ]
 // Item-type registry (demo): built-ins + any locally-saved custom types.
 const BUILTIN_ITEM_TYPES = [
-  { key: 'milestone', label: 'Milestone', family: 'timeline-point', icon: 'l:Diamond', color: '', fields: [...DESC_FIELDS], workflowKey: 'standard', builtin: true },
-  { key: 'event', label: 'Event', family: 'timeline-range', icon: 'l:Flag', color: '', fields: [...DESC_FIELDS], workflowKey: 'standard', builtin: true },
+  { key: 'milestone', label: 'Milestones', family: 'timeline-point', icon: 'l:Diamond', color: '', fields: [...DESC_FIELDS], workflowKey: 'standard', builtin: true },
+  { key: 'event', label: 'Events', family: 'timeline-range', icon: 'l:Flag', color: '', fields: [...DESC_FIELDS], workflowKey: 'standard', builtin: true },
 ]
 const BUILTIN_TYPE_KEYS = new Set(['milestone', 'event'])
+// Singular names built-ins shipped with before pluralisation. A stored override
+// still equal to one is a phantom from older saves → ignored so the default wins.
+const LEGACY_BUILTIN_LABEL = { milestone: 'Milestone', event: 'Event' }
 
 // Shipped default workflows (mirrors the server's DefaultWorkflows). "standard"
 // carries a hand-arranged status-flow layout so the diagram looks right at once.
@@ -153,7 +156,8 @@ const itemTypeCatalog = () => {
   const builtins = BUILTIN_ITEM_TYPES.map(d => {
     const ov = overrides[d.key]
     if (!ov) return d
-    return { ...d, label: ov.label || d.label, icon: ov.icon || d.icon, color: ov.color || '', fill: ov.fill, fields: ov.fields || d.fields, workflowKey: ov.workflowKey || 'standard', statuses: ov.statuses, layout: ov.layout, builtin: true }
+    const label = (ov.label && ov.label !== LEGACY_BUILTIN_LABEL[d.key]) ? ov.label : d.label
+    return { ...d, label, icon: ov.icon || d.icon, color: ov.color || '', fill: ov.fill, fields: ov.fields || d.fields, workflowKey: ov.workflowKey || 'standard', statuses: ov.statuses, layout: ov.layout, builtin: true }
   })
   const out = [...builtins, ...custom]
   // Every type gains the standard description fields if missing (mirrors the
@@ -433,10 +437,13 @@ export const demoApi = {
     save(); return ok()
   },
 
-  addLink: (a, b, rel = 'depends-on', version = null) => {
+  addLink: (a, b, rel = 'depends-on', version = null, qty = null, designators = '') => {
     if (a !== b) {
+      // qty <2 normalises to null (= 1), mirroring the server.
+      const q = Number(qty) >= 2 ? Math.floor(Number(qty)) : null
+      const des = String(designators || '').trim()
       const e = db.links.find(l => l.a === a && l.b === b && (l.rel || 'depends-on') === rel)
-      if (e) e.version = version ?? null; else db.links.push({ a, b, rel, version: version ?? null })
+      if (e) { e.version = version ?? null; e.qty = q; e.designators = des } else db.links.push({ a, b, rel, version: version ?? null, qty: q, designators: des })
     }
     save(); return ok()
   },
@@ -464,6 +471,17 @@ export const demoApi = {
     return ok({ id: b.id, name: b.name, note: b.note, createdAt: b.createdAt, itemCount: b.items.length })
   },
   deleteBaseline: (id) => { db.baselines = db.baselines.filter(b => b.id !== id); save(); return ok() },
+
+  // Item comments (kept in the local demo db).
+  listComments: (id) => ok((db.comments || []).filter(c => c.itemId === id).map(c => ({ ...c }))),
+  listMentions: (id) => ok((db.comments || []).filter(c => (c.body || '').includes(`[[${id}]]`)).map(c => ({ ...c }))),
+  addComment: (id, body) => {
+    const c = { id: uid(), itemId: id, authorId: 'you', body: String(body || '').trim(), createdAt: new Date().toISOString() }
+    if (!c.body) return Promise.reject(Object.assign(new Error('a comment body is required'), { status: 400 }))
+    db.comments = db.comments || []
+    db.comments.push(c); save(); return ok(c)
+  },
+  deleteComment: (id) => { db.comments = (db.comments || []).filter(c => c.id !== id); save(); return ok() },
 
   // Demo has no server-side history; synthesize the current state as v1.
   listRevisions: (id) => {
